@@ -126,7 +126,7 @@ const Index = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3, duration: 0.6 }}
-                className="text-xl md:text-2xl text-muted-foreground mb-12 max-w-3xl mx-auto"
+                className="text-xl md:text-2xl text-muted-foreground mb-16 max-w-3xl mx-auto"
               >
                 {heroSlides[currentSlide].description}
               </motion.p>
@@ -135,7 +135,7 @@ const Index = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5, duration: 0.6 }}
-                className="flex flex-col sm:flex-row gap-4 justify-center"
+                className="flex flex-col sm:flex-row gap-4 justify-center mb-32"
               >
                 <Link to="/projects">
                   <Button
