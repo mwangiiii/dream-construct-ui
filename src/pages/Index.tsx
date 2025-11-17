@@ -7,6 +7,9 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import heroRoadImage from "@/assets/hero-road-construction.jpg";
 import heroBuildingImage from "@/assets/hero-building-construction.jpg";
 import heroCranesImage from "@/assets/hero-cranes-construction.jpg";
+import commercialBuildings from "@/assets/commercial-mastery.mp4";
+import industrialSite from "@/assets/industrial-innovation.mp4";
+import residentialHome from "@/assets/Residential-mastery.mp4";
 
 const Index = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -43,21 +46,24 @@ const Index = () => {
     {
       title: "Residential Excellence",
       description: "Custom homes designed and built to exceed your expectations with premium finishes.",
+      video: residentialHome,
     },
     {
       title: "Commercial Mastery",
       description: "State-of-the-art commercial spaces that blend functionality with aesthetic appeal.",
+      video: commercialBuildings,
     },
     {
       title: "Industrial Innovation",
       description: "Large-scale industrial projects executed with precision and engineering excellence.",
+      video: industrialSite,
     },
   ];
 
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 5000);
+    }, 7000);
     return () => clearInterval(timer);
   }, []);
 
@@ -243,7 +249,16 @@ const Index = () => {
                 transition={{ delay: idx * 0.2, duration: 0.6 }}
               >
                 <GlassCard className="h-full">
-                  <div className="h-48 bg-gradient-to-br from-primary/20 to-accent/20 rounded-xl mb-6" />
+                  <div className ="h-48 rounded-xl mb-6 overflow-hidden flex items-center justify-center bg-black">
+                    <video
+                      src={feature.video}
+                      className="w-full h-full object-cover"
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                    />
+                  </div>
                   <h3 className="text-2xl font-bold mb-3">{feature.title}</h3>
                   <p className="text-muted-foreground mb-6">{feature.description}</p>
                   <Link to="/services" className="text-primary hover:text-primary/80 inline-flex items-center font-medium group">
