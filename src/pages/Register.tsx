@@ -1,21 +1,55 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
-import signUpVideo from "@/assets/sign-up.mp4";
+import signUpVideo from "@/assets/sign-upp.mp4";
 
 const Register = () => {
   const { toast } = useToast();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     confirmPassword: "",
   });
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const overlay = overlayRef.current;
+    
+    if (!video || !overlay) return;
+    
+    const handleTimeUpdate = () => {
+      const timeRemaining = video.duration - video.currentTime;
+      
+      // Trigger fade transition 0.3 seconds before video ends
+      if (timeRemaining <= 0.3 && timeRemaining > 0) {
+        fadeTransition(overlay);
+      }
+    };
+    
+    const fadeTransition = (overlay: HTMLDivElement) => {
+      overlay.style.background = 'black';
+      overlay.style.transition = 'opacity 0.2s ease-in-out';
+      overlay.style.opacity = '1';
+      
+      setTimeout(() => {
+        overlay.style.opacity = '0';
+      }, 200);
+    };
+    
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+    };
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +71,7 @@ const Register = () => {
     <section className="relative h-screen flex items-center justify-center overflow-hidden">
       {/* Video Background */}
       <video
+        ref={videoRef}
         src={signUpVideo}
         className="absolute inset-0 w-full h-full object-cover"
         autoPlay
@@ -44,14 +79,28 @@ const Register = () => {
         muted
         playsInline
       />
+      
+      {/* Transition Overlay */}
+      <div
+        ref={overlayRef}
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          opacity: 0,
+          transition: 'opacity 0s',
+          zIndex: 5
+        }}
+      />
+      
       {/* Gradient Overlay */}
       <div className="absolute inset-0 bg-gradient-to-br from-background/90 via-background/85 to-background/80 z-10" />
+      
       {/* Animated background pattern */}
       <div className="absolute inset-0 opacity-5 z-10">
         <div className="absolute inset-0" style={{
           backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\"60\" height=\"60\" viewBox=\"0 0 60 60\" xmlns=\"http://www.w3.org/2000/svg\"%3E%3Cg fill=\"none\" fill-rule=\"evenodd\"%3E%3Cg fill=\"%23ffffff\" fill-opacity=\"1\"%3E%3Cpath d=\"M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
         }} />
       </div>
+      
       {/* Content */}
       <div className="container mx-auto px-6 z-20 relative flex items-center justify-center h-full">
         <motion.div

@@ -7,9 +7,9 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import heroRoadImage from "@/assets/hero-road-construction.jpg";
 import heroBuildingImage from "@/assets/hero-building-construction.jpg";
 import heroCranesImage from "@/assets/hero-cranes-construction.jpg";
-import commercialBuildings from "@/assets/commercial-mastery.mp4";
-import industrialSite from "@/assets/industrial-innovation.mp4";
-import residentialHome from "@/assets/Residential-mastery.mp4";
+import commercialBuildings from "@/assets/commercial-excellence.mp4";
+import industrialSite from "@/assets/industrial-renovation.mp4";
+import residentialHome from "@/assets/residential-excellencee.mp4";
 
 const Index = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
