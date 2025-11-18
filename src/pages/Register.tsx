@@ -6,12 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
-import signUpVideo from "@/assets/sign-upp.mp4";
+
+
+
 
 const Register = () => {
   const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  const signUpVideo = "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448834/sign-upp_aoe2g5.mp4";
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
