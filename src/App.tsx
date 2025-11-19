@@ -15,6 +15,16 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/admin/Dashboard";
 import NotFound from "./pages/NotFound";
 
+// Dashboard imports
+import ClientDashboard from "./pages/dashboards/ClientDashboard";
+import ManagerDashboard from "./pages/dashboards/ManagerDashboard";
+import PMDashboard from "./pages/dashboards/PMDashboard";
+import AdminDashboard from "./pages/dashboards/AdminDashboard";
+import Users from "./pages/admin/Users";
+import AdminProjects from "./pages/admin/Projects";
+import HeroManagement from "./pages/admin/HeroManagement";
+import Inquiries from "./pages/admin/Inquiries";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -34,13 +44,25 @@ const App = () => (
           {/* Auth Routes (No Layout) */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+
+          {/* Client Dashboard Routes */}
+          <Route path="/client" element={<ClientDashboard />} />
+          
+          {/* Manager Dashboard Routes */}
+          <Route path="/manager" element={<ManagerDashboard />} />
+          
+          {/* PM Dashboard Routes */}
+          <Route path="/pm" element={<PMDashboard />} />
+          
+          {/* Admin Dashboard Routes */}
+          <Route path="/admin-dashboard" element={<AdminDashboard />} />
           
           {/* Admin Routes with Admin Layout */}
           <Route path="/admin" element={<AdminLayout><Dashboard /></AdminLayout>} />
-          <Route path="/admin/users" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Users Management</h1><p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p></div></AdminLayout>} />
-          <Route path="/admin/projects" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Projects Management</h1><p className="text-muted-foreground mt-2">Oversee all construction projects</p></div></AdminLayout>} />
-          <Route path="/admin/content" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Content Management</h1><p className="text-muted-foreground mt-2">Update website content and media</p></div></AdminLayout>} />
-          <Route path="/admin/settings" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Settings</h1><p className="text-muted-foreground mt-2">Configure system settings</p></div></AdminLayout>} />
+          <Route path="/admin/users" element={<AdminLayout><Users /></AdminLayout>} />
+          <Route path="/admin/projects" element={<AdminLayout><AdminProjects /></AdminLayout>} />
+          <Route path="/admin/hero" element={<AdminLayout><HeroManagement /></AdminLayout>} />
+          <Route path="/admin/inquiries" element={<AdminLayout><Inquiries /></AdminLayout>} />
           
           {/* 404 Route */}
           <Route path="*" element={<NotFound />} />
