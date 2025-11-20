@@ -7,9 +7,9 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import heroRoadImage from "@/assets/hero-road-construction.jpg";
 import heroBuildingImage from "@/assets/hero-building-construction.jpg";
 import heroCranesImage from "@/assets/hero-cranes-construction.jpg";
-import commercialBuildings from "@/assets/commercial-excellence.mp4";
-import industrialSite from "@/assets/industrial-renovation.mp4";
-import residentialHome from "@/assets/residential-excellencee.mp4";
+// import commercialBuildings from "@/assets/commercial-excellence.mp4";
+// import industrialSite from "@/assets/industrial-renovation.mp4";
+// import residentialHome from "@/assets/residential-excellencee.mp4";
 
 const Index = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -41,6 +41,10 @@ const Index = () => {
     { icon: Star, value: "98%", label: "Client Satisfaction" },
     { icon: TrendingUp, value: "25+", label: "Years Experience" },
   ];
+
+  const residentialHome = "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763447970/residential-excellencee_qwuy0i.mp4";
+  const commercialBuildings = "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448357/commercial-excellence_lr3ciu.mp4"; 
+  const industrialSite = "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448281/industrial-renovation_hwh7jf.mp4";
 
   const features = [
     {
