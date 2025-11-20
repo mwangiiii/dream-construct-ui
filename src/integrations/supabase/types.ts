@@ -14,7 +14,93 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      roles: {
+        Row: {
+          role_id: number
+          role_name: string
+        }
+        Insert: {
+          role_id?: number
+          role_name: string
+        }
+        Update: {
+          role_id?: number
+          role_name?: string
+        }
+        Relationships: []
+      }
+      user_statuses: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          is_active: boolean
+          status_id: number
+          status_name: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          is_active?: boolean
+          status_id?: number
+          status_name: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          is_active?: boolean
+          status_id?: number
+          status_name?: string
+        }
+        Relationships: []
+      }
+      users: {
+        Row: {
+          created_at: string | null
+          email: string
+          full_name: string
+          password_hash: string
+          phone: string | null
+          role_id: number
+          status_id: number
+          user_id: number
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          full_name: string
+          password_hash: string
+          phone?: string | null
+          role_id: number
+          status_id: number
+          user_id?: number
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          full_name?: string
+          password_hash?: string
+          phone?: string | null
+          role_id?: number
+          status_id?: number
+          user_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "users_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "roles"
+            referencedColumns: ["role_id"]
+          },
+          {
+            foreignKeyName: "users_status_id_fkey"
+            columns: ["status_id"]
+            isOneToOne: false
+            referencedRelation: "user_statuses"
+            referencedColumns: ["status_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
