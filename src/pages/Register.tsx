@@ -1,17 +1,17 @@
 import { motion } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
-
-
-
+import { useAuth } from "@/hooks/useAuth";
 
 const Register = () => {
   const { toast } = useToast();
+  const { signUp, user } = useAuth();
+  const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -23,6 +23,14 @@ const Register = () => {
     password: "",
     confirmPassword: "",
   });
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -56,20 +64,37 @@ const Register = () => {
     };
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (formData.password !== formData.confirmPassword) {
       toast({
         title: "Error",
-        description: "Passwords don't match",
+        description: "Passwords do not match",
         variant: "destructive",
       });
       return;
     }
-    toast({
-      title: "Account Created",
-      description: "Welcome to Dream Construct!",
-    });
+
+    setIsLoading(true);
+
+    const { error } = await signUp(formData.email, formData.password, formData.name);
+
+    if (error) {
+      toast({
+        title: "Registration Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Account Created",
+        description: "Welcome to Dream Construct! You can now sign in.",
+      });
+      navigate('/login');
+    }
+    
+    setIsLoading(false);
   };
 
   return (
@@ -189,8 +214,9 @@ const Register = () => {
               <Button
                 type="submit"
                 className="w-full bg-primary hover:bg-primary/90 text-background font-semibold py-6"
+                disabled={isLoading}
               >
-                Create Account
+                {isLoading ? "Creating Account..." : "Create Account"}
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </form>
