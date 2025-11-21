@@ -14,38 +14,62 @@ export type Database = {
   }
   public: {
     Tables: {
+      profiles: {
+        Row: {
+          created_at: string | null
+          full_name: string
+          id: string
+          phone: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          full_name: string
+          id: string
+          phone?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          full_name?: string
+          id?: string
+          phone?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       project_approvals: {
         Row: {
-          approval_id: number
+          approval_id: string
           approval_type: string
           created_at: string | null
           description: string | null
-          project_id: number
-          requested_by: number
+          project_id: string
+          requested_by: string
           reviewed_at: string | null
-          reviewed_by: number | null
+          reviewed_by: string | null
           status: string | null
         }
         Insert: {
-          approval_id?: number
+          approval_id?: string
           approval_type: string
           created_at?: string | null
           description?: string | null
-          project_id: number
-          requested_by: number
+          project_id: string
+          requested_by: string
           reviewed_at?: string | null
-          reviewed_by?: number | null
+          reviewed_by?: string | null
           status?: string | null
         }
         Update: {
-          approval_id?: number
+          approval_id?: string
           approval_type?: string
           created_at?: string | null
           description?: string | null
-          project_id?: number
-          requested_by?: number
+          project_id?: string
+          requested_by?: string
           reviewed_at?: string | null
-          reviewed_by?: number | null
+          reviewed_by?: string | null
           status?: string | null
         }
         Relationships: [
@@ -60,15 +84,15 @@ export type Database = {
             foreignKeyName: "project_approvals_requested_by_fkey"
             columns: ["requested_by"]
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "project_approvals_reviewed_by_fkey"
             columns: ["reviewed_by"]
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -77,11 +101,11 @@ export type Database = {
           completion_date: string | null
           created_at: string | null
           description: string | null
-          milestone_id: number
+          milestone_id: string
           milestone_name: string
           phase: string | null
           progress_percentage: number | null
-          project_id: number
+          project_id: string
           status_id: number
           target_date: string | null
         }
@@ -89,11 +113,11 @@ export type Database = {
           completion_date?: string | null
           created_at?: string | null
           description?: string | null
-          milestone_id?: number
+          milestone_id?: string
           milestone_name: string
           phase?: string | null
           progress_percentage?: number | null
-          project_id: number
+          project_id: string
           status_id: number
           target_date?: string | null
         }
@@ -101,11 +125,11 @@ export type Database = {
           completion_date?: string | null
           created_at?: string | null
           description?: string | null
-          milestone_id?: number
+          milestone_id?: string
           milestone_name?: string
           phase?: string | null
           progress_percentage?: number | null
-          project_id?: number
+          project_id?: string
           status_id?: number
           target_date?: string | null
         }
@@ -129,27 +153,27 @@ export type Database = {
       project_updates: {
         Row: {
           created_at: string | null
-          project_id: number
+          project_id: string
           update_description: string | null
-          update_id: number
+          update_id: string
           update_title: string
-          user_id: number
+          user_id: string
         }
         Insert: {
           created_at?: string | null
-          project_id: number
+          project_id: string
           update_description?: string | null
-          update_id?: number
+          update_id?: string
           update_title: string
-          user_id: number
+          user_id: string
         }
         Update: {
           created_at?: string | null
-          project_id?: number
+          project_id?: string
           update_description?: string | null
-          update_id?: number
+          update_id?: string
           update_title?: string
-          user_id?: number
+          user_id?: string
         }
         Relationships: [
           {
@@ -163,41 +187,41 @@ export type Database = {
             foreignKeyName: "project_updates_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
         ]
       }
       projects: {
         Row: {
-          client_id: number
+          client_id: string
           created_at: string | null
           end_date: string | null
-          manager_id: number
+          manager_id: string
           project_description: string | null
-          project_id: number
+          project_id: string
           project_name: string
           start_date: string | null
           status_id: number
         }
         Insert: {
-          client_id: number
+          client_id: string
           created_at?: string | null
           end_date?: string | null
-          manager_id: number
+          manager_id: string
           project_description?: string | null
-          project_id?: number
+          project_id?: string
           project_name: string
           start_date?: string | null
           status_id: number
         }
         Update: {
-          client_id?: number
+          client_id?: string
           created_at?: string | null
           end_date?: string | null
-          manager_id?: number
+          manager_id?: string
           project_description?: string | null
-          project_id?: number
+          project_id?: string
           project_name?: string
           start_date?: string | null
           status_id?: number
@@ -207,15 +231,15 @@ export type Database = {
             foreignKeyName: "projects_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "projects_manager_id_fkey"
             columns: ["manager_id"]
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "projects_status_id_fkey"
@@ -238,6 +262,27 @@ export type Database = {
         Update: {
           role_id?: number
           role_name?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
         }
         Relationships: []
       }
@@ -265,63 +310,21 @@ export type Database = {
         }
         Relationships: []
       }
-      users: {
-        Row: {
-          created_at: string | null
-          email: string
-          full_name: string
-          password_hash: string
-          phone: string | null
-          role_id: number
-          status_id: number
-          user_id: number
-        }
-        Insert: {
-          created_at?: string | null
-          email: string
-          full_name: string
-          password_hash: string
-          phone?: string | null
-          role_id: number
-          status_id: number
-          user_id?: number
-        }
-        Update: {
-          created_at?: string | null
-          email?: string
-          full_name?: string
-          password_hash?: string
-          phone?: string | null
-          role_id?: number
-          status_id?: number
-          user_id?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "users_role_id_fkey"
-            columns: ["role_id"]
-            isOneToOne: false
-            referencedRelation: "roles"
-            referencedColumns: ["role_id"]
-          },
-          {
-            foreignKeyName: "users_status_id_fkey"
-            columns: ["status_id"]
-            isOneToOne: false
-            referencedRelation: "user_statuses"
-            referencedColumns: ["status_id"]
-          },
-        ]
-      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "manager" | "project_manager" | "client"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -448,6 +451,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "manager", "project_manager", "client"],
+    },
   },
 } as const
