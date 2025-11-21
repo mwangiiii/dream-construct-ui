@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import Services from "./pages/Services";
 import Projects from "./pages/Projects";
@@ -44,18 +45,81 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
-            {/* Dashboard Routes */}
-            <Route path="/client/dashboard" element={<ClientDashboard />} />
-            <Route path="/manager/dashboard" element={<ManagerDashboard />} />
-            <Route path="/pm/dashboard" element={<PMDashboard />} />
-            <Route path="/pm/project/:id" element={<PMDashboard />} />
+            {/* Dashboard Routes - Protected */}
+            <Route 
+              path="/client/dashboard" 
+              element={
+                <ProtectedRoute allowedRoles={['client', 'admin']}>
+                  <ClientDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/manager/dashboard" 
+              element={
+                <ProtectedRoute allowedRoles={['manager', 'admin']}>
+                  <ManagerDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/pm/dashboard" 
+              element={
+                <ProtectedRoute allowedRoles={['project_manager', 'admin']}>
+                  <PMDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/pm/project/:id" 
+              element={
+                <ProtectedRoute allowedRoles={['project_manager', 'admin']}>
+                  <PMDashboard />
+                </ProtectedRoute>
+              } 
+            />
 
-            {/* Admin Routes */}
-            <Route path="/admin" element={<AdminLayout><AdminDashboard /></AdminLayout>} />
-            <Route path="/admin/users" element={<AdminLayout><AdminUsers /></AdminLayout>} />
-            <Route path="/admin/projects" element={<AdminLayout><AdminProjects /></AdminLayout>} />
-            <Route path="/admin/inquiries" element={<AdminLayout><AdminInquiries /></AdminLayout>} />
-            <Route path="/admin/hero-management" element={<AdminLayout><AdminHeroManagement /></AdminLayout>} />
+            {/* Admin Routes - Protected */}
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout><AdminDashboard /></AdminLayout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/users" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout><AdminUsers /></AdminLayout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/projects" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout><AdminProjects /></AdminLayout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/inquiries" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout><AdminInquiries /></AdminLayout>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/hero-management" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminLayout><AdminHeroManagement /></AdminLayout>
+                </ProtectedRoute>
+              } 
+            />
 
             {/* 404 */}
             <Route path="*" element={<NotFound />} />
