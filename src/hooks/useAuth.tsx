@@ -29,10 +29,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Fetch user role when session changes
+        // Fetch user role and check password status when session changes
         if (session?.user) {
           setTimeout(() => {
             fetchUserRole(session.user.id);
+            checkPasswordChangeRequired(session.user.id);
           }, 0);
         } else {
           setUserRole(null);
@@ -47,12 +48,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (session?.user) {
         fetchUserRole(session.user.id);
+        checkPasswordChangeRequired(session.user.id);
       }
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const checkPasswordChangeRequired = async (userId: string) => {
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("must_change_password")
+        .eq("id", userId)
+        .single();
+      
+      if (data?.must_change_password && window.location.pathname !== "/change-password") {
+        window.location.href = "/change-password";
+      }
+    } catch (error) {
+      console.error("Error checking password status:", error);
+    }
+  };
 
   const fetchUserRole = async (userId: string) => {
     try {

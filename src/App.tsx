@@ -12,6 +12,7 @@ import Team from "./pages/Team";
 import Contact from "./pages/Contact";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ChangePassword from "./pages/ChangePassword";
 import NotFound from "./pages/NotFound";
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -42,8 +43,9 @@ const App = () => (
             <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
 
             {/* Auth Routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/change-password" element={<ChangePassword />} />
 
             {/* Dashboard Routes - Protected */}
             <Route 
