@@ -36,26 +36,26 @@ const Index = () => {
   ];
 
   const stats = [
-    { icon: Award, value: "500+", label: "Projects Completed" },
-    { icon: Users, value: "200+", label: "Expert Team Members" },
-    { icon: Star, value: "98%", label: "Client Satisfaction" },
-    { icon: TrendingUp, value: "25+", label: "Years Experience" },
+    // // { icon: Award, value: "50+", label: "Projects Completed" },
+    // { icon: Users, value: "200+", label: "Expert Team Members" },
+    // { icon: Star, value: "98%", label: "Client Satisfaction" },
+    // { icon: TrendingUp, value: "25+", label: "Years Experience" },
   ];
 
   const features = [
     {
       title: "Residential Excellence",
-      description: "Custom homes designed and built to exceed your expectations with premium finishes.",
+      description: "From concept to completion, we create living spaces that are Family-Friendly and Reflect your Lifestyle.",
       video: residentialHome,
     },
     {
       title: "Commercial Mastery",
-      description: "State-of-the-art commercial spaces that blend functionality with aesthetic appeal.",
+      description: "Commercial complexes, designed for functionality that help thrive to success.",
       video: commercialBuildings,
     },
     {
       title: "Industrial Innovation",
-      description: "Large-scale industrial projects executed with precision and engineering excellence.",
+      description: "Large-scale industrial facilities, warehouses, and manufacturing plants engineered for efficiency and built to industry standards.",
       video: industrialSite,
     },
   ];

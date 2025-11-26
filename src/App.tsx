@@ -13,6 +13,7 @@ import Contact from "./pages/Contact";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/admin/Dashboard";
+import AdminUserCreate from "./pages/admin/UserCreate";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ const App = () => (
           {/* Admin Routes with Admin Layout */}
           <Route path="/admin" element={<AdminLayout><Dashboard /></AdminLayout>} />
           <Route path="/admin/users" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Users Management</h1><p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p></div></AdminLayout>} />
+          <Route path="/admin/users/create" element={<AdminLayout><AdminUserCreate /></AdminLayout>} />
           <Route path="/admin/projects" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Projects Management</h1><p className="text-muted-foreground mt-2">Oversee all construction projects</p></div></AdminLayout>} />
           <Route path="/admin/content" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Content Management</h1><p className="text-muted-foreground mt-2">Update website content and media</p></div></AdminLayout>} />
           <Route path="/admin/settings" element={<AdminLayout><div className="p-8"><h1 className="text-4xl font-bold">Settings</h1><p className="text-muted-foreground mt-2">Configure system settings</p></div></AdminLayout>} />

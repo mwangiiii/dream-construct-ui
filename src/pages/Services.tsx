@@ -8,14 +8,14 @@ const Services = () => {
     {
       icon: Home,
       title: "Residential Construction",
-      description: "Custom homes, luxury villas, and residential complexes built with precision and care. From concept to completion, we create living spaces that reflect your lifestyle.",
-      features: ["Custom Home Design", "Luxury Villas", "Apartment Buildings", "Home Renovations"],
+      description: "From concept to completion, we create living spaces that are Family-Friendly and Reflect your Lifestyle.",
+      features: ["Town Houses", "Duplexes", "Stand-Alone houses", "Cooperative Houses","Luxury Villas", "Apartment Buildings"],
     },
     {
       icon: Building2,
       title: "Commercial Projects",
-      description: "Modern office buildings, retail spaces, and commercial complexes designed for functionality and aesthetic appeal that drives business success.",
-      features: ["Office Buildings", "Retail Spaces", "Shopping Centers", "Mixed-Use Developments"],
+      description: "Commercial complexes, designed for functionality that help thrive to success.",
+      features: ["Office Buildings","Hotels","Restaurants","Schools / Universities","Hospitals", "Shopping Malls / Centers", "Mixed-Use Office and Residential Centers"],
     },
     {
       icon: Factory,

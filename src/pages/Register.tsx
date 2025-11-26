@@ -1,15 +1,19 @@
+
 import { motion } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
 import signUpVideo from "@/assets/sign-upp.mp4";
+import { signUp } from "@/lib/auth";
 
 const Register = () => {
+
   const { toast } = useToast();
+  const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
@@ -18,6 +22,7 @@ const Register = () => {
     password: "",
     confirmPassword: "",
   });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -51,7 +56,8 @@ const Register = () => {
     };
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.password !== formData.confirmPassword) {
       toast({
@@ -61,10 +67,27 @@ const Register = () => {
       });
       return;
     }
-    toast({
-      title: "Account Created",
-      description: "Welcome to Dream Construct!",
-    });
+    setLoading(true);
+    try {
+      await signUp({
+        email: formData.email,
+        password: formData.password,
+        fullName: formData.name,
+      });
+      toast({
+        title: "Account Created",
+        description: "Check your email to confirm your account.",
+      });
+      navigate("/login");
+    } catch (error: any) {
+      toast({
+        title: "Signup Error",
+        description: error.message || "Failed to create account.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -184,8 +207,9 @@ const Register = () => {
               <Button
                 type="submit"
                 className="w-full bg-primary hover:bg-primary/90 text-background font-semibold py-6"
+                disabled={loading}
               >
-                Create Account
+                {loading ? "Creating..." : "Create Account"}
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             </form>

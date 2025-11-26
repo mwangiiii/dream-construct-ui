@@ -1,22 +1,43 @@
+
 import { motion } from "framer-motion";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
+import { signIn } from "@/lib/auth";
+
 
 const Login = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({ email: "", password: "" });
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast({
-      title: "Login Successful",
-      description: "Welcome back to Dream Construct!",
-    });
+    setLoading(true);
+    try {
+      await signIn({
+        email: formData.email,
+        password: formData.password,
+      });
+      toast({
+        title: "Login Successful",
+        description: "Welcome back to Dream Construct!",
+      });
+      navigate("/");
+    } catch (error: any) {
+      toast({
+        title: "Login Error",
+        description: error.message || "Failed to sign in.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -83,8 +104,9 @@ const Login = () => {
             <Button
               type="submit"
               className="w-full bg-primary hover:bg-primary/90 text-background font-semibold py-6"
+              disabled={loading}
             >
-              Sign In
+              {loading ? "Signing in..." : "Sign In"}
               <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
           </form>

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Target, Heart, Award, Users } from "lucide-react";
+import { Target, Heart, Award, Users, Clock } from "lucide-react";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { GlassCard } from "@/components/ui/GlassCard";
 
@@ -46,18 +46,23 @@ const Team = () => {
   const values = [
     {
       icon: Target,
-      title: "Excellence",
-      description: "We pursue perfection in every project, never settling for anything less than exceptional quality.",
+      title: "Quality",
+      description: "We Pledge to deliver quality work from our quality team.",
     },
     {
       icon: Heart,
       title: "Integrity",
-      description: "Honest communication and ethical practices form the foundation of all our relationships.",
+      description: "Honest communication and ethical practices form the foundation of all our relationships and work.",
+    },
+    {
+      icon: Clock,
+      title: "Time",
+      description: "Where We Deliver Our Work On Time, Every Time.",
     },
     {
       icon: Award,
       title: "Innovation",
-      description: "Embracing cutting-edge technology and methods to deliver superior construction solutions.",
+      description: "We Deliver Creative and Sustainable Solutions that Push the Boundaries of Traditional Construction for You.",
     },
     {
       icon: Users,
@@ -79,15 +84,15 @@ const Team = () => {
             About <span className="text-primary">Dream Construct</span>
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed mb-8">
-            For over 25 years, Dream Construct System has been at the forefront of construction
-            excellence, transforming visions into reality through innovation, expertise, and
-            unwavering commitment to quality.
+            Dream Construct Limited is at the Forefront of Creative, Eco-friendly and Human-friendly Construction
+            Excellence, Transforming Visions into Reality Through Innovation, expertise, and
+            Unwavering Commitment to Quality and Time.
           </p>
-          <p className="text-lg text-muted-foreground leading-relaxed">
+          {/* <p className="text-lg text-muted-foreground leading-relaxed">
             From residential masterpieces to commercial landmarks and industrial facilities, our
             diverse portfolio showcases our ability to deliver exceptional results across all
             construction sectors.
-          </p>
+          </p> */}
         </motion.div>
 
         {/* Values Section */}
@@ -153,9 +158,9 @@ const Team = () => {
           <GlassCard className="max-w-4xl mx-auto text-center p-12">
             <h2 className="text-3xl md:text-4xl font-bold mb-6">Our Mission</h2>
             <p className="text-lg text-muted-foreground leading-relaxed">
-              To revolutionize the construction industry by delivering innovative, sustainable, and
-              exceptional building solutions that exceed client expectations while fostering a
-              culture of safety, integrity, and continuous improvement.
+              To Revolutionize the Construction Industry by Delivering Innovative, Futuristic and
+              Sustainable Building Solutions that Exceed Client Expectations while Fostering a
+              Culture of Safety, Integrity, and Continuous Improvement.
             </p>
           </GlassCard>
         </motion.div>
