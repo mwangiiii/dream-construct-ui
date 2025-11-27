@@ -14,6 +14,7 @@ import residentialHome from "@/assets/residential-excellencee.mp4";
 const Index = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
 
+  
   const heroSlides = [
     {
       title: "Building Tomorrow's",
