@@ -24,7 +24,6 @@ export interface UserProfile {
 }
 
 export interface UserRole {
-  role_id: number;
   role_name: 'admin' | 'manager' | 'project_manager' | 'client';
   description: string | null;
 }
@@ -60,22 +59,29 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       .eq('id', userId)
       .single();
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      console.error('Profile fetch error:', profileError);
+      throw profileError;
+    }
 
-    // Fetch roles with join
+    // Fetch roles - corrected query based on your schema
+    // user_roles has: user_id (uuid), role_id (app_role enum)
+    // We need to join with roles table to get full role info
     const { data: userRoles, error: rolesError } = await supabase
       .from('user_roles')
       .select(`
         role_id,
-        roles (
-          role_id,
+        roles!inner (
           role_name,
           description
         )
       `)
       .eq('user_id', userId);
 
-    if (rolesError) throw rolesError;
+    if (rolesError) {
+      console.error('Roles fetch error:', rolesError);
+      throw rolesError;
+    }
 
     // Fetch status
     const { data: status, error: statusError } = await supabase
@@ -84,11 +90,13 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       .eq('user_id', userId)
       .single();
 
-    if (statusError) throw statusError;
+    if (statusError) {
+      console.error('Status fetch error:', statusError);
+      throw statusError;
+    }
 
     // Transform roles data
     const roles: UserRole[] = userRoles?.map((ur: any) => ({
-      role_id: ur.roles.role_id,
       role_name: ur.roles.role_name,
       description: ur.roles.description,
     })) || [];
@@ -98,7 +106,7 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
 
     return {
       id: userId,
-      email: user?.email || '',
+      email: user?.email || profile.id || '',
       profile,
       roles,
       status,
@@ -185,22 +193,12 @@ export async function signUp(data: SignupData) {
     }
 
     // 3. Assign default role (client) in user_roles
-    const { data: roleData, error: roleError } = await supabase
-      .from('roles')
-      .select('role_id')
-      .eq('role_name', 'client')
-      .single();
-
-    if (roleError) {
-      console.error('Role fetch error:', roleError);
-      throw new Error('Failed to fetch default role');
-    }
-
+    // Note: role_id is an app_role enum, not a foreign key to roles table
     const { error: userRoleError } = await supabase
       .from('user_roles')
       .insert({
         user_id: userId,
-        role_id: roleData.role_id,
+        role_id: 'client', // Direct enum value
         assigned_by: null,
       });
 

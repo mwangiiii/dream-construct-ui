@@ -47,7 +47,7 @@ const Team = () => {
     {
       icon: Target,
       title: "Quality",
-      description: "We Pledge to deliver quality work from our quality team.",
+      description: "We Pledge to deliver quality work from our qualified team.",
     },
     {
       icon: Heart,
