@@ -41,7 +41,7 @@ const Footer = () => {
               </div>
               <div className="flex flex-col">
                 <span className="font-bold text-lg leading-tight">Dream Construct</span>
-                <span className="text-xs text-muted-foreground">Building Dreams</span>
+                <span className="text-xs text-muted-foreground">Building your Dreams</span>
               </div>
             </Link>
             <p className="text-muted-foreground text-sm mb-6 max-w-md">
