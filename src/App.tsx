@@ -143,13 +143,13 @@ const App = () => {
               <span className="text-white text-xs font-medium whitespace-nowrap">
                 {Math.round(volume * 100)}%
               </span>
-              <Slider
+              {/* <Slider
                 value={[volume]}
                 onValueChange={handleVolumeChange}
                 max={1}
                 step={0.01}
                 className="w-24 cursor-pointer"
-              />
+              /> */}
             </div>
           </div>
 
