@@ -1,7 +1,8 @@
+// components/Navbar.tsx
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, ChevronDown } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser, getDashboardRoute, signOut, AuthUser } from "@/lib/auth";
 import { supabase } from "@/lib/supabaseClient";
@@ -14,6 +15,12 @@ const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Debug: Log currentUser and isLoading on every render
+  useEffect(() => {
+    console.log("[Navbar] currentUser:", currentUser);
+    console.log("[Navbar] isLoading:", isLoading);
+  }, [currentUser, isLoading]);
+  // Handle scroll effect for glass background
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
@@ -22,31 +29,39 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Check authentication status on mount and listen for auth changes
+  // CRITICAL FIX: Properly detect auth state on mount + all events
   useEffect(() => {
-    const checkUser = async () => {
+    // Initial load: check for existing session
+    const initAuth = async () => {
       setIsLoading(true);
       const user = await getCurrentUser();
       setCurrentUser(user);
       setIsLoading(false);
     };
 
-    checkUser();
+    initAuth();
 
-    // Listen for auth state changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === "SIGNED_IN" && session) {
-          const user = await getCurrentUser();
-          setCurrentUser(user);
-        } else if (event === "SIGNED_OUT") {
-          setCurrentUser(null);
-        }
+    // Listen to ALL relevant Supabase auth events
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth event:", event); // Debug in dev
+
+      if (
+        event === "INITIAL_SESSION" ||    // Page load / refresh
+        event === "SIGNED_IN" ||          // Fresh login
+        event === "TOKEN_REFRESHED"       // Auto-renewed session
+      ) {
+        const user = await getCurrentUser();
+        setCurrentUser(user);
+      } else if (event === "SIGNED_OUT") {
+        setCurrentUser(null);
       }
-    );
 
+      setIsLoading(false);
+    });
+
+    // Cleanup listener
     return () => {
-      authListener.subscription.unsubscribe();
+      listener.subscription.unsubscribe();
     };
   }, []);
 
@@ -54,6 +69,7 @@ const Navbar = () => {
     try {
       await signOut();
       setCurrentUser(null);
+      setIsMobileMenuOpen(false);
       navigate("/");
     } catch (error) {
       console.error("Sign out error:", error);
@@ -64,6 +80,7 @@ const Navbar = () => {
     if (currentUser) {
       const dashboardRoute = getDashboardRoute(currentUser.roles);
       navigate(dashboardRoute);
+      setIsMobileMenuOpen(false); // Close mobile menu
     }
   };
 
@@ -80,32 +97,35 @@ const Navbar = () => {
     <motion.nav
       initial={{ y: -100 }}
       animate={{ y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
-        isScrolled ? "glass py-4" : "bg-transparent py-6"
-      }`}
+        isScrolled ? "glass py-4 shadow-lg" : "bg-transparent py-6"
+      } backdrop-blur-lg`}
     >
       <div className="container mx-auto px-6">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-2 group">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-6 transition-transform duration-300">
+          <Link to="/" className="flex items-center space-x-3 group">
+            <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform duration-300 shadow-md">
               <span className="text-background font-bold text-xl">DC</span>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">Dream Construct Limited</span>
+              <span className="font-bold text-lg leading-tight text-foreground">
+                Dream Construct Limited
+              </span>
               <span className="text-xs text-muted-foreground">Building Your Dreams</span>
             </div>
           </Link>
 
-          {/* Desktop Navigation */}
+          {/* Desktop Navigation Links */}
           <div className="hidden md:flex items-center space-x-8">
             {navLinks.map((link) => (
               <Link
                 key={link.path}
                 to={link.path}
-                className={`text-sm font-medium transition-colors hover:text-primary ${
+                className={`text-sm font-medium transition-all duration-200 hover:text-primary ${
                   location.pathname === link.path
-                    ? "text-primary"
+                    ? "text-primary font-semibold"
                     : "text-foreground/80"
                 }`}
               >
@@ -114,52 +134,45 @@ const Navbar = () => {
             ))}
           </div>
 
-          {/* CTA Buttons */}
+          {/* Desktop CTA Buttons */}
           <div className="hidden md:flex items-center space-x-4">
-            {!isLoading && (
+            {isLoading ? (
+              <div className="w-48 h-10 animate-pulse bg-muted rounded-lg" />
+            ) : currentUser ? (
               <>
-                {currentUser ? (
-                  // Authenticated user - show Dashboard and Sign Out
-                  <>
-                    <Button
-                      onClick={handleDashboardClick}
-                      className="bg-primary hover:bg-primary/90 text-background font-medium"
-                    >
-                      Dashboard
-                    </Button>
-                    <Button
-                      onClick={handleSignOut}
-                      variant="ghost"
-                      className="text-sm"
-                    >
-                      Sign Out
-                    </Button>
-                  </>
-                ) : (
-                  // Non-authenticated user - show Sign In and Sign Up
-                  <>
-                    <Link to="/login">
-                      <Button variant="ghost" className="text-sm">
-                        Sign In
-                      </Button>
-                    </Link>
-                    <Link to="/register">
-                      <Button className="bg-primary hover:bg-primary/90 text-background font-medium">
-                        Sign Up
-                      </Button>
-                    </Link>
-                  </>
-                )}
+                <Button
+                  onClick={handleDashboardClick}
+                  className="bg-primary hover:bg-primary/90 text-background font-medium shadow-md"
+                >
+                  Dashboard
+                </Button>
+                <Button onClick={handleSignOut} variant="ghost" className="text-sm">
+                  Sign Out
+                </Button>
+              </>
+            ) : (
+              <>
+                <Link to="/login">
+                  <Button variant="ghost" className="text-sm">
+                    Sign In
+                  </Button>
+                </Link>
+                <Link to="/register">
+                  <Button className="bg-primary hover:bg-primary/90 text-background font-medium shadow-md">
+                    Get Started
+                  </Button>
+                </Link>
               </>
             )}
           </div>
 
-          {/* Mobile Menu Button */}
+          {/* Mobile Menu Toggle */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden text-foreground p-2"
+            className="md:hidden text-foreground p-2 rounded-lg hover:bg-muted/50 transition-colors"
+            aria-label="Toggle menu"
           >
-            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            {isMobileMenuOpen ? <X size={28} /> : <Menu size={28} />}
           </button>
         </div>
 
@@ -170,65 +183,61 @@ const Navbar = () => {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="md:hidden mt-6 pb-6 space-y-4"
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="md:hidden mt-6 pb-6 border-t border-border/50 pt-6 space-y-5"
             >
+              {/* Mobile Nav Links */}
               {navLinks.map((link) => (
                 <Link
                   key={link.path}
                   to={link.path}
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className={`block py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    location.pathname === link.path
-                      ? "text-primary"
-                      : "text-foreground/80"
+                  className={`block py-3 text-lg font-medium transition-colors hover:text-primary ${
+                    location.pathname === link.path ? "text-primary" : "text-foreground"
                   }`}
                 >
                   {link.name}
                 </Link>
               ))}
-              
-              {!isLoading && (
-                <div className="pt-4 space-y-2">
-                  {currentUser ? (
-                    // Authenticated user - mobile
-                    <>
-                      <Button
-                        onClick={() => {
-                          handleDashboardClick();
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className="w-full bg-primary hover:bg-primary/90 text-background"
-                      >
-                        Dashboard
+
+              {/* Mobile Auth Buttons */}
+              <div className="pt-6 space-y-3 border-t border-border/50">
+                {isLoading ? (
+                  <div className="space-y-3">
+                    <div className="h-12 bg-muted rounded-lg animate-pulse" />
+                    <div className="h-12 bg-muted rounded-lg animate-pulse" />
+                  </div>
+                ) : currentUser ? (
+                  <>
+                    <Button
+                      onClick={handleDashboardClick}
+                      className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base py-6"
+                    >
+                      Go to Dashboard
+                    </Button>
+                    <Button
+                      onClick={handleSignOut}
+                      variant="outline"
+                      className="w-full text-base py-6"
+                    >
+                      Sign Out
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button variant="outline" className="w-full text-base py-6">
+                        Sign In
                       </Button>
-                      <Button
-                        onClick={() => {
-                          handleSignOut();
-                          setIsMobileMenuOpen(false);
-                        }}
-                        variant="ghost"
-                        className="w-full"
-                      >
-                        Sign Out
+                    </Link>
+                    <Link to="/register" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base py-6">
+                        Get Started
                       </Button>
-                    </>
-                  ) : (
-                    // Non-authenticated user - mobile
-                    <>
-                      <Link to="/login" className="block" onClick={() => setIsMobileMenuOpen(false)}>
-                        <Button variant="ghost" className="w-full">
-                          Sign In
-                        </Button>
-                      </Link>
-                      <Link to="/register" className="block" onClick={() => setIsMobileMenuOpen(false)}>
-                        <Button className="w-full bg-primary hover:bg-primary/90 text-background">
-                          Sign Up
-                        </Button>
-                      </Link>
-                    </>
-                  )}
-                </div>
-              )}
+                    </Link>
+                  </>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

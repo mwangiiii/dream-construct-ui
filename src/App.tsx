@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
+// src/App.tsx
+import { useEffect, useState, useRef } from "react";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Volume2, VolumeX, Volume1, UserPlus } from "lucide-react";
-import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
+
+import { supabase } from "@/lib/supabaseClient";
 
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -19,94 +21,100 @@ import Team from "./pages/Team";
 import Contact from "./pages/contact";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import ReviewsManagement from "./pages/admin/ReviewsManagement";
 import Reviews from "./pages/Reviews";
 
 // Admin Pages
 import Dashboard from "./pages/admin/Dashboard";
-import AdminUserCreate from "./pages/admin/UserCreate"; // ✅ Fixed import path
+import AdminUserCreate from "./pages/admin/UserCreate";
+import UserManagement from "./pages/admin/UserManagement";  // ← Added
+import ReviewsManagement from "./pages/admin/ReviewsManagement";
 
 // 404
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// Reusable Protected Route Component
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    const redirectTo = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?redirectTo=${redirectTo}`} replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const App = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.2); // Default to 20% (soft ambient volume)
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [volume, setVolume] = useState(0.2);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Set initial volume
     audio.volume = volume;
 
-    // Attempt to play audio on mount
     const playAudio = async () => {
       try {
         await audio.play();
-        setIsPlaying(true);
-      } catch (error) {
-        console.log("Autoplay prevented. User interaction needed.");
+      } catch (err) {
+        console.log("Autoplay prevented");
       }
     };
 
-    playAudio();
-
-    // Handle user interaction for autoplay policy
-    const handleUserInteraction = async () => {
-      if (!isPlaying && audio.paused) {
-        try {
-          await audio.play();
-          setIsPlaying(true);
-        } catch (error) {
-          console.error("Failed to play audio:", error);
-        }
-      }
+    const handleInteraction = () => {
+      playAudio();
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener("touchstart", handleInteraction);
+      document.removeEventListener("keydown", handleInteraction);
     };
 
-    // Add listeners for first user interaction
-    document.addEventListener("click", handleUserInteraction, { once: true });
-    document.addEventListener("touchstart", handleUserInteraction, { once: true });
-    document.addEventListener("keydown", handleUserInteraction, { once: true });
+    document.addEventListener("click", handleInteraction, { once: true });
+    document.addEventListener("touchstart", handleInteraction, { once: true });
+    document.addEventListener("keydown", handleInteraction, { once: true });
 
     return () => {
-      document.removeEventListener("click", handleUserInteraction);
-      document.removeEventListener("touchstart", handleUserInteraction);
-      document.removeEventListener("keydown", handleUserInteraction);
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener("touchstart", handleInteraction);
+      document.removeEventListener("keydown", handleInteraction);
     };
-  }, [isPlaying, volume]);
+  }, []);
 
-  // Update audio volume when volume state changes
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
+      audioRef.current.muted = isMuted;
     }
-  }, [volume]);
+  }, [volume, isMuted]);
 
-  const toggleMute = () => {
-    if (audioRef.current) {
-      audioRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const handleVolumeChange = (newVolume: number[]) => {
-    const volumeValue = newVolume[0];
-    setVolume(volumeValue);
-    
-    // Auto-unmute if user increases volume while muted
-    if (isMuted && volumeValue > 0) {
-      setIsMuted(false);
-      if (audioRef.current) {
-        audioRef.current.muted = false;
-      }
-    }
-  };
+  const toggleMute = () => setIsMuted(!isMuted);
 
   const getVolumeIcon = () => {
     if (isMuted || volume === 0) return <VolumeX className="w-5 h-5" />;
@@ -118,50 +126,18 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Sonner />
 
-        {/* Global Background Music */}
-        <audio
-          ref={audioRef}
-          loop
-          preload="auto"
-          style={{ display: "none" }}
-        >
+        {/* Background Music */}
+        <audio ref={audioRef} loop preload="auto" style={{ display: "none" }}>
           <source src="/Ravz.mp3" type="audio/mpeg" />
-          Your browser does not support the audio element.
         </audio>
 
-        {/* Floating Music Control */}
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
-          {/* Volume Slider - Shows on hover or when toggled */}
-            {/* <div
-              className={`
-                transition-all duration-300 ease-in-out
-                ${showVolumeSlider ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}
-              `}
-            >
-              <div className="bg-black/90 backdrop-blur-sm rounded-full px-4 py-3 shadow-lg flex items-center gap-3 min-w-[180px]">
-                <span className="text-white text-xs font-medium whitespace-nowrap">
-                  {Math.round(volume * 100)}%
-                </span>
-                <Slider
-                  value={[volume]}
-                  onValueChange={handleVolumeChange}
-                  max={1}
-                  step={0.01}
-                  className="w-24 cursor-pointer"
-                />
-              </div>
-            </div> */}
-
-          {/* Volume Control Button */}
+        {/* Floating Volume Control */}
+        <div className="fixed bottom-6 right-6 z-50">
           <button
             onClick={toggleMute}
-            onMouseEnter={() => setShowVolumeSlider(true)}
-            onMouseLeave={() => setShowVolumeSlider(false)}
-            onTouchStart={() => setShowVolumeSlider(!showVolumeSlider)}
-            className="bg-black/80 hover:bg-black text-white p-4 rounded-full shadow-lg backdrop-blur-sm transition-all duration-300 hover:scale-110"
-            aria-label={isMuted ? "Unmute background music" : "Mute background music"}
+            className="bg-black/80 hover:bg-black text-white p-4 rounded-full shadow-lg backdrop-blur-sm transition-all hover:scale-110"
+            aria-label={isMuted ? "Unmute" : "Mute"}
           >
             {getVolumeIcon()}
           </button>
@@ -169,7 +145,7 @@ const App = () => {
 
         <BrowserRouter>
           <Routes>
-            {/* === Public Routes (Main Layout) === */}
+            {/* === Public Routes === */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/services" element={<MainLayout><Services /></MainLayout>} />
             <Route path="/projects" element={<MainLayout><Projects /></MainLayout>} />
@@ -177,69 +153,120 @@ const App = () => {
             <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
             <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
 
-            {/* === Auth Routes (No Layout) === */}
+            {/* === Auth Routes === */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
-            {/* === Admin Routes (Admin Layout) === */}
-            <Route path="/admin" element={<AdminLayout><Dashboard /></AdminLayout>} />
-            
-            {/* Users Management with Create Button */}
-            <Route path="/admin/users" element={
-              <AdminLayout>
-                <div className="p-8">
-                  <div className="flex justify-between items-center mb-6">
-                    <div>
-                      <h1 className="text-4xl font-bold">Users Management</h1>
-                      <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p>
-                    </div>
-                    <Link to="/admin/users/create">
-                      <Button className="bg-primary hover:bg-primary/90">
-                        <UserPlus className="w-4 h-4 mr-2" />
-                        Create New User
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              </AdminLayout>
-            } />
-            
-            {/* ✅ Create User Page */}
-            <Route 
-              path="/admin/users/create" 
-              element={<AdminLayout><AdminUserCreate /></AdminLayout>} 
+            {/* === ADMIN ROUTES - FULLY PROTECTED === */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout><Dashboard /></AdminLayout>
+                </ProtectedRoute>
+              }
             />
 
-            <Route path="/admin/projects" element={
-              <AdminLayout>
-                <div className="p-8">
-                  <h1 className="text-4xl font-bold">Projects Management</h1>
-                  <p className="text-muted-foreground mt-2">Oversee all construction projects</p>
-                </div>
-              </AdminLayout>
-            } />
-            
-            <Route path="/admin/content" element={
-              <AdminLayout>
-                <div className="p-8">
-                  <h1 className="text-4xl font-bold">Content Management</h1>
-                  <p className="text-muted-foreground mt-2">Update website content and media</p>
-                </div>
-              </AdminLayout>
-            } />
-            
-            <Route path="/admin/settings" element={
-              <AdminLayout>
-                <div className="p-8">
-                  <h1 className="text-4xl font-bold">Settings</h1>
-                  <p className="text-muted-foreground mt-2">Configure system settings</p>
-                </div>
-              </AdminLayout>
-            } />
-            
-            <Route path="/admin/reviews" element={<AdminLayout><ReviewsManagement /></AdminLayout>} />
+            {/* USER MANAGEMENT — Full List + Edit + Delete */}
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <div className="p-8">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h1 className="text-4xl font-bold">Users Management</h1>
+                          <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p>
+                        </div>
+                        <Link to="/admin/users/create">
+                          <Button className="bg-primary hover:bg-primary/90">
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Create New User
+                          </Button>
+                        </Link>
+                      </div>
+                      <UserManagement /> {/* ← Your beautiful dashboard here */}
+                    </div>
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
 
-            {/* === 404 Catch-All === */}
+            {/* USER CREATION — Dedicated create form */}
+            <Route
+              path="/admin/users/create"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout><AdminUserCreate /></AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/admin/projects"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <div className="p-8">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h1 className="text-4xl font-bold">Projects Management</h1>
+                          <p className="text-muted-foreground mt-2">Oversee all construction projects</p>
+                        </div>
+                      </div>
+                    </div>
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/admin/content"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <div className="p-8">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h1 className="text-4xl font-bold">Content Management</h1>
+                          <p className="text-muted-foreground mt-2">Update website content and media</p>
+                        </div>
+                      </div>
+                    </div>
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/admin/reviews"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout><ReviewsManagement /></AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/admin/settings"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <div className="p-8">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h1 className="text-4xl font-bold">Settings</h1>
+                          <p className="text-muted-foreground mt-2">Configure system settings</p>
+                        </div>
+                      </div>
+                    </div>
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* === 404 === */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
