@@ -43,7 +43,7 @@ const Navbar = () => {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">Dream Construct Limited</span>
-              <span className="text-xs text-muted-foreground">Building Dreams</span>
+              <span className="text-xs text-muted-foreground">Building Your Dreams</span>
             </div>
           </Link>
 
