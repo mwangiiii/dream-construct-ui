@@ -268,7 +268,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 transition={{ delay: 0.4 }}
                 className="space-y-4 mb-8"
               >
-                <div className="flex items-center gap-3 mb-3">
+                {/* <div className="flex items-center gap-3 mb-3">
                   <div className="p-2 rounded-lg bg-primary/10">
                     <Calendar className="w-5 h-5 text-primary" />
                   </div>
@@ -280,7 +280,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                       This helps us provide tailored assistance
                     </p>
                   </div>
-                </div>
+                </div> */}
                 
                 <Select value={selectedStage} onValueChange={setSelectedStage}>
                   <SelectTrigger className="glass border-border h-14 text-base hover:border-primary/50 transition-all duration-300 focus:ring-2 focus:ring-primary/20">

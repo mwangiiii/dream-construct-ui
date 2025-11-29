@@ -360,10 +360,10 @@ I would like to discuss the following:
                     disabled={isLoading || isSuccess}
                     className="glass border-border focus:border-primary transition-colors resize-none"
                   />
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  {/* <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     Average response time: 2-4 hours during business hours
-                  </p>
+                  </p> */}
                 </div>
 
                 <Button

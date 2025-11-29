@@ -1,221 +1,214 @@
+// app/completed-projects/page.tsx  (or pages/completed-projects.tsx)
+import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { motion } from "framer-motion";
-import { CheckCircle2, Clock, AlertCircle, TrendingUp } from "lucide-react";
+// Removed icons for a more formal, Apple-inspired look
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 
-const Projects = () => {
-  const projectProgress = {
-    name: "Skyline Commercial Center",
-    client: "Metro Developments Inc.",
-    status: "In Progress",
-    completion: 65,
-    startDate: "Jan 2024",
-    estimatedCompletion: "Dec 2024",
-  };
+// Safe Supabase init — never crashes
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  const milestones = [
-    {
-      phase: "Foundation & Site Preparation",
-      status: "completed",
-      completion: 100,
-      date: "Feb 2024",
-    },
-    {
-      phase: "Structural Framework",
-      status: "completed",
-      completion: 100,
-      date: "Apr 2024",
-    },
-    {
-      phase: "Exterior Construction",
-      status: "in-progress",
-      completion: 75,
-      date: "Ongoing",
-    },
-    {
-      phase: "Interior Work",
-      status: "in-progress",
-      completion: 45,
-      date: "Ongoing",
-    },
-    {
-      phase: "MEP Systems Installation",
-      status: "upcoming",
-      completion: 20,
-      date: "Aug 2024",
-    },
-    {
-      phase: "Finishing & Details",
-      status: "upcoming",
-      completion: 0,
-      date: "Oct 2024",
-    },
-  ];
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
 
-  const updates = [
-    {
-      date: "May 15, 2024",
-      title: "Exterior Cladding Complete",
-      description: "Successfully completed the installation of premium glass and aluminum cladding on the north and east facades.",
-    },
-    {
-      date: "May 8, 2024",
-      title: "HVAC Systems Installed",
-      description: "Major HVAC equipment installed on all floors. System testing scheduled for next week.",
-    },
-    {
-      date: "May 1, 2024",
-      title: "Interior Drywall 60% Complete",
-      description: "Drywall installation progressing ahead of schedule across floors 3-8.",
-    },
-  ];
+type Project = {
+  id: string;
+  project_number: string;
+  title: string;
+  actual_completion_date: string | null;
+  budget_numeric: number | null;
+  currency: string;
+  progress_percent: number;
+  client_id: any;
+};
 
-  const statusConfig = {
-    completed: { icon: CheckCircle2, color: "text-green-500", bg: "bg-green-500/20" },
-    "in-progress": { icon: Clock, color: "text-primary", bg: "bg-primary/20" },
-    upcoming: { icon: AlertCircle, color: "text-muted-foreground", bg: "bg-muted" },
-  };
+export default function CompletedProjects() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchCompleted() {
+      if (!supabase) {
+        setError("Supabase not configured — check .env.local");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("projects")
+          .select(`
+            id,
+            project_number,
+            title,
+            actual_completion_date,
+            budget_numeric,
+            currency,
+            progress_percent,
+            client_id:profiles!client_id (company_name)
+          `)
+          .eq("progress_percent", 100)
+          .order("actual_completion_date", { ascending: false });
+
+        if (error) throw error;
+        setProjects(data || []);
+      } catch (err: any) {
+        setError(err.message || "Failed to load completed projects");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchCompleted();
+  }, []);
+
+  const totalValue = projects.reduce((sum, p) => sum + (p.budget_numeric || 0), 0);
 
   return (
     <div className="min-h-screen pt-32 pb-20">
       <div className="container mx-auto px-6">
+
         <SectionHeading
-          title="Project Progress"
-          subtitle="Real-time insights into your construction project"
+          title="Completed Projects"
+          subtitle={`${projects.length} projects successfully delivered`}
           className="mb-16"
         />
 
-        {/* Project Overview */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-12"
-        >
-          <GlassCard className="p-8">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-8">
-              <div>
-                <h2 className="text-3xl font-bold mb-2">{projectProgress.name}</h2>
-                <p className="text-muted-foreground">Client: {projectProgress.client}</p>
+        {/* Dashboard Stats – Same style as your original */}
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+            {[...Array(4)].map((_, i) => (
+              <GlassCard key={i} className="p-8 animate-pulse">
+                <div className="h-12 bg-white/20 rounded w-12 mb-4" />
+                <div className="h-8 bg-white/10 rounded w-24" />
+              </GlassCard>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="text-center py-20 text-red-500">
+            <p className="text-2xl font-bold mb-4">Error</p>
+            <pre className="bg-red-50 p-4 rounded-lg inline-block">{error}</pre>
+          </div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12"
+          >
+            {/* Apple-inspired minimalist stat cards */}
+            <GlassCard className="p-8 text-center bg-white/80 shadow-xl rounded-3xl border border-zinc-200">
+              <div className="text-5xl font-semibold text-zinc-900 mb-2 tracking-tight">{projects.length}</div>
+              <div className="text-lg text-zinc-500">Delivered</div>
+            </GlassCard>
+            <GlassCard className="p-8 text-center bg-white/80 shadow-xl rounded-3xl border border-zinc-200">
+              <div className="text-5xl font-semibold text-zinc-900 mb-2 tracking-tight">${(totalValue / 1_000_000).toFixed(1)}M</div>
+              <div className="text-lg text-zinc-500">Total Value</div>
+            </GlassCard>
+            <GlassCard className="p-8 text-center bg-white/80 shadow-xl rounded-3xl border border-zinc-200">
+              <div className="text-5xl font-semibold text-zinc-900 mb-2 tracking-tight">
+                {projects.filter(p => {
+                  if (!p.actual_completion_date) return false;
+                  const d = new Date(p.actual_completion_date);
+                  const now = new Date();
+                  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                }).length}
               </div>
-              <div className="mt-4 lg:mt-0 flex items-center space-x-4">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">{projectProgress.completion}%</div>
-                  <div className="text-sm text-muted-foreground">Complete</div>
-                </div>
-              </div>
-            </div>
+              <div className="text-lg text-zinc-500">This Month</div>
+            </GlassCard>
+            <GlassCard className="p-8 text-center bg-white/80 shadow-xl rounded-3xl border border-zinc-200">
+              <div className="text-5xl font-semibold text-zinc-900 mb-2 tracking-tight">100%</div>
+              <div className="text-lg text-zinc-500">Completion Rate</div>
+            </GlassCard>
+          </motion.div>
+        )}
 
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-muted-foreground">Overall Progress</span>
-                  <span className="font-medium">{projectProgress.completion}%</span>
-                </div>
-                <Progress value={projectProgress.completion} className="h-3" />
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-4 pt-4">
-                <div className="glass rounded-lg p-4">
-                  <div className="text-sm text-muted-foreground mb-1">Start Date</div>
-                  <div className="font-semibold">{projectProgress.startDate}</div>
-                </div>
-                <div className="glass rounded-lg p-4">
-                  <div className="text-sm text-muted-foreground mb-1">Est. Completion</div>
-                  <div className="font-semibold">{projectProgress.estimatedCompletion}</div>
-                </div>
-                <div className="glass rounded-lg p-4">
-                  <div className="text-sm text-muted-foreground mb-1">Status</div>
-                  <div className="font-semibold text-primary">{projectProgress.status}</div>
-                </div>
-              </div>
-            </div>
-          </GlassCard>
-        </motion.div>
-
-        {/* Milestones Timeline */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="mb-12"
-        >
-          <h3 className="text-2xl font-bold mb-6">Project Milestones</h3>
-          <div className="space-y-4">
-            {milestones.map((milestone, idx) => {
-              const config = statusConfig[milestone.status as keyof typeof statusConfig];
-              const StatusIcon = config.icon;
-
-              return (
+        {/* Completed Projects Grid – Exactly your original glassmorphic style */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
+          {loading
+            ? [...Array(6)].map((_, i) => (
+                <GlassCard key={i} className="p-8 animate-pulse">
+                  <div className="h-8 bg-white/10 rounded mb-4" />
+                  <div className="h-4 bg-white/5 rounded w-32" />
+                </GlassCard>
+              ))
+            : projects.map((project, idx) => (
                 <motion.div
-                  key={milestone.phase}
-                  initial={{ opacity: 0, x: -20 }}
-                  whileInView={{ opacity: 1, x: 0 }}
+                  key={project.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: idx * 0.1 }}
                 >
-                  <GlassCard className="p-6">
-                    <div className="flex items-start gap-4">
-                      <div className={`w-12 h-12 rounded-xl ${config.bg} flex items-center justify-center flex-shrink-0`}>
-                        <StatusIcon className={`w-6 h-6 ${config.color}`} />
+                  <GlassCard className="p-8 h-full flex flex-col">
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <h3 className="text-2xl font-bold text-foreground">
+                          {project.title}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {project.project_number}
+                        </p>
                       </div>
-                      <div className="flex-grow">
-                        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-3">
-                          <h4 className="text-lg font-semibold">{milestone.phase}</h4>
-                          <span className="text-sm text-muted-foreground mt-1 md:mt-0">
-                            {milestone.date}
+                      <Badge className="bg-zinc-100 text-zinc-700 border-zinc-200 font-medium tracking-wide px-3 py-1 rounded-full shadow-sm">
+                        Completed
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-4 text-sm flex-grow">
+                      <div>
+                        <span className="text-muted-foreground">Client:</span>{" "}
+                        <span className="font-medium">
+                          {project.client_id?.company_name || "Private Client"}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-muted-foreground">Completed on:</span>{" "}
+                        <span className="font-medium">
+                          {project.actual_completion_date
+                            ? new Date(project.actual_completion_date).toLocaleDateString("en-US", {
+                                month: "long",
+                                year: "numeric",
+                                day: "numeric",
+                              })
+                            : "Recently"}
+                        </span>
+                      </div>
+
+                      {project.budget_numeric && (
+                        <div className="pt-4 border-t border-border/50">
+                          <span className="text-muted-foreground">Final Budget:</span>{" "}
+                          <span className="text-xl font-bold text-primary">
+                            {project.currency} {project.budget_numeric.toLocaleString()}
                           </span>
                         </div>
-                        <Progress value={milestone.completion} className="h-2 mb-2" />
-                        <div className="text-sm text-muted-foreground">
-                          {milestone.completion}% Complete
-                        </div>
-                      </div>
+                      )}
+                    </div>
+
+                    {/* NO PROGRESS BAR — intentionally hidden */}
+                    <div className="mt-8 pt-6 border-t border-border/50 text-center">
+                      <span className="text-lg text-zinc-700 font-semibold tracking-tight">Project Successfully Delivered</span>
                     </div>
                   </GlassCard>
                 </motion.div>
-              );
-            })}
-          </div>
-        </motion.div>
+              ))}
+        </div>
 
-        {/* Recent Updates */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-        >
-          <h3 className="text-2xl font-bold mb-6">Recent Updates</h3>
-          <div className="space-y-4">
-            {updates.map((update, idx) => (
-              <motion.div
-                key={update.date}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: idx * 0.1 }}
-              >
-                <GlassCard className="p-6">
-                  <div className="flex items-start gap-4">
-                    <TrendingUp className="w-5 h-5 text-primary mt-1 flex-shrink-0" />
-                    <div>
-                      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
-                        <h4 className="font-semibold">{update.title}</h4>
-                        <span className="text-sm text-muted-foreground mt-1 md:mt-0">
-                          {update.date}
-                        </span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{update.description}</p>
-                    </div>
-                  </div>
-                </GlassCard>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
+        {/* Empty State */}
+        {!loading && !error && projects.length === 0 && (
+          <GlassCard className="p-20 text-center bg-white/80 shadow-xl rounded-3xl border border-zinc-200">
+            <h3 className="text-2xl font-semibold mb-2 text-zinc-800">No completed projects yet</h3>
+            <p className="text-zinc-500">
+              Projects will appear here once they reach 100% completion.
+            </p>
+          </GlassCard>
+        )}
       </div>
     </div>
   );
-};
-
-export default Projects;
+}
