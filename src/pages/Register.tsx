@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
-import signUpVideo from "@/assets/sign-upp.mp4";
+// import signUpVideo from "@/assets/sign-upp.mp4";
 import { signUp } from "@/lib/auth";
 
 const Register = () => {
@@ -95,18 +95,19 @@ const Register = () => {
       {/* Video Background */}
       <video
         ref={videoRef}
-        src={signUpVideo}
-        className="absolute inset-0 w-full h-full object-cover"
+        src="https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448834/sign-upp_aoe2g5.mp4"
+        className="absolute inset-0 w-full h-full object-cover brightness-75 contrast-110 blur-[1px]"
         autoPlay
         loop
         muted
         playsInline
+        style={{ zIndex: 0 }}
       />
       
       {/* Transition Overlay */}
       <div
         ref={overlayRef}
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none bg-black/40"
         style={{
           opacity: 0,
           transition: 'opacity 0s',
@@ -115,12 +116,12 @@ const Register = () => {
       />
       
       {/* Gradient Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-br from-background/90 via-background/85 to-background/80 z-10" />
+      <div className="absolute inset-0 bg-gradient-to-br from-background/80 via-background/70 to-background/60 z-10" />
       
       {/* Animated background pattern */}
-      <div className="absolute inset-0 opacity-5 z-10">
+      <div className="absolute inset-0 opacity-10 z-10">
         <div className="absolute inset-0" style={{
-          backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\"60\" height=\"60\" viewBox=\"0 0 60 60\" xmlns=\"http://www.w3.org/2000/svg\"%3E%3Cg fill=\"none\" fill-rule=\"evenodd\"%3E%3Cg fill=\"%23ffffff\" fill-opacity=\"1\"%3E%3Cpath d=\"M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+          backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\"60\" height=\"60\" viewBox=\"0 0 60 60\" xmlns=\"http://www.w3.org/2000/svg\"%3E%3Cg fill=\"none\" fill-rule=\"evenodd\"%3E%3Cg fill=\"%23ffffff\" fill-opacity=\"0.7\"%3E%3Cpath d=\"M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
         }} />
       </div>
       

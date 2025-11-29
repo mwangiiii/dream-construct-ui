@@ -7,9 +7,8 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import heroRoadImage from "@/assets/hero-road-construction.jpg";
 import heroBuildingImage from "@/assets/hero-building-construction.jpg";
 import heroCranesImage from "@/assets/hero-cranes-construction.jpg";
-import commercialBuildings from "@/assets/commercial-excellence.mp4";
-import industrialSite from "@/assets/industrial-renovation.mp4";
-import residentialHome from "@/assets/residential-excellencee.mp4";
+
+
 
 const Index = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -47,17 +46,17 @@ const Index = () => {
     {
       title: "Residential Excellence",
       description: "From concept to completion, we create living spaces that are Family-Friendly and Reflect your Lifestyle.",
-      video: residentialHome,
+      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763447970/residential-excellencee_qwuy0i.mp4",
     },
     {
       title: "Commercial Mastery",
       description: "Commercial complexes, designed for functionality that help thrive to success.",
-      video: commercialBuildings,
+      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448357/commercial-excellence_lr3ciu.mp4",
     },
     {
       title: "Industrial Innovation",
       description: "Large-scale industrial facilities, warehouses, and manufacturing plants engineered for efficiency and built to industry standards.",
-      video: industrialSite,
+      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448281/industrial-renovation_hwh7jf.mp4",
     },
   ];
 
