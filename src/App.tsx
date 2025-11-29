@@ -15,6 +15,8 @@ import Team from "./pages/Team";
 import Contact from "./pages/contact";        // Correct lowercase path
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ReviewsManagement from "./pages/admin/ReviewsManagement";
+import Reviews from "./pages/Reviews";
 
 // Admin Pages
 import Dashboard from "./pages/admin/Dashboard";
@@ -39,8 +41,9 @@ const App = () => (
           <Route path="/projects" element={<MainLayout><Projects /></MainLayout>} />
           <Route path="/team" element={<MainLayout><Team /></MainLayout>} />
           
-          {/* THIS WAS MISSING — NOW FIXED */}
+
           <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
+          <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
 
           {/* === Auth Routes (No Layout) === */}
           <Route path="/login" element={<Login />} />
@@ -81,6 +84,8 @@ const App = () => (
               </div>
             </AdminLayout>
           } />
+
+          <Route path="/admin/reviews" element={<AdminLayout><ReviewsManagement /></AdminLayout>} />
 
           {/* === 404 Catch-All === */}
           <Route path="*" element={<NotFound />} />

@@ -150,7 +150,7 @@ I would like to discuss the following:
     {
       icon: Mail,
       title: "Email Us",
-      details: ["mwangiwanjiku033@gmail.com"],
+      details: ["to be set"],
       link: "mailto:mwangiwanjiku033@gmail.com",
     },
   ];
