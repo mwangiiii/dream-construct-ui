@@ -22,6 +22,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface Stage {
+  step: string;
+  title: string;
+}
+
+interface Phase {
+  number: string;
+  title: string;
+  stages: Stage[];
+}
+
 interface SubService {
   title: string;
   serviceCategory: string;
@@ -34,15 +45,16 @@ interface SubServicePopupProps {
   isOpen: boolean;
   onClose: () => void;
   subService: SubService;
-  stages: string[];
+  phases: Phase[]; // Updated to receive phases instead of flat stages
 }
 
 const SubServicePopup: React.FC<SubServicePopupProps> = ({
   isOpen,
   onClose,
   subService,
-  stages,
+  phases,
 }) => {
+  const [selectedPhase, setSelectedPhase] = useState("");
   const [selectedStage, setSelectedStage] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false);
@@ -51,7 +63,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
   if (!isOpen) return null;
 
   const handleProceed = () => {
-    if (!selectedStage) return;
+    if (!selectedPhase || !selectedStage) return;
     
     setIsRedirecting(true);
     
@@ -59,6 +71,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
     const params = new URLSearchParams({
       subService: subService.title,
       category: subService.serviceCategory,
+      phase: selectedPhase,
       stage: selectedStage,
     });
 
@@ -79,6 +92,9 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
     setMediaError(true);
     setMediaLoaded(false);
   };
+
+  const selectedPhaseObj = phases.find(p => p.title === selectedPhase);
+  const availableStages = selectedPhaseObj?.stages || [];
 
   return (
     <AnimatePresence>
@@ -261,54 +277,103 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 )}
               </motion.div>
 
-              {/* Stage Selection */}
+              {/* Phase and Stage Selection */}
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4 }}
                 className="space-y-4 mb-8"
               >
-                {/* <div className="flex items-center gap-3 mb-3">
+                <div className="flex items-center gap-3 mb-3">
                   <div className="p-2 rounded-lg bg-primary/10">
                     <Calendar className="w-5 h-5 text-primary" />
                   </div>
                   <div>
                     <label className="text-sm font-semibold block">
-                      Select Your Current Project Stage
+                      Select Your Current Project Phase
                     </label>
                     <p className="text-xs text-muted-foreground/70">
-                      This helps us provide tailored assistance
+                      Choose the phase your project is currently in
                     </p>
                   </div>
-                </div> */}
+                </div>
                 
-                <Select value={selectedStage} onValueChange={setSelectedStage}>
+                <Select value={selectedPhase} onValueChange={setSelectedPhase}>
                   <SelectTrigger className="glass border-border h-14 text-base hover:border-primary/50 transition-all duration-300 focus:ring-2 focus:ring-primary/20">
                     <SelectValue placeholder="Choose current phase of project" />
                   </SelectTrigger>
                   <SelectContent>
-                    {stages.map((stage, index) => (
+                    {phases.map((phase, index) => (
                       <SelectItem 
-                        key={stage} 
-                        value={stage}
+                        key={phase.title} 
+                        value={phase.title}
                         className="cursor-pointer hover:bg-primary/5 transition-colors py-3"
                       >
                         <div className="flex items-center gap-3">
                           <span className="flex items-center justify-center w-6 h-6 text-xs font-bold text-primary/80 bg-primary/10 rounded-full">
                             {String(index + 1).padStart(2, "0")}
                           </span>
-                          <span className="font-medium">{stage}</span>
+                          <span className="font-medium">{phase.title}</span>
                         </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
 
+                {/* Stage Selection - Appears after phase is selected */}
+                <AnimatePresence>
+                  {selectedPhase && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, y: -10 }}
+                      animate={{ opacity: 1, height: "auto", y: 0 }}
+                      exit={{ opacity: 0, height: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-2"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-accent/10">
+                          <Calendar className="w-5 h-5 text-accent" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-semibold block">
+                            Select Stage Within {selectedPhase}
+                          </label>
+                          <p className="text-xs text-muted-foreground/70">
+                            Now choose the specific stage in this phase
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <Select value={selectedStage} onValueChange={setSelectedStage}>
+                        <SelectTrigger className="glass border-border h-14 text-base hover:border-accent/50 transition-all duration-300 focus:ring-2 focus:ring-accent/20 pl-10">
+                          <SelectValue placeholder="Choose stage" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableStages.map((stage, index) => (
+                            <SelectItem 
+                              key={stage.step} 
+                              value={stage.step}
+                              className="cursor-pointer hover:bg-accent/5 transition-colors py-3"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="flex items-center justify-center w-8 h-8 text-xs font-mono text-accent/80 bg-accent/10 rounded-full">
+                                  {stage.step}
+                                </span>
+                                <span className="font-medium">{stage.title}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Helper text with animation */}
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ 
-                    opacity: selectedStage ? 1 : 0.5, 
+                    opacity: selectedStage ? 1 : (selectedPhase ? 0.7 : 0.5), 
                     height: "auto" 
                   }}
                   className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10"
@@ -316,8 +381,10 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                   <span className="text-primary text-lg mt-0.5">ℹ️</span>
                   <p className="text-xs text-muted-foreground/80 leading-relaxed">
                     {selectedStage 
-                      ? `Perfect! We'll prepare relevant information for the ${selectedStage} stage.`
-                      : "Select your current stage to help us understand your project timeline and needs."
+                      ? `Excellent! We're ready to assist with ${selectedStage} in the ${selectedPhase} phase.`
+                      : selectedPhase 
+                        ? `Great choice! Now select your specific stage within ${selectedPhase} to get tailored support.`
+                        : "Select your phase and stage to help us understand your project timeline and needs."
                     }
                   </p>
                 </motion.div>
@@ -332,7 +399,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
               >
                 <Button
                   onClick={handleProceed}
-                  disabled={!selectedStage || isRedirecting}
+                  disabled={!selectedPhase || !selectedStage || isRedirecting}
                   className="w-full bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white font-semibold py-6 text-base disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 group relative overflow-hidden shadow-lg hover:shadow-xl disabled:shadow-none"
                 >
                   {isRedirecting ? (
@@ -363,7 +430,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
 
                 {/* Conditional feedback message */}
                 <AnimatePresence>
-                  {!selectedStage && (
+                  {(!selectedPhase || !selectedStage) && (
                     <motion.p
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -371,7 +438,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                       className="text-xs text-center text-muted-foreground/70 flex items-center justify-center gap-2"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                      Please select a project stage to continue
+                      {selectedPhase ? "Please select a stage to continue" : "Please select a phase and stage to continue"}
                     </motion.p>
                   )}
                 </AnimatePresence>

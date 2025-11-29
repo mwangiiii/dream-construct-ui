@@ -212,7 +212,52 @@ const Services = () => {
     },
   ];
 
-  const stages = ["Consultation", "Planning", "Execution", "Delivery"];
+  const oldStages = ["Consultation", "Planning", "Execution", "Delivery"]; // Kept for reference if needed
+
+  const phases = [
+    {
+      number: "01",
+      title: "Conception and Feasibility",
+      stages: [
+        { step: "1.1", title: "Decision and Land Purchase" },
+        { step: "1.2", title: "Feasibility Study and Business Case" },
+      ],
+    },
+    {
+      number: "02",
+      title: "Pre-Construction",
+      stages: [
+        { step: "2.1", title: "Design Planning" },
+        { step: "2.2", title: "Schematic Designing" },
+        { step: "2.3", title: "Construction Documents and Approvals" },
+        { step: "2.4", title: "Contractor Selection" },
+      ],
+    },
+    {
+      number: "03",
+      title: "Construction",
+      stages: [
+        { step: "3.1", title: "Mobilization and Site Preparation" },
+        { step: "3.2", title: "Foundation" },
+        { step: "3.3", title: "Structural Frames" },
+        { step: "3.4", title: "Envelope and Roofing" },
+        { step: "3.5", title: "Mechanical, Electrical and Plumbing (MEP) Roughing" },
+        { step: "3.6", title: "Interior Finishes and Cladding" },
+        { step: "3.7", title: "MEP Fitout and Final Connections" },
+        { step: "3.8", title: "External Works" },
+      ],
+    },
+    {
+      number: "04",
+      title: "Inspections and Snagging",
+      stages: [
+        { step: "4.1", title: "Final Inspections and Snagging" },
+        { step: "4.2", title: "Handover and Commissioning" },
+        { step: "4.3", title: "Project Closeout" },
+        { step: "4.4", title: "Aftercare and Warranty" },
+      ],
+    },
+  ];
 
   const openPopup = (feature: any, category: string) => {
     setSelectedSubService({
@@ -285,24 +330,43 @@ const Services = () => {
               className="mb-16"
             />
 
-            <div className="grid md:grid-cols-4 gap-6">
-              {[
-                { step: "01", title: "Consultation", desc: "Understanding your vision and requirements" },
-                { step: "02", title: "Planning", desc: "Detailed design and project roadmap" },
-                { step: "03", title: "Execution", desc: "Expert construction with quality control" },
-                { step: "04", title: "Delivery", desc: "Final inspection and handover" },
-              ].map((phase, idx) => (
+            <div className="space-y-12">
+              {phases.map((phase, phaseIdx) => (
                 <motion.div
-                  key={phase.step}
-                  initial={{ opacity: 0, x: -20 }}
-                  whileInView={{ opacity: 1, x: 0 }}
+                  key={phase.number}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
-                  transition={{ delay: idx * 0.15 }}
+                  transition={{ delay: phaseIdx * 0.2 }}
+                  className="group"
                 >
-                  <GlassCard>
-                    <div className="text-5xl font-bold text-primary/20 mb-4">{phase.step}</div>
-                    <h4 className="text-xl font-bold mb-2">{phase.title}</h4>
-                    <p className="text-sm text-muted-foreground">{phase.desc}</p>
+                  <GlassCard className="relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="relative z-10">
+                      <div className="flex items-center mb-6 pt-4">
+                        <div className="text-4xl font-bold text-primary/20 mr-4">{phase.number}</div>
+                        <h3 className="text-2xl font-bold text-foreground">{phase.title}</h3>
+                      </div>
+                      <div className="grid gap-4">
+                        {phase.stages.map((stage, stageIdx) => (
+                          <motion.div
+                            key={stage.step}
+                            initial={{ opacity: 0, x: -10 }}
+                            whileInView={{ opacity: 1, x: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ delay: phaseIdx * 0.1 + stageIdx * 0.05 }}
+                            className="flex items-start space-x-4 p-3 rounded-lg hover:bg-primary/5 transition-colors duration-200"
+                          >
+                            <div className="w-6 h-6 flex-shrink-0 mt-1 flex items-center justify-center">
+                              <span className="text-sm font-mono text-primary/60">{stage.step}</span>
+                            </div>
+                            <div>
+                              <h4 className="font-semibold text-foreground">{stage.title}</h4>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
                   </GlassCard>
                 </motion.div>
               ))}
@@ -316,7 +380,7 @@ const Services = () => {
         isOpen={isPopupOpen}
         onClose={closePopup}
         subService={selectedSubService}
-        stages={stages}
+        phases={phases}
       />
     </>
   );

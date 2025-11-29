@@ -1,13 +1,18 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getCurrentUser, getDashboardRoute, signOut, AuthUser } from "@/lib/auth";
+import { supabase } from "@/lib/supabaseClient";
 
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -16,6 +21,51 @@ const Navbar = () => {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Check authentication status on mount and listen for auth changes
+  useEffect(() => {
+    const checkUser = async () => {
+      setIsLoading(true);
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+      setIsLoading(false);
+    };
+
+    checkUser();
+
+    // Listen for auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === "SIGNED_IN" && session) {
+          const user = await getCurrentUser();
+          setCurrentUser(user);
+        } else if (event === "SIGNED_OUT") {
+          setCurrentUser(null);
+        }
+      }
+    );
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      setCurrentUser(null);
+      navigate("/");
+    } catch (error) {
+      console.error("Sign out error:", error);
+    }
+  };
+
+  const handleDashboardClick = () => {
+    if (currentUser) {
+      const dashboardRoute = getDashboardRoute(currentUser.roles);
+      navigate(dashboardRoute);
+    }
+  };
 
   const navLinks = [
     { name: "Home", path: "/" },
@@ -66,16 +116,42 @@ const Navbar = () => {
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center space-x-4">
-            <Link to="/login">
-              <Button variant="ghost" className="text-sm">
-                Sign In
-              </Button>
-            </Link>
-            <Link to="/contact">
-              <Button className="bg-primary hover:bg-primary/90 text-background font-medium">
-                Get Started
-              </Button>
-            </Link>
+            {!isLoading && (
+              <>
+                {currentUser ? (
+                  // Authenticated user - show Dashboard and Sign Out
+                  <>
+                    <Button
+                      onClick={handleDashboardClick}
+                      className="bg-primary hover:bg-primary/90 text-background font-medium"
+                    >
+                      Dashboard
+                    </Button>
+                    <Button
+                      onClick={handleSignOut}
+                      variant="ghost"
+                      className="text-sm"
+                    >
+                      Sign Out
+                    </Button>
+                  </>
+                ) : (
+                  // Non-authenticated user - show Sign In and Sign Up
+                  <>
+                    <Link to="/login">
+                      <Button variant="ghost" className="text-sm">
+                        Sign In
+                      </Button>
+                    </Link>
+                    <Link to="/register">
+                      <Button className="bg-primary hover:bg-primary/90 text-background font-medium">
+                        Sign Up
+                      </Button>
+                    </Link>
+                  </>
+                )}
+              </>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -110,18 +186,49 @@ const Navbar = () => {
                   {link.name}
                 </Link>
               ))}
-              <div className="pt-4 space-y-2">
-                <Link to="/login" className="block">
-                  <Button variant="ghost" className="w-full">
-                    Sign In
-                  </Button>
-                </Link>
-                <Link to="/contact" className="block">
-                  <Button className="w-full bg-primary hover:bg-primary/90 text-background">
-                    Get Started
-                  </Button>
-                </Link>
-              </div>
+              
+              {!isLoading && (
+                <div className="pt-4 space-y-2">
+                  {currentUser ? (
+                    // Authenticated user - mobile
+                    <>
+                      <Button
+                        onClick={() => {
+                          handleDashboardClick();
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className="w-full bg-primary hover:bg-primary/90 text-background"
+                      >
+                        Dashboard
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          handleSignOut();
+                          setIsMobileMenuOpen(false);
+                        }}
+                        variant="ghost"
+                        className="w-full"
+                      >
+                        Sign Out
+                      </Button>
+                    </>
+                  ) : (
+                    // Non-authenticated user - mobile
+                    <>
+                      <Link to="/login" className="block" onClick={() => setIsMobileMenuOpen(false)}>
+                        <Button variant="ghost" className="w-full">
+                          Sign In
+                        </Button>
+                      </Link>
+                      <Link to="/register" className="block" onClick={() => setIsMobileMenuOpen(false)}>
+                        <Button className="w-full bg-primary hover:bg-primary/90 text-background">
+                          Sign Up
+                        </Button>
+                      </Link>
+                    </>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

@@ -21,18 +21,22 @@ export interface UserProfile {
   job_title: string | null;
   created_at: string;
   updated_at: string;
+  status_id: number;
+  last_sign_in_at: string | null;
+  company_id: string | null;
 }
 
 export interface UserRole {
   role_name: 'admin' | 'manager' | 'project_manager' | 'client';
   description: string | null;
+  assigned_at: string;
 }
 
 export interface UserStatus {
-  status: 'active' | 'inactive' | 'suspended' | 'pending' | 'archived';
-  status_changed_at: string;
-  status_changed_by: string | null;
-  status_reason: string | null;
+  status_id: number;
+  status_name: string;
+  is_active: boolean;
+  description: string | null;
 }
 
 export interface AuthUser {
@@ -52,10 +56,18 @@ export interface AuthUser {
  */
 export async function getUserFullProfile(userId: string): Promise<AuthUser | null> {
   try {
-    // Fetch profile
+    // Fetch profile with status
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select(`
+        *,
+        user_statuses (
+          status_id,
+          status_name,
+          is_active,
+          description
+        )
+      `)
       .eq('id', userId)
       .single();
 
@@ -64,14 +76,13 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       throw profileError;
     }
 
-    // Fetch roles - corrected query based on your schema
-    // user_roles has: user_id (uuid), role_id (app_role enum)
-    // We need to join with roles table to get full role info
+    // Fetch roles - user_roles has role_name (app_role enum), not role_id
     const { data: userRoles, error: rolesError } = await supabase
       .from('user_roles')
       .select(`
-        role_id,
-        roles!inner (
+        role_name,
+        assigned_at,
+        roles (
           role_name,
           description
         )
@@ -83,31 +94,40 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       throw rolesError;
     }
 
-    // Fetch status
-    const { data: status, error: statusError } = await supabase
-      .from('user_statuses')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (statusError) {
-      console.error('Status fetch error:', statusError);
-      throw statusError;
-    }
-
     // Transform roles data
     const roles: UserRole[] = userRoles?.map((ur: any) => ({
-      role_name: ur.roles.role_name,
-      description: ur.roles.description,
+      role_name: ur.role_name,
+      description: ur.roles?.description || null,
+      assigned_at: ur.assigned_at,
     })) || [];
 
     // Get user email from auth
     const { data: { user } } = await supabase.auth.getUser();
 
+    // Extract status from profile
+    const status: UserStatus = profile.user_statuses || {
+      status_id: profile.status_id,
+      status_name: 'active',
+      is_active: true,
+      description: null,
+    };
+
     return {
       id: userId,
-      email: user?.email || profile.id || '',
-      profile,
+      email: user?.email || '',
+      profile: {
+        id: profile.id,
+        full_name: profile.full_name,
+        avatar_url: profile.avatar_url,
+        phone: profile.phone,
+        company_name: profile.company_name,
+        job_title: profile.job_title,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+        status_id: profile.status_id,
+        last_sign_in_at: profile.last_sign_in_at,
+        company_id: profile.company_id,
+      },
       roles,
       status,
     };
@@ -140,7 +160,7 @@ export function getDashboardRoute(roles: UserRole[]): string {
   const primaryRole = getPrimaryRole(roles);
   
   const routeMap: Record<UserRole['role_name'], string> = {
-    admin: '/admin/dashboard',
+    admin: '/admin',
     manager: '/manager/dashboard',
     project_manager: '/projects/dashboard',
     client: '/client/dashboard',
@@ -176,7 +196,7 @@ export async function signUp(data: SignupData) {
 
     const userId = user.id;
 
-    // 2. Insert into profiles table
+    // 2. Insert into profiles table (status_id defaults to 1 which should be 'active')
     const { error: profileError } = await supabase
       .from('profiles')
       .insert({
@@ -185,6 +205,7 @@ export async function signUp(data: SignupData) {
         phone: data.phone || null,
         company_name: data.companyName || null,
         job_title: data.jobTitle || null,
+        status_id: 1, // Default to active status
       });
 
     if (profileError) {
@@ -193,33 +214,18 @@ export async function signUp(data: SignupData) {
     }
 
     // 3. Assign default role (client) in user_roles
-    // Note: role_id is an app_role enum, not a foreign key to roles table
+    // user_roles has: user_id, role_name (app_role enum), assigned_at, assigned_by
     const { error: userRoleError } = await supabase
       .from('user_roles')
       .insert({
         user_id: userId,
-        role_id: 'client', // Direct enum value
+        role_name: 'client', // Direct enum value
         assigned_by: null,
       });
 
     if (userRoleError) {
       console.error('User role assignment error:', userRoleError);
       throw new Error('Failed to assign user role');
-    }
-
-    // 4. Set user status to 'active'
-    const { error: statusError } = await supabase
-      .from('user_statuses')
-      .insert({
-        user_id: userId,
-        status: 'active',
-        status_changed_by: null,
-        status_reason: 'New user registration',
-      });
-
-    if (statusError) {
-      console.error('Status creation error:', statusError);
-      throw new Error('Failed to set user status');
     }
 
     return {
@@ -253,37 +259,36 @@ export async function signIn({
     if (authError) throw authError;
     if (!authData.user) throw new Error('Authentication failed');
 
-    // 2. Fetch complete user profile with roles and status
+    // 2. Update last_sign_in_at
+    await supabase
+      .from('profiles')
+      .update({ last_sign_in_at: new Date().toISOString() })
+      .eq('id', authData.user.id);
+
+    // 3. Fetch complete user profile with roles and status
     const userProfile = await getUserFullProfile(authData.user.id);
     
     if (!userProfile) {
       throw new Error('Failed to load user profile');
     }
 
-    // 3. Check if user status is active
-    if (userProfile.status.status !== 'active') {
+    // 4. Check if user status is active
+    if (!userProfile.status.is_active) {
       await supabase.auth.signOut();
-      
-      const statusMessages: Record<string, string> = {
-        inactive: 'Your account is inactive. Please contact support.',
-        suspended: 'Your account has been suspended. Please contact support.',
-        pending: 'Your account is pending approval. Please wait for administrator approval.',
-        archived: 'Your account has been archived. Please contact support to reactivate.',
-      };
-      
-      const message = statusMessages[userProfile.status.status] || 
-                     `Account is ${userProfile.status.status}. ${userProfile.status.status_reason || 'Please contact support.'}`;
-      
-      throw new Error(message);
+      throw new Error(
+        `Your account status is "${userProfile.status.status_name}". ${
+          userProfile.status.description || 'Please contact support.'
+        }`
+      );
     }
 
-    // 4. Check if user has at least one role assigned
+    // 5. Check if user has at least one role assigned
     if (userProfile.roles.length === 0) {
       await supabase.auth.signOut();
       throw new Error('No roles assigned. Please contact an administrator.');
     }
 
-    // 5. Return complete authentication data with dashboard route
+    // 6. Return complete authentication data with dashboard route
     return {
       success: true,
       user: userProfile,
@@ -397,5 +402,29 @@ export async function resetPassword(email: string) {
   } catch (error: any) {
     console.error('Reset password error:', error);
     throw new Error(error.message || 'Failed to send reset email');
+  }
+}
+
+/**
+ * Update user profile
+ */
+export async function updateProfile(userId: string, updates: Partial<UserProfile>) {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    return { success: true, profile: data };
+  } catch (error: any) {
+    console.error('Update profile error:', error);
+    throw new Error(error.message || 'Failed to update profile');
   }
 }

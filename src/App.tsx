@@ -3,9 +3,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { Volume2, VolumeX, Volume1 } from "lucide-react";
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { Volume2, VolumeX, Volume1, UserPlus } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
 
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -23,7 +24,7 @@ import Reviews from "./pages/Reviews";
 
 // Admin Pages
 import Dashboard from "./pages/admin/Dashboard";
-import AdminUserCreate from "./pages/admin/UserCreate";
+import AdminUserCreate from "./pages/admin/UserCreate"; // ✅ Fixed import path
 
 // 404
 import NotFound from "./pages/NotFound";
@@ -133,25 +134,25 @@ const App = () => {
         {/* Floating Music Control */}
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
           {/* Volume Slider - Shows on hover or when toggled */}
-          <div
-            className={`
-              transition-all duration-300 ease-in-out
-              ${showVolumeSlider ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}
-            `}
-          >
-            <div className="bg-black/90 backdrop-blur-sm rounded-full px-4 py-3 shadow-lg flex items-center gap-3 min-w-[180px]">
-              <span className="text-white text-xs font-medium whitespace-nowrap">
-                {Math.round(volume * 100)}%
-              </span>
-              {/* <Slider
-                value={[volume]}
-                onValueChange={handleVolumeChange}
-                max={1}
-                step={0.01}
-                className="w-24 cursor-pointer"
-              /> */}
-            </div>
-          </div>
+            {/* <div
+              className={`
+                transition-all duration-300 ease-in-out
+                ${showVolumeSlider ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}
+              `}
+            >
+              <div className="bg-black/90 backdrop-blur-sm rounded-full px-4 py-3 shadow-lg flex items-center gap-3 min-w-[180px]">
+                <span className="text-white text-xs font-medium whitespace-nowrap">
+                  {Math.round(volume * 100)}%
+                </span>
+                <Slider
+                  value={[volume]}
+                  onValueChange={handleVolumeChange}
+                  max={1}
+                  step={0.01}
+                  className="w-24 cursor-pointer"
+                />
+              </div>
+            </div> */}
 
           {/* Volume Control Button */}
           <button
@@ -182,15 +183,33 @@ const App = () => {
 
             {/* === Admin Routes (Admin Layout) === */}
             <Route path="/admin" element={<AdminLayout><Dashboard /></AdminLayout>} />
+            
+            {/* Users Management with Create Button */}
             <Route path="/admin/users" element={
               <AdminLayout>
                 <div className="p-8">
-                  <h1 className="text-4xl font-bold">Users Management</h1>
-                  <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p>
+                  <div className="flex justify-between items-center mb-6">
+                    <div>
+                      <h1 className="text-4xl font-bold">Users Management</h1>
+                      <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p>
+                    </div>
+                    <Link to="/admin/users/create">
+                      <Button className="bg-primary hover:bg-primary/90">
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Create New User
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
               </AdminLayout>
             } />
-            <Route path="/admin/users/create" element={<AdminLayout><AdminUserCreate /></AdminLayout>} />
+            
+            {/* ✅ Create User Page */}
+            <Route 
+              path="/admin/users/create" 
+              element={<AdminLayout><AdminUserCreate /></AdminLayout>} 
+            />
+
             <Route path="/admin/projects" element={
               <AdminLayout>
                 <div className="p-8">
@@ -199,6 +218,7 @@ const App = () => {
                 </div>
               </AdminLayout>
             } />
+            
             <Route path="/admin/content" element={
               <AdminLayout>
                 <div className="p-8">
@@ -207,6 +227,7 @@ const App = () => {
                 </div>
               </AdminLayout>
             } />
+            
             <Route path="/admin/settings" element={
               <AdminLayout>
                 <div className="p-8">
@@ -215,6 +236,7 @@ const App = () => {
                 </div>
               </AdminLayout>
             } />
+            
             <Route path="/admin/reviews" element={<AdminLayout><ReviewsManagement /></AdminLayout>} />
 
             {/* === 404 Catch-All === */}
