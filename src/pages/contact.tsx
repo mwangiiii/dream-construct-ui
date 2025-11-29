@@ -1,8 +1,9 @@
-// src/pages/Contact.tsx or src/app/contact/page.tsx
-// FINAL PRODUCTION-READY VERSION - Fixed Business Hours overlap
+// src/pages/Contact.tsx
+// Updated with EmailJS integration for email functionality
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
+import emailjs from '@emailjs/browser';
 import { 
   Mail, 
   Phone, 
@@ -72,42 +73,51 @@ I would like to discuss the following:
     e.preventDefault();
     setIsLoading(true);
 
-    const submitData = {
-      ...formData,
-      subService: queryParams.subService,
-      category: queryParams.category,
-      stage: queryParams.stage,
+    // Prepare template parameters for EmailJS
+    const templateParams = {
+      from_name: formData.name,
+      from_email: formData.email,
+      phone: formData.phone || 'Not provided',
+      subject: formData.subject,
+      message: formData.message,
+      sub_service: queryParams.subService || 'Not specified',
+      category: queryParams.category || 'Not specified',
+      stage: queryParams.stage || 'Not specified',
     };
 
     try {
-      const response = await fetch("/api/sendMail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(submitData),
+      // Send auto-reply to customer
+      await emailjs.send(
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_TEMPLATE_CUSTOMER,  // Customer auto-reply template
+        templateParams,
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+      );
+
+      // Send notification to admin
+      await emailjs.send(
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_TEMPLATE_ADMIN,  // Admin notification template
+        templateParams,
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+      );
+
+      setIsSuccess(true);
+      toast({
+        title: "Message Sent Successfully!",
+        description: "We've received your inquiry and will respond within 24 hours.",
       });
 
-      const result = await response.json();
+      setTimeout(() => {
+        setFormData({ name: "", email: "", phone: "", subject: "", message: "" });
+        setIsSuccess(false);
+        setShowBanner(false);
+        window.history.replaceState({}, "", window.location.pathname);
+        setQueryParams({ subService: "", category: "", stage: "" });
+      }, 3000);
 
-      if (response.ok) {
-        setIsSuccess(true);
-        toast({
-          title: "Message Sent Successfully!",
-          description: "We've received your inquiry and will respond within 24 hours.",
-        });
-        
-        setTimeout(() => {
-          setFormData({ name: "", email: "", phone: "", subject: "", message: "" });
-          setIsSuccess(false);
-          setShowBanner(false);
-          
-          window.history.replaceState({}, "", window.location.pathname);
-          setQueryParams({ subService: "", category: "", stage: "" });
-        }, 3000);
-      } else {
-        throw new Error(result.error || "Failed to send email");
-      }
     } catch (error) {
-      console.error("Contact form error:", error);
+      console.error("EmailJS error:", error);
       toast({
         title: "Error Sending Message",
         description: "Please try again or contact us directly via phone or email.",
@@ -396,7 +406,7 @@ I would like to discuss the following:
                       className="p-4 rounded-lg bg-green-500/10 border border-green-500/20 text-center"
                     >
                       <p className="text-sm text-green-600 dark:text-green-400 font-medium">
-                        Your message has been sent! We'll get back to you soon.
+                        Your message has been sent! Check your email for confirmation.
                       </p>
                     </motion.div>
                   )}
@@ -405,7 +415,7 @@ I would like to discuss the following:
             </GlassCard>
           </motion.div>
 
-          {/* Right Column: Map + Business Hours (Properly Stacked & Spaced) */}
+          {/* Right Column: Map + Business Hours */}
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -439,7 +449,7 @@ I would like to discuss the following:
               </div>
             </GlassCard>
 
-            {/* Business Hours - Now properly placed with spacing */}
+            {/* Business Hours */}
             <GlassCard className="p-6 shadow-xl flex-shrink-0">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 rounded-lg bg-primary/10">
@@ -465,7 +475,7 @@ I would like to discuss the following:
           </motion.div>
         </div>
 
-        {/* Extra bottom padding to ensure no footer overlap */}
+        {/* Extra bottom padding */}
         <div className="h-20 lg:h-32" />
       </div>
     </div>
