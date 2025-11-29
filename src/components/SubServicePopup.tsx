@@ -284,7 +284,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 
                 <Select value={selectedStage} onValueChange={setSelectedStage}>
                   <SelectTrigger className="glass border-border h-14 text-base hover:border-primary/50 transition-all duration-300 focus:ring-2 focus:ring-primary/20">
-                    <SelectValue placeholder="Choose where you are in your project..." />
+                    <SelectValue placeholder="Choose current phase of project" />
                   </SelectTrigger>
                   <SelectContent>
                     {stages.map((stage, index) => (

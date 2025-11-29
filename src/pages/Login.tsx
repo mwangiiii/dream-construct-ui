@@ -1,14 +1,12 @@
-
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, User, ArrowRight } from "lucide-react";
+import { Mail, Lock, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
 import { signIn } from "@/lib/auth";
-
 
 const Login = () => {
   const { toast } = useToast();
@@ -19,20 +17,27 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
     try {
-      await signIn({
+      // Sign in and get complete user profile with role-based routing
+      const result = await signIn({
         email: formData.email,
         password: formData.password,
       });
+
+      // Show success toast with personalized message
       toast({
         title: "Login Successful",
-        description: "Welcome back to Dream Construct!",
+        description: `Welcome back, ${result.user.profile.full_name}!`,
       });
-      navigate("/");
+
+      // Navigate to role-specific dashboard
+      navigate(result.dashboardRoute);
     } catch (error: any) {
+      // Show error toast with specific error message
       toast({
         title: "Login Error",
-        description: error.message || "Failed to sign in.",
+        description: error.message || "Failed to sign in. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -58,9 +63,13 @@ const Login = () => {
 
       {/* Animated background pattern */}
       <div className="absolute inset-0 opacity-10 z-10">
-        <div className="absolute inset-0" style={{
-          backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\"60\" height=\"60\" viewBox=\"0 0 60 60\" xmlns=\"http://www.w3.org/2000/svg\"%3E%3Cg fill=\"none\" fill-rule=\"evenodd\"%3E%3Cg fill=\"%23ffffff\" fill-opacity=\"0.7\"%3E%3Cpath d=\"M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-        }} />
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'url("data:image/svg+xml,%3Csvg width=\\"60\\" height=\\"60\\" viewBox=\\"0 0 60 60\\" xmlns=\\"http://www.w3.org/2000/svg\\"%3E%3Cg fill=\\"none\\" fill-rule=\\"evenodd\\"%3E%3Cg fill=\\"%23ffffff\\" fill-opacity=\\"0.7\\"%3E%3Cpath d=\\"M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\\"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+          }}
+        />
       </div>
 
       {/* Content */}
@@ -68,6 +77,7 @@ const Login = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
           className="w-full max-w-md"
         >
           <div className="text-center mb-8">
@@ -83,7 +93,10 @@ const Login = () => {
           <GlassCard className="p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium flex items-center">
+                <label
+                  htmlFor="email"
+                  className="text-sm font-medium flex items-center"
+                >
                   <Mail className="w-4 h-4 mr-2" />
                   Email Address
                 </label>
@@ -91,15 +104,22 @@ const Login = () => {
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
                   placeholder="you@example.com"
                   required
+                  disabled={loading}
                   className="glass border-border"
+                  autoComplete="email"
                 />
               </div>
 
               <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium flex items-center">
+                <label
+                  htmlFor="password"
+                  className="text-sm font-medium flex items-center"
+                >
                   <Lock className="w-4 h-4 mr-2" />
                   Password
                 </label>
@@ -107,43 +127,80 @@ const Login = () => {
                   id="password"
                   type="password"
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
                   placeholder="••••••••"
                   required
+                  disabled={loading}
                   className="glass border-border"
+                  autoComplete="current-password"
                 />
               </div>
 
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <input type="checkbox" className="rounded border-border" />
+                  <input
+                    type="checkbox"
+                    className="rounded border-border"
+                    disabled={loading}
+                  />
                   <span className="text-muted-foreground">Remember me</span>
                 </label>
-                <a href="#" className="text-primary hover:text-primary/80">
+                <Link
+                  to="/forgot-password"
+                  className="text-primary hover:text-primary/80 transition-colors"
+                >
                   Forgot password?
-                </a>
+                </Link>
               </div>
 
               <Button
                 type="submit"
-                className="w-full bg-primary hover:bg-primary/90 text-background font-semibold py-6"
+                className="w-full bg-primary hover:bg-primary/90 text-background font-semibold py-6 transition-all"
                 disabled={loading}
               >
-                {loading ? "Signing in..." : "Sign In"}
-                <ArrowRight className="ml-2 w-4 h-4" />
+                {loading ? (
+                  <>
+                    <span className="animate-pulse">Signing in...</span>
+                  </>
+                ) : (
+                  <>
+                    Sign In
+                    <ArrowRight className="ml-2 w-4 h-4" />
+                  </>
+                )}
               </Button>
             </form>
 
             <div className="mt-6 text-center text-sm">
-              <span className="text-muted-foreground">Don't have an account? </span>
-              <Link to="/register" className="text-primary hover:text-primary/80 font-medium">
+              <span className="text-muted-foreground">
+                Don't have an account?{" "}
+              </span>
+              <Link
+                to="/register"
+                className="text-primary hover:text-primary/80 font-medium transition-colors"
+              >
                 Create one
               </Link>
             </div>
           </GlassCard>
 
           <p className="text-center text-sm text-muted-foreground mt-8">
-            By signing in, you agree to our Terms of Service and Privacy Policy
+            By signing in, you agree to our{" "}
+            <Link
+              to="/terms"
+              className="text-primary hover:text-primary/80 transition-colors"
+            >
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link
+              to="/privacy"
+              className="text-primary hover:text-primary/80 transition-colors"
+            >
+              Privacy Policy
+            </Link>
           </p>
         </motion.div>
       </div>
