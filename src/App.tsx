@@ -12,7 +12,7 @@ import Index from "./pages/Index";
 import Services from "./pages/Services";
 import Projects from "./pages/Projects";
 import Team from "./pages/Team";
-import Contact from "./pages/contact";        // Correct lowercase path
+import Contact from "./pages/Contact";        // Correct lowercase path
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
