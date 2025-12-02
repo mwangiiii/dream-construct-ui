@@ -1,8 +1,8 @@
 // src/pages/Login.tsx
 import { motion } from "framer-motion";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { Mail, Lock, ArrowRight, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -16,6 +16,8 @@ const Login = () => {
 
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 
   // Extract redirectTo from URL
   const getRedirectPath = () => {
@@ -29,6 +31,7 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFieldErrors({}); // Clear previous errors
 
     if (!formData.email.trim() || !formData.password) {
       toast({
@@ -42,18 +45,81 @@ const Login = () => {
     setLoading(true);
 
     try {
+      // Attempt login
       const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email.trim().toLowerCase(),
         password: formData.password,
       });
 
-      if (error) throw error;
+      if (error) {
+        // Determine which field is incorrect
+        if (error.code === "invalid_credentials" || error.message?.includes("Invalid login credentials")) {
+          // Check if email exists in auth.users by querying profiles table
+          // The profiles table should have the same email as auth.users
+          const { data: userExists, error: checkError } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", "(SELECT id FROM auth.users WHERE email = $1)")
+            .limit(1);
+
+          // Alternative: Try to check using RPC or direct auth table query
+          // Let's use a simpler approach - check profiles by email
+          const { count, error: countError } = await supabase
+            .from("profiles")
+            .select("*", { count: "exact", head: true })
+            .ilike("email", formData.email.trim());
+
+          if (countError) {
+            console.error("Error checking email:", countError);
+          }
+
+          // If count is 0 or null, email doesn't exist
+          if (count === 0) {
+            setFieldErrors({ email: "No account found with this email" });
+            toast({
+              title: "Email Not Found",
+              description: "No account exists with this email address. Please check your email or create an account.",
+              variant: "destructive",
+            });
+          } else {
+            // Email exists, so password is wrong
+            setFieldErrors({ password: "Incorrect password" });
+            toast({
+              title: "Incorrect Password",
+              description: "The password you entered is incorrect. Please try again or use 'Forgot Password' to reset it.",
+              variant: "destructive",
+            });
+          }
+        } else if (error.code === "email_not_confirmed" || error.message?.includes("Email not confirmed")) {
+          setFieldErrors({ email: "Email not confirmed" });
+          toast({
+            title: "Email Not Confirmed",
+            description: "Please check your email and confirm your account first.",
+            variant: "destructive",
+          });
+        } else if (error.code === "email_address_invalid" || error.message?.includes("invalid email") || error.code === "validation_failed") {
+          setFieldErrors({ email: "Invalid email format" });
+          toast({
+            title: "Invalid Email",
+            description: "Please enter a valid email address.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Login Failed",
+            description: error.message || "An unexpected error occurred. Please try again.",
+            variant: "destructive",
+          });
+        }
+        setLoading(false);
+        return;
+      }
 
       if (!data.user) {
         throw new Error("No user data returned");
       }
 
-      // Optional: Fetch profile to get full name (if needed)
+      // Fetch profile to get full name
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name")
@@ -72,19 +138,14 @@ const Login = () => {
       navigate(redirectPath, { replace: true });
 
     } catch (error: any) {
+      console.error("Login error:", error);
+
       let message = "An unexpected error occurred.";
 
-      if (error.message.includes("Invalid login credentials")) {
-        message = "Incorrect email or password. Please try again.";
-      } else if (error.message.includes("Email not confirmed")) {
-        message = "Please check your email and confirm your account first.";
-      } else if (error.message.includes("To signup, please provide your email")) {
-        message = "Please enter a valid email address.";
-      } else if (!navigator.onLine) {
+      if (!navigator.onLine) {
         message = "No internet connection. Please check your network.";
       } else {
-        console.error("Login error:", error);
-        message = "Login failed. Please try again later.";
+        message = error.message || "Login failed. Please try again later.";
       }
 
       toast({
@@ -159,14 +220,24 @@ const Login = () => {
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    setFieldErrors({ ...fieldErrors, email: undefined });
+                  }}
                   placeholder="you@company.com"
                   required
                   disabled={loading}
-                  className="glass border-border/80 focus:border-primary/50 h-12 text-base"
+                  className={`glass border-border/80 focus:border-primary/50 h-12 text-base ${
+                    fieldErrors.email ? "border-red-500 focus:border-red-500" : ""
+                  }`}
                   autoComplete="email"
                   autoFocus
                 />
+                {fieldErrors.email && (
+                  <p className="text-xs text-red-500 flex items-center mt-1">
+                    <span className="mr-1">⚠</span> {fieldErrors.email}
+                  </p>
+                )}
               </div>
 
               {/* Password Field */}
@@ -183,17 +254,41 @@ const Login = () => {
                     Forgot?
                   </Link>
                 </label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="••••••••"
-                  required
-                  disabled={loading}
-                  className="glass border-border/80 focus:border-primary/50 h-12 text-base"
-                  autoComplete="current-password"
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) => {
+                      setFormData({ ...formData, password: e.target.value });
+                      setFieldErrors({ ...fieldErrors, password: undefined });
+                    }}
+                    placeholder="••••••••"
+                    required
+                    disabled={loading}
+                    className={`glass border-border/80 focus:border-primary/50 h-12 text-base pr-10 ${
+                      fieldErrors.password ? "border-red-500 focus:border-red-500" : ""
+                    }`}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground hover:text-foreground transition-colors"
+                    disabled={loading}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {fieldErrors.password && (
+                  <p className="text-xs text-red-500 flex items-center mt-1">
+                    <span className="mr-1">⚠</span> {fieldErrors.password}
+                  </p>
+                )}
               </div>
 
               {/* Remember Me */}

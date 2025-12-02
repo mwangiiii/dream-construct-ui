@@ -15,11 +15,6 @@ const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Debug: Log currentUser and isLoading on every render
-  useEffect(() => {
-    console.log("[Navbar] currentUser:", currentUser);
-    console.log("[Navbar] isLoading:", isLoading);
-  }, [currentUser, isLoading]);
   // Handle scroll effect for glass background
   useEffect(() => {
     const handleScroll = () => {
@@ -29,39 +24,113 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // CRITICAL FIX: Properly detect auth state on mount + all events
+  // FIXED: Properly detect auth state on mount + all events
   useEffect(() => {
-    // Initial load: check for existing session
+    let mounted = true;
+    let isAuthenticating = false; // Prevent concurrent auth calls
+
+    // Initial load: check for existing session immediately
     const initAuth = async () => {
-      setIsLoading(true);
-      const user = await getCurrentUser();
-      setCurrentUser(user);
-      setIsLoading(false);
+      console.log("[Navbar] Starting auth initialization...");
+      isAuthenticating = true;
+      
+      try {
+        // First check if there's a session at all
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log("[Navbar] Session check:", !!session);
+        
+        if (!mounted) return;
+
+        if (session?.user) {
+          // User is logged in, fetch full profile
+          console.log("[Navbar] Fetching user profile...");
+          const user = await getCurrentUser();
+          console.log("[Navbar] User fetched:", !!user);
+          if (mounted) {
+            setCurrentUser(user);
+          }
+        } else {
+          // No session, user is logged out
+          console.log("[Navbar] No session found");
+          if (mounted) {
+            setCurrentUser(null);
+          }
+        }
+      } catch (error) {
+        console.error("[Navbar] Auth init error:", error);
+        if (mounted) {
+          setCurrentUser(null);
+        }
+      } finally {
+        if (mounted) {
+          console.log("[Navbar] Setting isLoading to false");
+          setIsLoading(false);
+          isAuthenticating = false;
+        }
+      }
     };
 
+    // Start initialization
     initAuth();
 
-    // Listen to ALL relevant Supabase auth events
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth event:", event); // Debug in dev
+    // Listen to auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("[Navbar] Auth event:", event, "Has session:", !!session);
 
-      if (
-        event === "INITIAL_SESSION" ||    // Page load / refresh
-        event === "SIGNED_IN" ||          // Fresh login
-        event === "TOKEN_REFRESHED"       // Auto-renewed session
-      ) {
-        const user = await getCurrentUser();
-        setCurrentUser(user);
-      } else if (event === "SIGNED_OUT") {
-        setCurrentUser(null);
+      if (!mounted) return;
+
+      // Ignore INITIAL_SESSION - we handle it in initAuth
+      if (event === "INITIAL_SESSION") {
+        console.log("[Navbar] Ignoring INITIAL_SESSION - already handled");
+        return;
       }
 
-      setIsLoading(false);
+      // Prevent concurrent authentication calls
+      if (isAuthenticating) {
+        console.log("[Navbar] Already authenticating, skipping this event");
+        return;
+      }
+
+      // Handle sign in / token refresh
+      if (session?.user && (
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "USER_UPDATED"
+      )) {
+        isAuthenticating = true;
+        try {
+          console.log("[Navbar] Fetching user on auth event:", event);
+          const user = await getCurrentUser();
+          console.log("[Navbar] User fetched on auth event:", !!user);
+          
+          if (mounted && user) {
+            setCurrentUser(user);
+            setIsLoading(false);
+          }
+        } catch (error) {
+          console.error("[Navbar] Error fetching user on auth change:", error);
+          if (mounted) {
+            setCurrentUser(null);
+            setIsLoading(false);
+          }
+        } finally {
+          isAuthenticating = false;
+        }
+      } 
+      // Handle sign out
+      else if (event === "SIGNED_OUT") {
+        console.log("[Navbar] Signing out");
+        if (mounted) {
+          setCurrentUser(null);
+          setIsLoading(false);
+        }
+      }
     });
 
-    // Cleanup listener
+    // Cleanup
     return () => {
-      listener.subscription.unsubscribe();
+      mounted = false;
+      authListener.subscription.unsubscribe();
     };
   }, []);
 
@@ -80,7 +149,7 @@ const Navbar = () => {
     if (currentUser) {
       const dashboardRoute = getDashboardRoute(currentUser.roles);
       navigate(dashboardRoute);
-      setIsMobileMenuOpen(false); // Close mobile menu
+      setIsMobileMenuOpen(false);
     }
   };
 
@@ -137,7 +206,10 @@ const Navbar = () => {
           {/* Desktop CTA Buttons */}
           <div className="hidden md:flex items-center space-x-4">
             {isLoading ? (
-              <div className="w-48 h-10 animate-pulse bg-muted rounded-lg" />
+              <div className="flex items-center space-x-4">
+                <div className="w-20 h-10 animate-pulse bg-muted/50 rounded-lg" />
+                <div className="w-28 h-10 animate-pulse bg-muted/50 rounded-lg" />
+              </div>
             ) : currentUser ? (
               <>
                 <Button

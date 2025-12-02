@@ -58,36 +58,43 @@ export interface AuthUser {
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   try {
+    console.log('[auth.ts] getCurrentUser called');
+    
     // Step 1: Get session first — this restores from localStorage reliably
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
     if (sessionError) {
-      console.error('Session error:', sessionError);
+      console.error('[auth.ts] Session error:', sessionError);
       return null;
     }
 
     if (!session?.user) {
+      console.log('[auth.ts] No session or user found');
       return null;
     }
+
+    console.log('[auth.ts] Session found, user ID:', session.user.id);
 
     // Step 2: Fetch full profile using valid user ID
     const userProfile = await getUserFullProfile(session.user.id);
 
     if (!userProfile) {
-      console.warn('Session exists but profile not found');
+      console.warn('[auth.ts] Session exists but profile not found');
       return null;
     }
 
+    console.log('[auth.ts] Full profile loaded:', userProfile.email);
+
     // Optional: Enforce active status
     if (!userProfile.status.is_active) {
-      console.warn('Inactive user attempted access:', userProfile.status.status_name);
+      console.warn('[auth.ts] Inactive user attempted access:', userProfile.status.status_name);
       await supabase.auth.signOut();
       return null;
     }
 
     return userProfile;
   } catch (error) {
-    console.error('getCurrentUser failed:', error);
+    console.error('[auth.ts] getCurrentUser failed:', error);
     return null;
   }
 }
@@ -97,11 +104,15 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
  */
 export async function getUserFullProfile(userId: string): Promise<AuthUser | null> {
   try {
+    console.log('[auth.ts] getUserFullProfile called for:', userId);
+    
     // Get email from auth (safe fallback)
     const { data: { user } } = await supabase.auth.getUser();
     const email = user?.email || '';
+    console.log('[auth.ts] User email:', email);
 
     // Fetch profile + status
+    console.log('[auth.ts] Fetching profile from database...');
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select(`
@@ -116,12 +127,20 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       .eq('id', userId)
       .single();
 
-    if (profileError || !profile) {
-      console.error('Profile fetch error:', profileError);
+    if (profileError) {
+      console.error('[auth.ts] Profile fetch error:', profileError);
       return null;
     }
 
+    if (!profile) {
+      console.error('[auth.ts] No profile data returned');
+      return null;
+    }
+
+    console.log('[auth.ts] Profile fetched:', profile.full_name);
+
     // Fetch roles
+    console.log('[auth.ts] Fetching user roles...');
     const { data: userRoles, error: rolesError } = await supabase
       .from('user_roles')
       .select(`
@@ -135,9 +154,11 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       .eq('user_id', userId);
 
     if (rolesError) {
-      console.error('Roles fetch error:', rolesError);
-      return null;
+      console.error('[auth.ts] Roles fetch error:', rolesError);
+      // Don't return null, continue with empty roles array
     }
+
+    console.log('[auth.ts] Roles fetched:', userRoles?.length || 0);
 
     const roles: UserRole[] = (userRoles || []).map((ur: any) => ({
       role_name: ur.role_name,
@@ -152,7 +173,7 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       description: null,
     };
 
-    return {
+    const authUser: AuthUser = {
       id: userId,
       email,
       profile: {
@@ -171,8 +192,11 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       roles,
       status,
     };
+
+    console.log('[auth.ts] AuthUser complete:', authUser);
+    return authUser;
   } catch (error) {
-    console.error('getUserFullProfile error:', error);
+    console.error('[auth.ts] getUserFullProfile error:', error);
     return null;
   }
 }
