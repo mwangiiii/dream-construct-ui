@@ -33,32 +33,32 @@ const Services = () => {
         {
           name: "Town Houses",
           description: "Modern townhouse developments featuring contemporary design, efficient layouts, and community-focused amenities. Perfect for families seeking urban convenience with suburban comfort.",
-          mediaSrc: "", // Add your CDN URL here
+          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703565/Town_house_iykd1h.jpg", // Add your CDN URL here
           mediaType: "image" as const,
         },
         {
           name: "Duplexes",
           description: "Sophisticated duplex constructions offering privacy and space efficiency. Ideal for multi-generational living or investment properties with separate entrances and utilities.",
-          mediaSrc: "",
+          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703563/Duplex_nx1iyn.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Stand-Alone Houses",
           description: "Custom-built standalone homes tailored to your unique vision. Complete creative freedom with architectural design, landscaping, and interior customization.",
-          mediaSrc: "",
+          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703561/Stand_Alone_Villa_Design_Proposal_-_Hazem_Gabr_c0fdrf.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Cooperative Houses",
           description: "Affordable cooperative housing solutions designed for community living. Shared amenities, sustainable design, and collaborative ownership models.",
-          mediaSrc: "",
-          mediaType: "image" as const,
+          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764703565/corporate-building-video_gtyqje.mp4",
+          mediaType: "video" as const,
         },
         {
           name: "Luxury Villas",
           description: "Premium villa construction with high-end finishes, smart home integration, and bespoke architectural elements. Exclusive living spaces designed for sophistication.",
-          mediaSrc: "",
-          mediaType: "image" as const,
+          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764703590/Villa_K_by_gnk_architects_c0blia.mp4",
+          mediaType: "video" as const,
         },
         {
           name: "Apartment Buildings",

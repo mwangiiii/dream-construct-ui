@@ -177,17 +177,22 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                     {subService.mediaType === "video" ? (
                       <div className="relative w-full">
                         <video
-                          src={subService.mediaSrc}
-                          controls
-                          className={`w-full h-auto max-h-[500px] object-cover rounded-xl transition-opacity duration-300 ${
-                            mediaLoaded ? "opacity-100" : "opacity-0"
-                          }`}
-                          onLoadedData={handleMediaLoad}
-                          onError={handleMediaError}
-                          poster="" // Optional: add a poster image URL
-                        >
-                          Your browser does not support the video tag.
-                        </video>
+                        key={subService.mediaSrc} // Forces re-mount when switching videos
+                        src={subService.mediaSrc}
+                        className={`w-full h-auto max-h-[520px] object-cover transition-opacity duration-500 ${
+                          mediaLoaded ? "opacity-100" : "opacity-0"
+                        }`}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline           // ← Critical for iOS/Android
+                        controls
+                        preload="auto"
+                        onLoadedData={handleMediaLoad}
+                        onError={handleMediaError}
+                      >
+                        Your browser does not support video playback.
+                      </video>
                         
                         {/* Video Badge */}
                         <motion.div
