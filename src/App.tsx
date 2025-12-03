@@ -4,11 +4,12 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { Volume2, VolumeX, Volume1, UserPlus } from "lucide-react";
+import { Volume2, VolumeX, Volume1, UserPlus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
 import { supabase } from "@/lib/supabaseClient";
+import { getCurrentUser } from "@/lib/auth";
 
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
@@ -26,33 +27,71 @@ import Reviews from "./pages/Reviews";
 // Admin Pages
 import Dashboard from "./pages/admin/Dashboard";
 import AdminUserCreate from "./pages/admin/UserCreate";
-import UserManagement from "./pages/admin/UserManagement";  // ← Added
+import UserManagement from "./pages/admin/UserManagement";
 import ReviewsManagement from "./pages/admin/ReviewsManagement";
+
+// Project Management Pages
+import ProjectManagementDashboard from "./components/dashboard/ProjectManagementDashboard";
+import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
 
 // 404
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-// Reusable Protected Route Component
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [session, setSession] = useState<any>(null);
+// Enhanced Protected Route Component with Role-Based Access
+const ProtectedRoute: React.FC<{ 
+  children: React.ReactNode;
+  requiredRoles?: string[];
+}> = ({ children, requiredRoles }) => {
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const location = useLocation();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    checkAuthorization();
   }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      // Check if user is authenticated
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        setIsAuthorized(false);
+        setLoading(false);
+        return;
+      }
+
+      // If no role requirement, just check authentication
+      if (!requiredRoles || requiredRoles.length === 0) {
+        setIsAuthorized(true);
+        setLoading(false);
+        return;
+      }
+
+      // Check user roles
+      const user = await getCurrentUser();
+      
+      if (!user) {
+        setIsAuthorized(false);
+        setLoading(false);
+        return;
+      }
+
+      // Check if user has any of the required roles
+      const hasRequiredRole = user.roles.some(role => 
+        requiredRoles.includes(role.role_name)
+      );
+
+      setIsAuthorized(hasRequiredRole);
+      setLoading(false);
+    } catch (error) {
+      console.error("Authorization check failed:", error);
+      setIsAuthorized(false);
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -62,7 +101,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     );
   }
 
-  if (!session) {
+  if (isAuthorized === false) {
     const redirectTo = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?redirectTo=${redirectTo}`} replace />;
   }
@@ -145,7 +184,7 @@ const App = () => {
 
         <BrowserRouter>
           <Routes>
-            {/* === Public Routes === */}
+            {/* === PUBLIC ROUTES === */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/services" element={<MainLayout><Services /></MainLayout>} />
             <Route path="/projects" element={<MainLayout><Projects /></MainLayout>} />
@@ -153,15 +192,15 @@ const App = () => {
             <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
             <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
 
-            {/* === Auth Routes === */}
+            {/* === AUTH ROUTES === */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
-            {/* === ADMIN ROUTES - FULLY PROTECTED === */}
+            {/* === ADMIN ROUTES === */}
             <Route
               path="/admin"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin"]}>
                   <AdminLayout><Dashboard /></AdminLayout>
                 </ProtectedRoute>
               }
@@ -171,13 +210,13 @@ const App = () => {
             <Route
               path="/admin/users"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin"]}>
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">
                         <div>
-                          <h1 className="text-4xl font-bold">Users Management</h1>
-                          <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p>
+                          {/* <h1 className="text-4xl font-bold">Users Management</h1> */}
+                          {/* <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p> */}
                         </div>
                         <Link to="/admin/users/create">
                           <Button className="bg-primary hover:bg-primary/90">
@@ -186,7 +225,7 @@ const App = () => {
                           </Button>
                         </Link>
                       </div>
-                      <UserManagement /> {/* ← Your beautiful dashboard here */}
+                      <UserManagement />
                     </div>
                   </AdminLayout>
                 </ProtectedRoute>
@@ -197,34 +236,75 @@ const App = () => {
             <Route
               path="/admin/users/create"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin"]}>
                   <AdminLayout><AdminUserCreate /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
+            {/* === PROJECT MANAGEMENT ROUTES === */}
+            
+            {/* PROJECT MANAGEMENT DASHBOARD — Accessible by admin, manager, project_manager */}
             <Route
               path="/admin/projects"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager"]}>
+                  <AdminLayout>
+                    <ProjectManagementDashboard />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* PROJECT DETAIL PAGE — Accessible by admin, manager, project_manager, client */}
+            <Route
+              path="/admin/projects/:id"
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager", "client"]}>
+                  <AdminLayout>
+                    <ProjectDetailPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* CLIENT PROJECT DASHBOARD — Separate view for clients */}
+            <Route
+              path="/client/projects"
+              element={
+                <ProtectedRoute requiredRoles={["client"]}>
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">
                         <div>
-                          <h1 className="text-4xl font-bold">Projects Management</h1>
-                          <p className="text-muted-foreground mt-2">Oversee all construction projects</p>
+                          <h1 className="text-4xl font-bold">My Projects</h1>
+                          <p className="text-muted-foreground mt-2">View your construction projects</p>
                         </div>
                       </div>
+                      <ProjectManagementDashboard />
                     </div>
                   </AdminLayout>
                 </ProtectedRoute>
               }
             />
 
+            {/* CLIENT PROJECT DETAIL */}
+            <Route
+              path="/client/projects/:id"
+              element={
+                <ProtectedRoute requiredRoles={["client"]}>
+                  <AdminLayout>
+                    <ProjectDetailPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* CONTENT MANAGEMENT */}
             <Route
               path="/admin/content"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">
@@ -239,19 +319,21 @@ const App = () => {
               }
             />
 
+            {/* REVIEWS MANAGEMENT */}
             <Route
               path="/admin/reviews"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <AdminLayout><ReviewsManagement /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
+            {/* SETTINGS */}
             <Route
               path="/admin/settings"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRoles={["admin"]}>
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">

@@ -230,66 +230,68 @@ export default function CompletedProjects() {
                   viewport={{ once: true, margin: "-100px" }}
                   transition={{ delay: idx * 0.1, duration: 0.6 }}
                 >
-                  <GlassCard className="p-8 h-full flex flex-col group hover:border-primary/30 transition-all duration-300">
-                    <div className="flex justify-between items-start mb-6">
-                      <div className="flex-1">
-                        <h3 className="text-2xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
-                          {project.title}
-                        </h3>
-                        <p className="text-sm text-muted-foreground font-mono">
-                          {project.project_number}
-                        </p>
-                      </div>
-                      <Badge className="bg-primary/10 text-primary border-primary/30 font-medium tracking-wide px-3 py-1 rounded-full">
-                        Completed
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-4 text-sm flex-grow">
-                      <div className="flex items-start gap-2">
-                        <span className="text-muted-foreground min-w-[100px]">Client:</span>
-                        <span className="font-medium text-foreground">
-                          {project.client_id?.company_name || "Private Client"}
-                        </span>
-                      </div>
-
-                      <div className="flex items-start gap-2">
-                        <span className="text-muted-foreground min-w-[100px]">Completed:</span>
-                        <span className="font-medium text-foreground">
-                          {project.actual_completion_date
-                            ? new Date(project.actual_completion_date).toLocaleDateString("en-US", {
-                                month: "long",
-                                year: "numeric",
-                                day: "numeric",
-                              })
-                            : "Recently"}
-                        </span>
-                      </div>
-
-                      {project.budget_numeric && (
-                        <div className="pt-4 border-t border-border/50">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-muted-foreground text-xs">Final Budget</span>
-                          </div>
-                          <div className="mt-2">
-                            <span className="text-2xl font-bold text-primary">
-                              {project.currency} {project.budget_numeric.toLocaleString()}
-                            </span>
-                          </div>
+                  <a href={`/admin/projects/${project.id}`} style={{ textDecoration: 'none' }}>
+                    <GlassCard className="p-8 h-full flex flex-col group hover:border-primary/30 transition-all duration-300 cursor-pointer">
+                      <div className="flex justify-between items-start mb-6">
+                        <div className="flex-1">
+                          <h3 className="text-2xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
+                            {project.title}
+                          </h3>
+                          <p className="text-sm text-muted-foreground font-mono">
+                            {project.project_number}
+                          </p>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="mt-6 pt-6 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-primary flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4" />
-                          Successfully Delivered
-                        </span>
-                        <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                        <Badge className="bg-primary/10 text-primary border-primary/30 font-medium tracking-wide px-3 py-1 rounded-full">
+                          Completed
+                        </Badge>
                       </div>
-                    </div>
-                  </GlassCard>
+
+                      <div className="space-y-4 text-sm flex-grow">
+                        <div className="flex items-start gap-2">
+                          <span className="text-muted-foreground min-w-[100px]">Client:</span>
+                          <span className="font-medium text-foreground">
+                            {project.client_id?.company_name || "Private Client"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-start gap-2">
+                          <span className="text-muted-foreground min-w-[100px]">Completed:</span>
+                          <span className="font-medium text-foreground">
+                            {project.actual_completion_date
+                              ? new Date(project.actual_completion_date).toLocaleDateString("en-US", {
+                                  month: "long",
+                                  year: "numeric",
+                                  day: "numeric",
+                                })
+                              : "Recently"}
+                          </span>
+                        </div>
+
+                        {project.budget_numeric && (
+                          <div className="pt-4 border-t border-border/50">
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-muted-foreground text-xs">Final Budget</span>
+                            </div>
+                            <div className="mt-2">
+                              <span className="text-2xl font-bold text-primary">
+                                {project.currency} {project.budget_numeric.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-6 pt-6 border-t border-border/50">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-primary flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4" />
+                            Successfully Delivered
+                          </span>
+                          <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                        </div>
+                      </div>
+                    </GlassCard>
+                  </a>
                 </motion.div>
               ))}
             </div>
