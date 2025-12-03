@@ -1,5 +1,12 @@
 // src/components/dashboard/ProjectManagementDashboard.tsx
 import { useState, useEffect, useMemo } from "react";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem
+} from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
@@ -282,7 +289,7 @@ export default function ProjectManagementDashboard() {
           transition={{ delay: 0.1 }}
           className="flex flex-col sm:flex-row gap-4"
         >
-          <div className="flex-1 relative">
+          <div className="flex-[2] min-w-0 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
             <input
               type="text"
@@ -292,20 +299,23 @@ export default function ProjectManagementDashboard() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <select
-            className="px-4 py-3 glass border border-white/10 rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-          >
-            <option value="all">All Status</option>
-            <option value="planning">Planning</option>
-            <option value="pre_construction">Pre-Construction</option>
-            <option value="in_construction">In Construction</option>
-            <option value="inspections">Inspections & Snagging</option>
-            <option value="completed">Completed</option>
-            <option value="on_hold">On Hold</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+          <div className="flex-[1] min-w-[180px] max-w-[260px]">
+            <Select value={statusFilter} onValueChange={v => setStatusFilter(v as any)}>
+              <SelectTrigger className="w-full px-4 py-3 glass border border-white/10 rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all bg-gradient-to-br from-background/90 via-background/95 to-background/80 text-foreground font-semibold shadow-lg">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent className="bg-gradient-to-br from-background/95 via-background/98 to-background/90 text-foreground font-semibold shadow-xl border border-white/10">
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="planning">Planning</SelectItem>
+                <SelectItem value="pre_construction">Pre-Construction</SelectItem>
+                <SelectItem value="in_construction">In Construction</SelectItem>
+                <SelectItem value="inspections">Inspections & Snagging</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="on_hold">On Hold</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={() => setViewMode("grid")}
