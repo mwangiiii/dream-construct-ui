@@ -1,7 +1,20 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Facebook, Twitter, Linkedin, Instagram, Mail, Phone, MapPin } from "lucide-react";
 
 const Footer = () => {
+  const navigate = useNavigate();
+
+  const handleServiceClick = (serviceType: string) => {
+    navigate('/services', { state: { scrollToService: serviceType } });
+    // Scroll to top first, then the component will handle scrolling to the section
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const footerLinks = {
     company: [
       { name: "About Us", path: "/team" },
@@ -10,10 +23,10 @@ const Footer = () => {
       { name: "Contact", path: "/contact" },
     ],
     services: [
-      { name: "Residential", path: "/services" },
-      { name: "Commercial", path: "/services" },
-      { name: "Industrial", path: "/services" },
-      { name: "Renovations", path: "/services" },
+      { name: "Residential", type: "Residential Construction" },
+      { name: "Commercial", type: "Commercial Projects" },
+      { name: "Industrial", type: "Industrial Construction" },
+      { name: "Renovations", type: "Renovations & Remodeling" },
     ],
     legal: [
       { name: "Privacy Policy", path: "#" },
@@ -35,7 +48,10 @@ const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12">
           {/* Brand */}
           <div className="lg:col-span-2">
-            <Link to="/" className="inline-flex items-center space-x-2 mb-4">
+            <button 
+              onClick={() => handleNavClick("/")} 
+              className="inline-flex items-center space-x-2 mb-4 hover:opacity-80 transition-opacity"
+            >
               <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center">
                 <span className="text-background font-bold text-xl">DC</span>
               </div>
@@ -43,7 +59,7 @@ const Footer = () => {
                 <span className="font-bold text-lg leading-tight">Dream Construct</span>
                 <span className="text-xs text-muted-foreground">Building your Dreams</span>
               </div>
-            </Link>
+            </button>
             <p className="text-muted-foreground text-sm mb-6 max-w-md">
               Excellence in construction. We bring your vision to life with innovative
               solutions, premium quality, and unwavering commitment to perfection.
@@ -68,12 +84,12 @@ const Footer = () => {
             <ul className="space-y-3">
               {footerLinks.company.map((link) => (
                 <li key={link.name}>
-                  <Link
-                    to={link.path}
-                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  <button
+                    onClick={() => handleNavClick(link.path)}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors text-left"
                   >
                     {link.name}
-                  </Link>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -85,12 +101,12 @@ const Footer = () => {
             <ul className="space-y-3">
               {footerLinks.services.map((link) => (
                 <li key={link.name}>
-                  <Link
-                    to={link.path}
-                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  <button
+                    onClick={() => handleServiceClick(link.type)}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors text-left"
                   >
                     {link.name}
-                  </Link>
+                  </button>
                 </li>
               ))}
             </ul>
