@@ -95,7 +95,9 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
               <Link to="/" className="text-sm text-muted-foreground hover:text-primary">
                 View Site
               </Link>
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/30 to-accent/30" />
+              {/* <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center"> */}
+              <span className="text-background font-bold text-xl">DC</span>
+            {/* </div> */}
             </div>
           </div>
         </header>
