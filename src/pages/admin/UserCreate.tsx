@@ -145,22 +145,22 @@ const UserCreate: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
       </div>
 
-      <div className="container mx-auto px-6 py-16 max-w-5xl">
+      <div className="container mx-auto px-2 sm:px-4 md:px-6 py-10 md:py-16 max-w-2xl md:max-w-3xl lg:max-w-5xl">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="text-center mb-16"
+          className="text-center mb-10 md:mb-16"
         >
-          <h1 className="text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight">
             Create
             <br />
             <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
               New User
             </span>
           </h1>
-          <p className="mt-8 text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="mt-4 sm:mt-8 text-base sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
             Add team members with secure, role-based access control
           </p>
         </motion.div>
@@ -171,12 +171,12 @@ const UserCreate: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.8 }}
         >
-          <GlassCard className="p-10 md:p-16 backdrop-blur-xl">
-            <form onSubmit={handleSubmit} className="space-y-10">
+          <GlassCard className="p-4 sm:p-8 md:p-10 lg:p-16 backdrop-blur-xl">
+            <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-8 md:space-y-10">
 
               {/* Full Name */}
-              <div className="space-y-3">
-                <label className="text-lg font-medium text-foreground">Full Name <span className="text-primary">*</span></label>
+              <div className="space-y-2 sm:space-y-3">
+                <label className="text-base sm:text-lg font-medium text-foreground">Full Name <span className="text-primary">*</span></label>
                 <input
                   type="text"
                   name="fullName"
@@ -184,13 +184,13 @@ const UserCreate: React.FC = () => {
                   onChange={handleChange}
                   required
                   placeholder="John Doe"
-                  className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
               </div>
 
               {/* Email */}
-              <div className="space-y-3">
-                <label className="text-lg font-medium text-foreground">Email Address <span className="text-primary">*</span></label>
+              <div className="space-y-2 sm:space-y-3">
+                <label className="text-base sm:text-lg font-medium text-foreground">Email Address <span className="text-primary">*</span></label>
                 <input
                   type="email"
                   name="email"
@@ -198,13 +198,13 @@ const UserCreate: React.FC = () => {
                   onChange={handleChange}
                   required
                   placeholder="john@company.com"
-                  className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
               </div>
 
               {/* Password */}
-              <div className="space-y-3">
-                <label className="text-lg font-medium text-foreground">Password <span className="text-primary">*</span></label>
+              <div className="space-y-2 sm:space-y-3">
+                <label className="text-base sm:text-lg font-medium text-foreground">Password <span className="text-primary">*</span></label>
                 <input
                   type="password"
                   name="password"
@@ -213,59 +213,59 @@ const UserCreate: React.FC = () => {
                   required
                   minLength={6}
                   placeholder="••••••••"
-                  className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
-                <p className="text-sm text-muted-foreground">Minimum 6 characters required</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">Minimum 6 characters required</p>
               </div>
 
               {/* Phone & Company */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="space-y-3">
-                  <label className="text-lg font-medium text-foreground">Phone Number</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
+                <div className="space-y-2 sm:space-y-3">
+                  <label className="text-base sm:text-lg font-medium text-foreground">Phone Number</label>
                   <input
                     type="tel"
                     name="phone"
                     value={form.phone}
                     onChange={handleChange}
                     placeholder="+254 700 000 000"
-                    className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                    className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                   />
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-lg font-medium text-foreground">Company Name</label>
+                <div className="space-y-2 sm:space-y-3">
+                  <label className="text-base sm:text-lg font-medium text-foreground">Company Name</label>
                   <input
                     type="text"
                     name="companyName"
                     value={form.companyName}
                     onChange={handleChange}
                     placeholder="Dream Construct Ltd"
-                    className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                    className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                   />
                 </div>
               </div>
 
               {/* Job Title */}
-              <div className="space-y-3">
-                <label className="text-lg font-medium text-foreground">Job Title</label>
+              <div className="space-y-2 sm:space-y-3">
+                <label className="text-base sm:text-lg font-medium text-foreground">Job Title</label>
                 <input
                   type="text"
                   name="jobTitle"
                   value={form.jobTitle}
                   onChange={handleChange}
                   placeholder="Site Engineer"
-                  className="w-full px-6 py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-lg"
+                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
               </div>
 
               {/* Role Selection – Apple-style cards */}
-              <div className="space-y-4">
-                <label className="text-lg font-medium text-foreground">User Role <span className="text-primary">*</span></label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2 sm:space-y-4">
+                <label className="text-base sm:text-lg font-medium text-foreground">User Role <span className="text-primary">*</span></label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 sm:gap-4">
                   {roleOptions.map((option) => (
                     <label
                       key={option.value}
-                      className={`relative block p-6 rounded-2xl border-2 cursor-pointer transition-all duration-300 backdrop-blur-sm ${
+                      className={`relative block p-4 sm:p-6 rounded-2xl border-2 cursor-pointer transition-all duration-300 backdrop-blur-sm ${
                         form.role === option.value
                           ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
                           : 'border-border bg-background/30 hover:border-primary/30'
@@ -281,13 +281,13 @@ const UserCreate: React.FC = () => {
                       />
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className={`text-xl font-semibold ${form.role === option.value ? 'text-primary' : 'text-foreground'}`}>
+                          <div className={`text-base sm:text-xl font-semibold ${form.role === option.value ? 'text-primary' : 'text-foreground'}`}>
                             {option.label}
                           </div>
-                          <div className="text-sm text-muted-foreground mt-1">{option.description}</div>
+                          <div className="text-xs sm:text-sm text-muted-foreground mt-1">{option.description}</div>
                         </div>
                         {form.role === option.value && (
-                          <CheckCircle2 className="w-7 h-7 text-primary" />
+                          <CheckCircle2 className="w-6 sm:w-7 h-6 sm:h-7 text-primary" />
                         )}
                       </div>
                     </label>
@@ -300,10 +300,10 @@ const UserCreate: React.FC = () => {
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-5 bg-destructive/10 border border-destructive/20 rounded-2xl flex items-center gap-4 text-destructive"
+                  className="p-4 sm:p-5 bg-destructive/10 border border-destructive/20 rounded-2xl flex items-center gap-3 sm:gap-4 text-destructive"
                 >
-                  <AlertCircle className="w-6 h-6 flex-shrink-0" />
-                  <p className="text-lg">{error}</p>
+                  <AlertCircle className="w-5 sm:w-6 h-5 sm:h-6 flex-shrink-0" />
+                  <p className="text-base sm:text-lg">{error}</p>
                 </motion.div>
               )}
 
@@ -311,10 +311,10 @@ const UserCreate: React.FC = () => {
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-5 bg-green-500/10 border border-green-500/30 rounded-2xl flex items-center gap-4 text-green-400"
+                  className="p-4 sm:p-5 bg-green-500/10 border border-green-500/30 rounded-2xl flex items-center gap-3 sm:gap-4 text-green-400"
                 >
-                  <CheckCircle2 className="w-6 h-6 flex-shrink-0" />
-                  <p className="text-lg">User created successfully and activated!</p>
+                  <CheckCircle2 className="w-5 sm:w-6 h-5 sm:h-6 flex-shrink-0" />
+                  <p className="text-base sm:text-lg">User created successfully and activated!</p>
                 </motion.div>
               )}
 
@@ -323,16 +323,16 @@ const UserCreate: React.FC = () => {
                 type="submit"
                 disabled={loading}
                 size="lg"
-                className="w-full h-16 text-xl font-semibold rounded-2xl bg-primary hover:bg-primary/90 text-background shadow-xl hover:shadow-primary/30 transition-all duration-300"
+                className="w-full h-14 sm:h-16 text-lg sm:text-xl font-semibold rounded-2xl bg-primary hover:bg-primary/90 text-background shadow-xl hover:shadow-primary/30 transition-all duration-300"
               >
                 {loading ? (
-                  <span className="flex items-center justify-center gap-3">
-                    <div className="w-6 h-6 border-3 border-background/30 border-t-background rounded-full animate-spin" />
+                  <span className="flex items-center justify-center gap-2 sm:gap-3">
+                    <div className="w-5 sm:w-6 h-5 sm:h-6 border-2 sm:border-3 border-background/30 border-t-background rounded-full animate-spin" />
                     Creating User...
                   </span>
                 ) : (
-                  <span className="flex items-center justify-center gap-3">
-                    <UserPlus className="w-6 h-6" />
+                  <span className="flex items-center justify-center gap-2 sm:gap-3">
+                    <UserPlus className="w-5 sm:w-6 h-5 sm:h-6" />
                     Create User Account
                   </span>
                 )}

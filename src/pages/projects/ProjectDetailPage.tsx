@@ -16,7 +16,6 @@ import {
   AlertCircle,
   CheckCircle2,
   Edit,
-  MoreVertical,
   Upload,
   MessageSquare,
   Gavel,
@@ -26,9 +25,7 @@ import {
   Wrench,
   Home,
   Download,
-  Trash2,
   Plus,
-  X,
 } from "lucide-react";
 
 type Tab =
@@ -97,7 +94,7 @@ interface Document {
 
 // Glass Card Component matching Index.tsx style
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
+  <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
     {children}
   </div>
 );
@@ -166,8 +163,8 @@ export default function ProjectDetailPage() {
         .from("projects")
         .select(`
           *,
-          client:profiles!client_id(id, full_name, company_id, companies(name)),
-          manager:profiles!manager_id(id, full_name)
+          client:profiles!projects_client_id_fkey(id, full_name, company_id, companies(name)),
+          manager:profiles!projects_manager_id_fkey(id, full_name)
         `)
         .eq("id", id)
         .single();
@@ -182,7 +179,7 @@ export default function ProjectDetailPage() {
       console.log("[ProjectDetail] Project loaded:", proj.project_number);
       setProject(proj);
 
-      // Parallel fetch all related data
+      // Parallel fetch all related data with FIXED foreign key syntax
       const [
         { data: m },
         { data: t },
@@ -198,26 +195,26 @@ export default function ProjectDetailPage() {
           .order("sort_order"),
         supabase
           .from("tasks")
-          .select("*, assigned_user:profiles!assigned_to(full_name)")
+          .select("*, assigned_user:profiles!tasks_assigned_to_fkey(full_name)")
           .eq("project_id", id)
           .order("created_at", { ascending: false }),
         supabase
           .from("project_updates")
-          .select("*, posted_by_user:profiles!posted_by(full_name)")
+          .select("*, posted_by_user:profiles!project_updates_posted_by_fkey(full_name)")
           .eq("project_id", id)
           .order("posted_at", { ascending: false }),
         supabase
           .from("project_approvals")
           .select(`
             *,
-            requested_by_user:profiles!requested_by(full_name),
-            approved_by_user:profiles!approved_by(full_name)
+            requested_by_user:profiles!project_approvals_requested_by_fkey(full_name),
+            approved_by_user:profiles!project_approvals_approved_by_fkey(full_name)
           `)
           .eq("project_id", id)
           .order("requested_at", { ascending: false }),
         supabase
           .from("documents")
-          .select("*, uploaded_by_user:profiles!uploaded_by(full_name)")
+          .select("*, uploaded_by_user:profiles!documents_uploaded_by_fkey(full_name)")
           .eq("project_id", id)
           .order("uploaded_at", { ascending: false }),
         supabase
@@ -270,8 +267,8 @@ export default function ProjectDetailPage() {
           animate={{ opacity: 1, scale: 1 }}
           className="text-center"
         >
-          <div className="w-20 h-20 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-6"></div>
-          <div className="text-2xl font-semibold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4 sm:mb-6"></div>
+          <div className="text-xl sm:text-2xl font-semibold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             Loading project...
           </div>
         </motion.div>
@@ -281,17 +278,17 @@ export default function ProjectDetailPage() {
 
   if (!project) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center"
         >
-          <AlertCircle className="w-20 h-20 text-red-500 mx-auto mb-6" />
-          <div className="text-3xl font-bold mb-4">Project Not Found</div>
+          <AlertCircle className="w-16 h-16 sm:w-20 sm:h-20 text-red-500 mx-auto mb-4 sm:mb-6" />
+          <div className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">Project Not Found</div>
           <button
             onClick={() => navigate("/projects")}
-            className="px-6 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
+            className="px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base"
           >
             Return to Projects
           </button>
@@ -311,40 +308,40 @@ export default function ProjectDetailPage() {
           }} />
         </div>
         
-        <div className="container mx-auto px-6 py-12 relative z-10">
+        <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12 relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 mb-6 sm:mb-8">
+              <div className="flex items-start gap-3 sm:gap-4 w-full sm:w-auto">
                 <button
                   onClick={() => navigate(-1)}
-                  className="p-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
+                  className="p-2 sm:p-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all flex-shrink-0"
                 >
-                  <ArrowLeft className="w-6 h-6" />
+                  <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
-                <div>
-                  <div className="flex items-center gap-4 mb-3">
-                    <h1 className="text-4xl md:text-5xl font-bold">{project.title}</h1>
-                    <span className="px-4 py-2 backdrop-blur-xl bg-primary/20 border border-primary/30 text-primary text-sm font-semibold rounded-xl">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-2 sm:mb-3">
+                    <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold truncate">{project.title}</h1>
+                    <span className="px-3 py-1 sm:px-4 sm:py-2 backdrop-blur-xl bg-primary/20 border border-primary/30 text-primary text-xs sm:text-sm font-semibold rounded-xl whitespace-nowrap flex-shrink-0">
                       {project.project_number}
                     </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-6 text-muted-foreground">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-3 sm:gap-6 text-muted-foreground">
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-5 h-5 text-primary" />
-                      <span className="text-base">{project.site_address || "Site address not set"}</span>
+                      <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
+                      <span className="text-xs sm:text-base truncate">{project.site_address || "Site address not set"}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <User className="w-5 h-5 text-primary" />
-                      <span className="text-base">Client: {project.client?.companies?.name || project.client?.full_name || "Unknown"}</span>
+                      <User className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
+                      <span className="text-xs sm:text-base truncate">Client: {project.client?.companies?.name || project.client?.full_name || "Unknown"}</span>
                     </div>
                     {project.manager && (
                       <div className="flex items-center gap-2">
-                        <Building2 className="w-5 h-5 text-primary" />
-                        <span className="text-base">PM: {project.manager.full_name}</span>
+                        <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
+                        <span className="text-xs sm:text-base truncate">PM: {project.manager.full_name}</span>
                       </div>
                     )}
                   </div>
@@ -354,9 +351,9 @@ export default function ProjectDetailPage() {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
+                  className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base w-full sm:w-auto justify-center"
                 >
-                  <Edit className="w-5 h-5" />
+                  <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
                   Edit Project
                 </motion.button>
               )}
@@ -364,8 +361,8 @@ export default function ProjectDetailPage() {
           </motion.div>
 
           {/* Tab Navigation */}
-          <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-2">
-            <div className="flex overflow-x-auto gap-2">
+          <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-1.5 sm:p-2">
+            <div className="flex overflow-x-auto gap-1 scrollbar-hide">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
@@ -374,14 +371,14 @@ export default function ProjectDetailPage() {
                     onClick={() => setActiveTab(tab.id)}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all whitespace-nowrap ${
+                    className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-6 py-2 sm:py-3 text-xs sm:text-sm font-semibold rounded-xl transition-all whitespace-nowrap flex-shrink-0 ${
                       activeTab === tab.id
                         ? "bg-primary text-background shadow-lg"
                         : "hover:bg-white/10"
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
+                    <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden xs:inline">{tab.label}</span>
                   </motion.button>
                 );
               })}
@@ -391,7 +388,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Tab Content */}
-      <div className="container mx-auto px-6 py-12">
+      <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -401,22 +398,22 @@ export default function ProjectDetailPage() {
             transition={{ duration: 0.3 }}
           >
             {activeTab === "overview" && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-8">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
+                <div className="lg:col-span-2 space-y-4 sm:space-y-8">
                   <GlassCard>
-                    <h3 className="text-2xl font-bold mb-6">Project Progress</h3>
+                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Project Progress</h3>
                     <div className="space-y-4">
                       <div>
-                        <div className="flex justify-between text-base mb-3">
+                        <div className="flex justify-between text-sm sm:text-base mb-3">
                           <span className="font-medium">Overall Progress</span>
-                          <span className="font-bold text-primary text-xl">{project.progress_percent}%</span>
+                          <span className="font-bold text-primary text-lg sm:text-xl">{project.progress_percent}%</span>
                         </div>
-                        <div className="w-full bg-white/10 rounded-full h-4 overflow-hidden backdrop-blur-xl border border-white/20">
+                        <div className="w-full bg-white/10 rounded-full h-3 sm:h-4 overflow-hidden backdrop-blur-xl border border-white/20">
                           <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${project.progress_percent}%` }}
                             transition={{ duration: 1, ease: "easeOut" }}
-                            className="bg-gradient-to-r from-primary to-accent h-4 rounded-full"
+                            className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
                           />
                         </div>
                       </div>
@@ -424,17 +421,17 @@ export default function ProjectDetailPage() {
                   </GlassCard>
 
                   <GlassCard>
-                    <h3 className="text-2xl font-bold mb-6">Key Dates</h3>
-                    <div className="grid grid-cols-2 gap-6">
+                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Key Dates</h3>
+                    <div className="grid grid-cols-2 gap-4 sm:gap-6">
                       <div>
-                        <p className="text-sm text-muted-foreground mb-2">Start Date</p>
-                        <p className="text-lg font-semibold">
+                        <p className="text-xs sm:text-sm text-muted-foreground mb-2">Start Date</p>
+                        <p className="text-base sm:text-lg font-semibold">
                           {project.start_date ? format(new Date(project.start_date), "dd MMM yyyy") : "Not set"}
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground mb-2">Expected Completion</p>
-                        <p className="text-lg font-semibold">
+                        <p className="text-xs sm:text-sm text-muted-foreground mb-2">Expected Completion</p>
+                        <p className="text-base sm:text-lg font-semibold">
                           {project.expected_completion_date
                             ? format(new Date(project.expected_completion_date), "dd MMM yyyy")
                             : "Not set"}
@@ -444,25 +441,25 @@ export default function ProjectDetailPage() {
                   </GlassCard>
 
                   <GlassCard>
-                    <h3 className="text-2xl font-bold mb-6">Project Description</h3>
-                    <p className="text-base leading-relaxed text-muted-foreground">
+                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Project Description</h3>
+                    <p className="text-sm sm:text-base leading-relaxed text-muted-foreground">
                       {project.description || "No description provided"}
                     </p>
                   </GlassCard>
                 </div>
 
-                <div className="space-y-8">
+                <div className="space-y-4 sm:space-y-8">
                   <GlassCard>
-                    <h3 className="text-xl font-bold mb-4">Budget Summary</h3>
-                    <div className="text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-2">
+                    <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
+                    <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 sm:mb-2 break-all">
                       {(project.budget_numeric || 0).toLocaleString()} {project.currency || "KES"}
                     </div>
-                    <p className="text-sm text-muted-foreground">Total Project Budget</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Total Project Budget</p>
                   </GlassCard>
 
                   <GlassCard>
-                    <h3 className="text-xl font-bold mb-6">Quick Stats</h3>
-                    <div className="space-y-5">
+                    <h3 className="text-base sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">Quick Stats</h3>
+                    <div className="space-y-4 sm:space-y-5">
                       {[
                         { label: "Milestones", value: milestones.length, icon: Calendar },
                         { label: "Tasks", value: tasks.length, icon: CheckCircle2 },
@@ -472,11 +469,11 @@ export default function ProjectDetailPage() {
                         const Icon = stat.icon;
                         return (
                           <div key={stat.label} className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <Icon className="w-5 h-5 text-primary" />
-                              <span className="text-base">{stat.label}</span>
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                              <span className="text-xs sm:text-sm md:text-base">{stat.label}</span>
                             </div>
-                            <span className="text-xl font-bold text-primary">{stat.value}</span>
+                            <span className="text-base sm:text-lg md:text-xl font-bold text-primary">{stat.value}</span>
                           </div>
                         );
                       })}
@@ -487,25 +484,25 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "milestones" && (
-              <div className="space-y-8">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-3xl md:text-4xl font-bold">Project Milestones</h3>
+              <div className="space-y-4 sm:space-y-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Project Milestones</h3>
                   {canEdit && (
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
                     >
-                      <Plus className="w-5 h-5" /> Add Milestone
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Add Milestone
                     </motion.button>
                   )}
                 </div>
                 {milestones.length === 0 ? (
-                  <GlassCard className="text-center py-16">
-                    <Calendar className="w-20 h-20 text-primary/30 mx-auto mb-6" />
-                    <p className="text-xl text-muted-foreground mb-6">No milestones yet</p>
+                  <GlassCard className="text-center py-12 sm:py-16">
+                    <Calendar className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
+                    <p className="text-base sm:text-xl text-muted-foreground mb-4 sm:mb-6">No milestones yet</p>
                     {canEdit && (
-                      <button className="text-primary hover:text-primary/80 font-semibold text-lg">
+                      <button className="text-primary hover:text-primary/80 font-semibold text-base sm:text-lg">
                         Create your first milestone
                       </button>
                     )}
@@ -519,10 +516,10 @@ export default function ProjectDetailPage() {
                       transition={{ delay: idx * 0.1 }}
                     >
                       <GlassCard>
-                        <div className="flex items-center justify-between mb-4">
-                          <h4 className="text-2xl font-bold">{m.title}</h4>
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
+                          <h4 className="text-base sm:text-lg md:text-2xl font-bold">{m.title}</h4>
                           <span
-                            className={`px-4 py-2 rounded-xl text-sm font-semibold backdrop-blur-xl border ${
+                            className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap ${
                               m.status === "completed"
                                 ? "bg-green-500/20 text-green-300 border-green-500/30"
                                 : m.status === "in_progress"
@@ -533,10 +530,10 @@ export default function ProjectDetailPage() {
                             {m.status.replace("_", " ")}
                           </span>
                         </div>
-                        {m.description && <p className="text-base text-muted-foreground mb-6">{m.description}</p>}
-                        <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                        {m.description && <p className="text-xs sm:text-sm md:text-base text-muted-foreground mb-4 sm:mb-6">{m.description}</p>}
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 text-xs sm:text-sm text-muted-foreground">
                           <div className="flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-primary" />
+                            <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary flex-shrink-0" />
                             <span>
                               <span className="font-semibold">Planned:</span>{" "}
                               {m.planned_start_date && format(new Date(m.planned_start_date), "dd MMM")} -{" "}
@@ -553,19 +550,19 @@ export default function ProjectDetailPage() {
 
             {activeTab === "tasks" && (
               <GlassCard>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold">Tasks ({tasks.length})</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+                  <h3 className="text-base sm:text-lg md:text-2xl font-bold">Tasks ({tasks.length})</h3>
                   {canEdit && (
-                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold">
-                      <Plus className="w-5 h-5" /> Add Task
+                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base">
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Add Task
                     </button>
                   )}
                 </div>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {tasks.length === 0 ? (
-                    <div className="py-16 text-center text-muted-foreground">
-                      <CheckCircle2 className="w-20 h-20 text-primary/30 mx-auto mb-6" />
-                      <p className="text-xl">No tasks assigned yet</p>
+                    <div className="py-12 sm:py-16 text-center text-muted-foreground">
+                      <CheckCircle2 className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
+                      <p className="text-base sm:text-xl">No tasks assigned yet</p>
                     </div>
                   ) : (
                     tasks.map((task, idx) => (
@@ -574,26 +571,26 @@ export default function ProjectDetailPage() {
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: idx * 0.05 }}
-                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-5 transition-all"
+                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 sm:p-5 transition-all"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+                          <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
                             <input
                               type="checkbox"
                               checked={task.status === "done"}
                               readOnly
-                              className="w-6 h-6 rounded accent-primary"
+                              className="w-5 h-5 sm:w-6 sm:h-6 rounded accent-primary mt-0.5 sm:mt-0 flex-shrink-0"
                             />
-                            <div>
-                              <h4 className="font-semibold text-lg">{task.title}</h4>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="font-semibold text-sm sm:text-base md:text-lg break-words">{task.title}</h4>
                               {task.assigned_user && (
-                                <p className="text-sm text-muted-foreground mt-1">
+                                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                                   Assigned to {task.assigned_user.full_name}
                                 </p>
                               )}
                             </div>
                           </div>
-                          <div className="text-sm text-muted-foreground">
+                          <div className="text-xs sm:text-sm text-muted-foreground pl-8 sm:pl-0">
                             {task.due_date && `Due ${format(new Date(task.due_date), "dd MMM yyyy")}`}
                           </div>
                         </div>
@@ -605,23 +602,23 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "updates" && (
-              <div className="space-y-8">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-3xl md:text-4xl font-bold">Project Updates</h3>
+              <div className="space-y-4 sm:space-y-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Project Updates</h3>
                   {canEdit && (
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
                     >
-                      <Plus className="w-5 h-5" /> Post Update
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Post Update
                     </motion.button>
                   )}
                 </div>
                 {updates.length === 0 ? (
-                  <GlassCard className="text-center py-16">
-                    <MessageSquare className="w-20 h-20 text-primary/30 mx-auto mb-6" />
-                    <p className="text-xl text-muted-foreground">No updates posted yet</p>
+                  <GlassCard className="text-center py-12 sm:py-16">
+                    <MessageSquare className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
+                    <p className="text-base sm:text-xl text-muted-foreground">No updates posted yet</p>
                   </GlassCard>
                 ) : (
                   updates.map((update, idx) => (
@@ -632,16 +629,16 @@ export default function ProjectDetailPage() {
                       transition={{ delay: idx * 0.1 }}
                     >
                       <GlassCard>
-                        <div className="flex items-start justify-between mb-6">
-                          <div>
-                            <h4 className="text-2xl font-bold mb-2">{update.title}</h4>
-                            <p className="text-sm text-muted-foreground">
+                        <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-base sm:text-lg md:text-2xl font-bold mb-1 sm:mb-2 break-words">{update.title}</h4>
+                            <p className="text-xs sm:text-sm text-muted-foreground">
                               Posted by {update.posted_by_user?.full_name || "Unknown"} •{" "}
                               {format(new Date(update.posted_at), "dd MMM yyyy, HH:mm")}
                             </p>
                           </div>
                         </div>
-                        <p className="text-base leading-relaxed text-muted-foreground">{update.content}</p>
+                        <p className="text-sm sm:text-base leading-relaxed text-muted-foreground break-words">{update.content}</p>
                       </GlassCard>
                     </motion.div>
                   ))
@@ -651,24 +648,24 @@ export default function ProjectDetailPage() {
 
             {activeTab === "photos" && (
               <div>
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-3xl md:text-4xl font-bold">Site Progress Photos</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
+                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Site Progress Photos</h3>
                   {canEdit && (
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
                     >
-                      <Upload className="w-5 h-5" /> Upload Photos
+                      <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Photos
                     </motion.button>
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
                   {photos.length === 0 ? (
                     <div className="col-span-full">
-                      <GlassCard className="text-center py-20">
-                        <Camera className="w-24 h-24 mx-auto mb-6 text-primary/30" />
-                        <p className="text-xl text-muted-foreground">No photos uploaded yet</p>
+                      <GlassCard className="text-center py-16 sm:py-20">
+                        <Camera className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 text-primary/30" />
+                        <p className="text-base sm:text-xl text-muted-foreground">No photos uploaded yet</p>
                       </GlassCard>
                     </div>
                   ) : (
@@ -678,17 +675,17 @@ export default function ProjectDetailPage() {
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: idx * 0.05 }}
-                        className="group relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl overflow-hidden hover:border-primary/50 transition-all"
+                        className="group relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl sm:rounded-2xl overflow-hidden hover:border-primary/50 transition-all"
                       >
                         <img
                           src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${photo.file_path}`}
                           alt={photo.name}
-                          className="w-full h-64 object-cover"
+                          className="w-full h-32 sm:h-40 md:h-64 object-cover"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-end p-5">
-                          <div className="text-white">
-                            <p className="font-semibold text-base mb-1">{photo.name}</p>
-                            <p className="text-xs text-white/80">{format(new Date(photo.uploaded_at), "dd MMM yyyy")}</p>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-end p-3 sm:p-5">
+                          <div className="text-white w-full">
+                            <p className="font-semibold text-xs sm:text-base mb-0 sm:mb-1 truncate">{photo.name}</p>
+                            <p className="text-[10px] sm:text-xs text-white/80">{format(new Date(photo.uploaded_at), "dd MMM yyyy")}</p>
                           </div>
                         </div>
                       </motion.div>
@@ -700,19 +697,19 @@ export default function ProjectDetailPage() {
 
             {activeTab === "documents" && (
               <GlassCard>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold">Documents ({documents.length})</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+                  <h3 className="text-base sm:text-lg md:text-2xl font-bold">Documents ({documents.length})</h3>
                   {canEdit && (
-                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold">
-                      <Upload className="w-5 h-5" /> Upload Document
+                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base">
+                      <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Document
                     </button>
                   )}
                 </div>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {documents.length === 0 ? (
-                    <div className="py-16 text-center text-muted-foreground">
-                      <FileText className="w-20 h-20 text-primary/30 mx-auto mb-6" />
-                      <p className="text-xl">No documents uploaded yet</p>
+                    <div className="py-12 sm:py-16 text-center text-muted-foreground">
+                      <FileText className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
+                      <p className="text-base sm:text-xl">No documents uploaded yet</p>
                     </div>
                   ) : (
                     documents.map((doc, idx) => (
@@ -721,15 +718,15 @@ export default function ProjectDetailPage() {
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: idx * 0.05 }}
-                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-5 transition-all flex items-center justify-between"
+                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 sm:p-5 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0"
                       >
-                        <div className="flex items-center gap-4">
-                          <div className="p-3 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl">
-                            <FileText className="w-6 h-6 text-primary" />
+                        <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                          <div className="p-2 sm:p-3 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl flex-shrink-0">
+                            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
                           </div>
-                          <div>
-                            <h4 className="font-semibold text-lg">{doc.name}</h4>
-                            <p className="text-sm text-muted-foreground mt-1">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-semibold text-sm sm:text-base md:text-lg break-words">{doc.name}</h4>
+                            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                               Uploaded by {doc.uploaded_by_user?.full_name || "Unknown"} •{" "}
                               {format(new Date(doc.uploaded_at), "dd MMM yyyy")}
                             </p>
@@ -738,9 +735,9 @@ export default function ProjectDetailPage() {
                         <motion.button
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
-                          className="text-primary hover:text-primary/80 p-2"
+                          className="text-primary hover:text-primary/80 p-2 self-end sm:self-auto"
                         >
-                          <Download className="w-6 h-6" />
+                          <Download className="w-5 h-5 sm:w-6 sm:h-6" />
                         </motion.button>
                       </motion.div>
                     ))
@@ -751,16 +748,16 @@ export default function ProjectDetailPage() {
 
             {/* Placeholder for other tabs */}
             {["approvals", "team", "financials", "daily-logs"].includes(activeTab) && (
-              <GlassCard className="text-center py-20">
+              <GlassCard className="text-center py-16 sm:py-20">
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                 >
-                  <div className="w-20 h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                    <Clock className="w-10 h-10 text-primary" />
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
+                    <Clock className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
                   </div>
-                  <h3 className="text-2xl font-bold mb-3">Coming Soon</h3>
-                  <p className="text-lg text-muted-foreground">
+                  <h3 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Coming Soon</h3>
+                  <p className="text-base sm:text-lg text-muted-foreground">
                     This section is currently under development
                   </p>
                 </motion.div>

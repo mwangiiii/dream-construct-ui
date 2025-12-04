@@ -436,23 +436,23 @@ const UserManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="container mx-auto px-6 py-16 max-w-7xl">
+      <div className="container mx-auto px-2 sm:px-4 md:px-6 py-8 md:py-16 max-w-2xl md:max-w-4xl lg:max-w-7xl">
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="mb-16"
+          className="mb-8 md:mb-16"
         >
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
             <div>
-              <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-4">
+              <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-2 sm:mb-4">
                 User
                 <br />
                 <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
                   Management
                 </span>
               </h1>
-              <p className="text-xl md:text-2xl text-muted-foreground">
+              <p className="text-base sm:text-xl md:text-2xl text-muted-foreground">
                 Manage team members and access control
               </p>
             </div>
@@ -460,13 +460,13 @@ const UserManagement: React.FC = () => {
               onClick={fetchUsers}
               size="lg"
               variant="outline"
-              className="glass rounded-xl h-14 px-6"
+              className="glass rounded-xl h-12 sm:h-14 px-4 sm:px-6"
             >
               <RefreshCw className="w-5 h-5" />
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
             {[
               { label: 'Total Users', value: users.length, icon: Users, color: 'primary' },
               { label: 'Active', value: users.filter(u => u.status_id === 1).length, icon: UserCheck, color: 'green' },
@@ -482,9 +482,9 @@ const UserManagement: React.FC = () => {
                   transition={{ delay: 0.2 + i * 0.1, duration: 0.6 }}
                 >
                   <GlassCard className="text-center">
-                    <Icon className="w-10 h-10 mx-auto mb-4 text-primary" />
-                    <div className="text-4xl font-bold mb-2 text-primary">{stat.value}</div>
-                    <div className="text-sm text-muted-foreground">{stat.label}</div>
+                    <Icon className="w-8 sm:w-10 h-8 sm:h-10 mx-auto mb-2 sm:mb-4 text-primary" />
+                    <div className="text-2xl sm:text-4xl font-bold mb-1 sm:mb-2 text-primary">{stat.value}</div>
+                    <div className="text-xs sm:text-sm text-muted-foreground">{stat.label}</div>
                   </GlassCard>
                 </motion.div>
               );
@@ -497,8 +497,8 @@ const UserManagement: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.8 }}
         >
-          <GlassCard className="p-6 mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <GlassCard className="p-4 sm:p-6 mb-6 sm:mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <input
@@ -506,14 +506,14 @@ const UserManagement: React.FC = () => {
                   placeholder="Search users..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                  className="w-full pl-12 pr-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
               </div>
 
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
               >
                 <option value="all">All Statuses</option>
                 {Object.entries(statuses).map(([id, status]) => (
@@ -524,7 +524,7 @@ const UserManagement: React.FC = () => {
               <select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-4 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
               >
                 <option value="all">All Roles</option>
                 {Object.entries(roles).map(([key, role]) => (

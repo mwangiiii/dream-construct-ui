@@ -74,7 +74,7 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden">
+      <section className="relative h-[80vh] md:h-screen flex items-center justify-center overflow-hidden">
         {/* Background Images */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -103,7 +103,7 @@ const Index = () => {
         </div>
 
         {/* Content */}
-        <div className="container mx-auto px-6 z-20 relative">
+        <div className="container mx-auto px-4 sm:px-6 z-20 relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentSlide}
@@ -111,7 +111,7 @@ const Index = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.6 }}
-              className="text-center max-w-5xl mx-auto"
+              className="text-center max-w-2xl sm:max-w-3xl md:max-w-5xl mx-auto"
             >
               <motion.div
                 initial={{ scale: 0.9 }}
@@ -119,7 +119,7 @@ const Index = () => {
                 transition={{ duration: 0.8 }}
                 className="mb-6"
               >
-                <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold mb-4 leading-tight">
+                <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold mb-4 leading-tight break-words">
                   {heroSlides[currentSlide].title}
                   <br />
                   <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
@@ -132,7 +132,7 @@ const Index = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3, duration: 0.6 }}
-                className="text-xl md:text-2xl text-muted-foreground mb-16 max-w-3xl mx-auto"
+                className="text-base sm:text-lg md:text-2xl text-muted-foreground mb-8 sm:mb-12 md:mb-16 max-w-xl sm:max-w-2xl md:max-w-3xl mx-auto"
               >
                 {heroSlides[currentSlide].description}
               </motion.p>
@@ -141,7 +141,7 @@ const Index = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5, duration: 0.6 }}
-                className="flex flex-col sm:flex-row gap-4 justify-center mb-32"
+                className="flex flex-col sm:flex-row gap-4 justify-center mb-20 sm:mb-20 md:mb-32"
               >
                 <Link to="/projects">
                   <Button
@@ -166,7 +166,7 @@ const Index = () => {
           </AnimatePresence>
 
           {/* Slide Controls */}
-          <div className="absolute bottom-12 left-0 right-0 flex items-center justify-center gap-4">
+          <div className="absolute bottom-4 sm:bottom-8 md:bottom-12 left-0 right-0 flex items-center justify-center gap-2 sm:gap-4 z-30">
             <button
               onClick={prevSlide}
               className="w-12 h-12 glass rounded-full flex items-center justify-center hover:bg-white/10 transition-all"
@@ -200,9 +200,9 @@ const Index = () => {
       </section>
 
       {/* Stats Section */}
-      <section className="py-20 relative">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+      <section className="py-6 sm:py-8 md:py-10 relative">
+        <div className="container mx-auto px-4 sm:px-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             {stats.map((stat, idx) => (
               <motion.div
                 key={stat.label}
@@ -223,23 +223,23 @@ const Index = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-32 relative">
-        <div className="container mx-auto px-6">
+      <section className="pt-8 sm:pt-12 md:pt-16 pb-16 sm:pb-24 md:pb-32 relative">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="text-center mb-16"
+            className="text-center mb-8 sm:mb-12 md:mb-16"
           >
-            <h2 className="text-4xl md:text-6xl font-bold mb-6">
+            <h2 className="text-2xl sm:text-4xl md:text-6xl font-bold mb-4 sm:mb-6">
               Our <span className="text-primary">Expertise</span>
             </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
+            <p className="text-base sm:text-lg md:text-xl text-muted-foreground max-w-xl sm:max-w-2xl md:max-w-3xl mx-auto">
               Delivering exceptional results across all construction sectors with innovation and precision.
             </p>
           </motion.div>
 
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
             {features.map((feature, idx) => (
               <motion.div
                 key={feature.title}
@@ -249,7 +249,7 @@ const Index = () => {
                 transition={{ delay: idx * 0.2, duration: 0.6 }}
               >
                 <GlassCard className="h-full">
-                  <div className ="h-48 rounded-xl mb-6 overflow-hidden flex items-center justify-center bg-black">
+                  <div className ="h-40 sm:h-48 rounded-xl mb-4 sm:mb-6 overflow-hidden flex items-center justify-center bg-black">
                     <video
                       src={feature.video}
                       className="w-full h-full object-cover"
@@ -273,20 +273,20 @@ const Index = () => {
       </section>
 
       {/* CTA Section */}
-      <section className="py-32 relative overflow-hidden">
+      <section className="py-16 sm:py-24 md:py-32 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-accent/10 to-primary/10" />
-        <div className="container mx-auto px-6 relative z-10">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
             transition={{ duration: 0.8 }}
-            className="glass-strong rounded-3xl p-12 md:p-20 text-center max-w-4xl mx-auto"
+            className="glass-strong rounded-2xl sm:rounded-3xl p-6 sm:p-12 md:p-20 text-center max-w-xl sm:max-w-2xl md:max-w-4xl mx-auto"
           >
-            <h2 className="text-4xl md:text-6xl font-bold mb-6">
+            <h2 className="text-2xl sm:text-4xl md:text-6xl font-bold mb-4 sm:mb-6">
               Ready to Build Your Dream?
             </h2>
-            <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
+            <p className="text-base sm:text-lg md:text-xl text-muted-foreground mb-6 sm:mb-8 md:mb-10 max-w-lg sm:max-w-xl md:max-w-2xl mx-auto">
               Let's transform your vision into reality with our expert team and proven track record.
             </p>
             <Link to="/contact">

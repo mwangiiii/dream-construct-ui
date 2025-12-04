@@ -344,7 +344,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6">
           {/* overlay */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -358,11 +358,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="relative backdrop-blur-2xl bg-background/95 border border-white/20 rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden"
+            className="relative backdrop-blur-2xl bg-background/95 border border-white/20 rounded-2xl md:rounded-3xl shadow-2xl max-w-full md:max-w-3xl w-full max-h-[90vh] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="relative px-8 py-6 border-b border-white/10">
+            <div className="relative px-4 sm:px-8 py-4 sm:py-6 border-b border-white/10">
               <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5" />
               <div className="relative flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -387,15 +387,15 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
             </div>
 
             {/* Body */}
-            <div className="p-8 space-y-8 overflow-y-auto max-h-[calc(90vh-180px)]">
+            <div className="p-4 sm:p-8 space-y-6 sm:space-y-8 overflow-y-auto max-h-[calc(90vh-180px)]">
               {/* Project Number */}
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   <Hash className="w-4 h-4 inline mr-2" />
                   Project Number
                 </label>
-                <div className="px-6 py-4 backdrop-blur-xl bg-primary/10 border border-primary/20 rounded-xl">
-                  <div className="font-mono text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                <div className="px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-primary/10 border border-primary/20 rounded-xl">
+                  <div className="font-mono text-lg sm:text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
                     {nextProjectNumber || "Generating..."}
                   </div>
                 </div>
@@ -408,7 +408,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                 </label>
                 <input
                   type="text"
-                  className="w-full px-6 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
                   placeholder="e.g., Luxury Villa at Palm Heights"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
@@ -423,7 +423,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                 </label>
                 <textarea
                   rows={4}
-                  className="w-full px-6 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 resize-none"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 resize-none"
                   placeholder="Brief overview of the project scope, objectives, and key deliverables..."
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -465,7 +465,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
 
               {/* Dates */}
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                   <div>
                     <label className="block text-sm font-semibold text-muted-foreground mb-3">
                       <Calendar className="w-4 h-4 inline mr-2" />
@@ -541,18 +541,18 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   <DollarSign className="w-4 h-4 inline mr-2" />
                   Budget
                 </label>
-                <div className="flex gap-4">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     placeholder="0.00"
-                    className="flex-1 px-6 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                    className="flex-1 px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
                     value={formData.budget_numeric}
                     onChange={(e) => setFormData({ ...formData, budget_numeric: e.target.value })}
                   />
 
-                  <div className="w-40">
+                  <div className="w-full sm:w-40">
                     <GlassDropdown
                       label={undefined}
                       items={currencyItems}
@@ -573,17 +573,17 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                 <input
                   type="text"
                   placeholder="Street address"
-                  className="w-full px-6 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 mb-4"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 mb-3 sm:mb-4"
                   value={formData.site_address}
                   onChange={(e) => setFormData({ ...formData, site_address: e.target.value })}
                 />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {["City", "State/County", "ZIP/Postal Code", "Country"].map((label, i) => (
                     <input
                       key={label}
                       type="text"
                       placeholder={label}
-                      className="px-6 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                      className="px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
                       value={
                         i === 0
                           ? formData.site_city
@@ -604,14 +604,14 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
             </div>
 
             {/* Footer */}
-            <div className="px-8 py-6 border-t border-white/10 backdrop-blur-xl bg-background/50">
-              <div className="flex gap-4">
+            <div className="px-4 sm:px-8 py-4 sm:py-6 border-t border-white/10 backdrop-blur-xl bg-background/50">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleClose}
                   disabled={loading}
-                  className="flex-1 px-8 py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all disabled:opacity-50 font-semibold text-base"
+                  className="flex-1 px-6 sm:px-8 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all disabled:opacity-50 font-semibold text-base"
                 >
                   Cancel
                 </motion.button>
@@ -620,16 +620,16 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   whileTap={{ scale: 0.98 }}
                   onClick={handleSubmit}
                   disabled={loading || !formData.client_id || !formData.title.trim() || !!dateError}
-                  className="flex-1 px-8 py-4 bg-gradient-to-r from-primary to-accent text-background rounded-xl hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all font-semibold text-base"
+                  className="flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-primary to-accent text-background rounded-xl hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 sm:gap-3 transition-all font-semibold text-base"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <Loader2 className="w-4 sm:w-5 h-4 sm:h-5 animate-spin" />
                       Creating...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-5 h-5" />
+                      <Sparkles className="w-4 sm:w-5 h-4 sm:h-5" />
                       Create Project
                     </>
                   )}

@@ -258,7 +258,7 @@ export default function ProjectManagementDashboard() {
         animate={{ opacity: 1, y: 0 }}
         className="glass-strong border-b border-white/10"
       >
-        <div className="px-4 sm:px-6 lg:px-8 py-8">
+        <div className="px-2 sm:px-4 lg:px-8 py-6 sm:py-8">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
@@ -282,7 +282,7 @@ export default function ProjectManagementDashboard() {
       </motion.div>
 
       {/* Filters & Search */}
-      <div className="px-4 sm:px-6 lg:px-8 py-6">
+      <div className="px-2 sm:px-4 lg:px-8 py-4 sm:py-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -342,7 +342,7 @@ export default function ProjectManagementDashboard() {
       </div>
 
       {/* Projects Grid / List */}
-      <div className="px-4 sm:px-6 lg:px-8 pb-32">
+      <div className="px-2 sm:px-4 lg:px-8 pb-20 sm:pb-32">
         {filteredProjects.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -369,7 +369,7 @@ export default function ProjectManagementDashboard() {
             </GlassCard>
           </motion.div>
         ) : viewMode === "grid" ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
             {filteredProjects.map((project, idx) => {
               const StatusIcon = getStatusIcon(project.status);
               return (
@@ -446,7 +446,7 @@ export default function ProjectManagementDashboard() {
           </div>
         ) : (
           <GlassCard className="overflow-hidden border border-white/10">
-            <table className="min-w-full divide-y divide-white/10">
+            <table className="min-w-full divide-y divide-white/10 text-xs sm:text-sm">
               <thead className="glass-strong">
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -531,38 +531,38 @@ export default function ProjectManagementDashboard() {
       </div>
 
       {/* Quick Stats Bar */}
-      <motion.div
+      {/* <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/10 px-6 py-4 backdrop-blur-xl"
+        className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/10 px-2 sm:px-6 py-3 sm:py-4 backdrop-blur-xl"
       >
-        <div className="flex items-center justify-around max-w-5xl mx-auto text-center">
+        <div className="flex flex-col sm:flex-row items-center justify-around max-w-2xl sm:max-w-5xl mx-auto text-center gap-2 sm:gap-0">
           <div>
-            <div className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            <div className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {projects.length}
             </div>
-            <div className="text-sm text-muted-foreground">Total Projects</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">Total Projects</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-yellow-400">
+            <div className="text-lg sm:text-2xl font-bold text-yellow-400">
               {projects.filter((p) => p.status === "in_construction").length}
             </div>
-            <div className="text-sm text-muted-foreground">Active Sites</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">Active Sites</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-green-400">
+            <div className="text-lg sm:text-2xl font-bold text-green-400">
               {projects.filter((p) => p.status === "completed").length}
             </div>
-            <div className="text-sm text-muted-foreground">Completed</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">Completed</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-red-400">
+            <div className="text-lg sm:text-2xl font-bold text-red-400">
               {projects.filter((p) => p.status === "on_hold").length}
             </div>
-            <div className="text-sm text-muted-foreground">On Hold</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">On Hold</div>
           </div>
         </div>
-      </motion.div>
+      </motion.div> */}
 
       {/* New Project Modal */}
       <NewProjectModal

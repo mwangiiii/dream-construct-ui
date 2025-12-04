@@ -171,23 +171,23 @@ const Navbar = () => {
         isScrolled ? "glass py-4 shadow-lg" : "bg-transparent py-6"
       } backdrop-blur-lg`}
     >
-      <div className="container mx-auto px-6">
-        <div className="flex items-center justify-between">
+      <div className="container mx-auto px-2 sm:px-4 md:px-6">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-3 group">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform duration-300 shadow-md">
-              <span className="text-background font-bold text-xl">DC</span>
+          <Link to="/" className="flex items-center gap-2 sm:gap-3 group">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform duration-300 shadow-md">
+              <span className="text-background font-bold text-base sm:text-xl">DC</span>
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight text-foreground">
+              <span className="font-bold text-base sm:text-lg leading-tight text-foreground">
                 Dream Construct Limited
               </span>
-              <span className="text-xs text-muted-foreground">Building Your Dreams</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Building Your Dreams</span>
             </div>
           </Link>
 
           {/* Desktop Navigation Links */}
-          <div className="hidden md:flex items-center space-x-8">
+          <div className="hidden md:flex items-center gap-4 lg:gap-8">
             {navLinks.map((link) => (
               <Link
                 key={link.path}
@@ -204,7 +204,7 @@ const Navbar = () => {
           </div>
 
           {/* Desktop CTA Buttons */}
-          <div className="hidden md:flex items-center space-x-4">
+          <div className="hidden md:flex items-center gap-2 sm:gap-4">
             {isLoading ? (
               <div className="flex items-center space-x-4">
                 <div className="w-20 h-10 animate-pulse bg-muted/50 rounded-lg" />
@@ -244,7 +244,7 @@ const Navbar = () => {
             className="md:hidden text-foreground p-2 rounded-lg hover:bg-muted/50 transition-colors"
             aria-label="Toggle menu"
           >
-            {isMobileMenuOpen ? <X size={28} /> : <Menu size={28} />}
+            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
 
@@ -256,7 +256,7 @@ const Navbar = () => {
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="md:hidden mt-6 pb-6 border-t border-border/50 pt-6 space-y-5"
+              className="md:hidden mt-4 sm:mt-6 pb-4 sm:pb-6 border-t border-border/50 pt-4 sm:pt-6 space-y-3 sm:space-y-5"
             >
               {/* Mobile Nav Links */}
               {navLinks.map((link) => (
@@ -264,7 +264,7 @@ const Navbar = () => {
                   key={link.path}
                   to={link.path}
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className={`block py-3 text-lg font-medium transition-colors hover:text-primary ${
+                  className={`block py-2 sm:py-3 text-base sm:text-lg font-medium transition-colors hover:text-primary ${
                     location.pathname === link.path ? "text-primary" : "text-foreground"
                   }`}
                 >
@@ -273,24 +273,24 @@ const Navbar = () => {
               ))}
 
               {/* Mobile Auth Buttons */}
-              <div className="pt-6 space-y-3 border-t border-border/50">
+              <div className="pt-4 sm:pt-6 space-y-2 sm:space-y-3 border-t border-border/50">
                 {isLoading ? (
-                  <div className="space-y-3">
-                    <div className="h-12 bg-muted rounded-lg animate-pulse" />
-                    <div className="h-12 bg-muted rounded-lg animate-pulse" />
+                  <div className="space-y-2 sm:space-y-3">
+                    <div className="h-10 sm:h-12 bg-muted rounded-lg animate-pulse" />
+                    <div className="h-10 sm:h-12 bg-muted rounded-lg animate-pulse" />
                   </div>
                 ) : currentUser ? (
                   <>
                     <Button
                       onClick={handleDashboardClick}
-                      className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base py-6"
+                      className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base sm:text-lg py-4 sm:py-6"
                     >
                       Go to Dashboard
                     </Button>
                     <Button
                       onClick={handleSignOut}
                       variant="outline"
-                      className="w-full text-base py-6"
+                      className="w-full text-base sm:text-lg py-4 sm:py-6"
                     >
                       Sign Out
                     </Button>
@@ -298,12 +298,12 @@ const Navbar = () => {
                 ) : (
                   <>
                     <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
-                      <Button variant="outline" className="w-full text-base py-6">
+                      <Button variant="outline" className="w-full text-base sm:text-lg py-4 sm:py-6">
                         Sign In
                       </Button>
                     </Link>
                     <Link to="/register" onClick={() => setIsMobileMenuOpen(false)}>
-                      <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base py-6">
+                      <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base sm:text-lg py-4 sm:py-6">
                         Get Started
                       </Button>
                     </Link>

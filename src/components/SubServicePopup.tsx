@@ -103,7 +103,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md"
           onClick={onClose}
         >
           <motion.div
@@ -111,17 +111,17 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="relative max-w-3xl w-full max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent"
+            className="relative max-w-full sm:max-w-2xl md:max-w-3xl w-full max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20 scrollbar-track-transparent"
             onClick={(e) => e.stopPropagation()}
           >
-            <GlassCard className="p-8 rounded-2xl shadow-2xl">
+            <GlassCard className="p-4 sm:p-8 rounded-xl sm:rounded-2xl shadow-2xl">
               {/* Close Button */}
               <button
                 onClick={onClose}
-                className="absolute top-6 right-6 p-2 hover:bg-primary/10 rounded-full transition-all duration-300 hover:rotate-90 z-10 group"
+                className="absolute top-3 sm:top-6 right-3 sm:right-6 p-2 hover:bg-primary/10 rounded-full transition-all duration-300 hover:rotate-90 z-10 group"
                 aria-label="Close popup"
               >
-                <X className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                <X className="w-4 sm:w-5 h-4 sm:h-5 text-muted-foreground group-hover:text-primary transition-colors" />
               </button>
 
               {/* Header */}
@@ -137,7 +137,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                     {subService.serviceCategory}
                   </p>
                 </div>
-                <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-gradient">
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-gradient">
                   {subService.title}
                 </h2>
               </motion.div>
@@ -149,7 +149,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 transition={{ delay: 0.2 }}
                 className="mb-8"
               >
-                <p className="text-muted-foreground leading-relaxed text-base">
+                <p className="text-muted-foreground leading-relaxed text-sm sm:text-base">
                   {subService.description}
                 </p>
               </motion.div>
@@ -257,10 +257,10 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                         </motion.div>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground font-medium">
+                        <p className="text-xs sm:text-sm text-muted-foreground font-medium">
                           Visual showcase coming soon
                         </p>
-                        <p className="text-xs text-muted-foreground/70 mt-2">
+                        <p className="text-[10px] sm:text-xs text-muted-foreground/70 mt-2">
                           Media gallery will be displayed here
                         </p>
                       </div>
@@ -271,7 +271,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                   <div className="p-12 bg-gradient-to-br from-red-500/10 to-orange-500/10 rounded-xl text-center border-2 border-dashed border-red-500/20">
                     <div className="space-y-3">
                       <div className="text-4xl">⚠️</div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-xs sm:text-sm text-muted-foreground">
                         Unable to load media content
                       </p>
                       <p className="text-xs text-muted-foreground/70">
@@ -297,7 +297,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                     <label className="text-sm font-semibold block">
                       Select Your Current Project Phase
                     </label>
-                    <p className="text-xs text-muted-foreground/70">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground/70">
                       Choose the phase your project is currently in
                     </p>
                   </div>
@@ -343,7 +343,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                           <label className="text-sm font-semibold block">
                             Select Stage Within {selectedPhase}
                           </label>
-                          <p className="text-xs text-muted-foreground/70">
+                          <p className="text-[10px] sm:text-xs text-muted-foreground/70">
                             Now choose the specific stage in this phase
                           </p>
                         </div>
@@ -384,7 +384,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                   className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10"
                 >
                   <span className="text-primary text-lg mt-0.5">ℹ️</span>
-                  <p className="text-xs text-muted-foreground/80 leading-relaxed">
+                  <p className="text-[11px] sm:text-xs text-muted-foreground/80 leading-relaxed">
                     {selectedStage 
                       ? `Excellent! We're ready to assist with ${selectedStage} in the ${selectedPhase} phase.`
                       : selectedPhase 
@@ -440,7 +440,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="text-xs text-center text-muted-foreground/70 flex items-center justify-center gap-2"
+                      className="text-[11px] sm:text-xs text-center text-muted-foreground/70 flex items-center justify-center gap-2"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
                       {selectedPhase ? "Please select a stage to continue" : "Please select a phase and stage to continue"}
@@ -456,7 +456,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 transition={{ delay: 0.6 }}
                 className="mt-6 pt-6 border-t border-border/50"
               >
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground/60">
+                <div className="flex items-center justify-center gap-2 text-[11px] sm:text-xs text-muted-foreground/60">
                   <span>Step 1 of 2:</span>
                   <span className="font-medium text-primary">Service Selection</span>
                   <span>→</span>
