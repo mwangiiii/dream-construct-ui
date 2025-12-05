@@ -448,13 +448,13 @@ const UserManagement: React.FC = () => {
               <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-2 sm:mb-4">
                 User
                 <br />
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow border border-background">
                   Management
                 </span>
               </h1>
-              <p className="text-base sm:text-xl md:text-2xl text-muted-foreground">
+              {/* <p className="text-base sm:text-xl md:text-2xl text-muted-foreground">
                 Manage team members and access control
-              </p>
+              </p> */}
             </div>
             <Button
               onClick={fetchUsers}

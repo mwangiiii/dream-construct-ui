@@ -12,6 +12,28 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+// Shared sidebar width values
+const SIDEBAR_WIDTH = {
+  open: {
+    base: "w-48",
+    sm: "sm:w-64"
+  },
+  closed: {
+    base: "w-16",
+    sm: "sm:w-20"
+  }
+};
+const SIDEBAR_MARGIN = {
+  open: {
+    base: "ml-48",
+    sm: "sm:ml-64"
+  },
+  closed: {
+    base: "ml-16",
+    sm: "sm:ml-20"
+  }
+};
+
 interface AdminLayoutProps {
   children: ReactNode;
 }
@@ -28,15 +50,21 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     { icon: Settings, label: "Settings", path: "/admin/settings" },
   ];
 
+  // Determine sidebar width and margin classes
+  const sidebarWidthClass = isSidebarOpen
+    ? `${SIDEBAR_WIDTH.open.base} ${SIDEBAR_WIDTH.open.sm}`
+    : `${SIDEBAR_WIDTH.closed.base} ${SIDEBAR_WIDTH.closed.sm}`;
+  const sidebarMarginClass = isSidebarOpen
+    ? `${SIDEBAR_MARGIN.open.base} ${SIDEBAR_MARGIN.open.sm}`
+    : `${SIDEBAR_MARGIN.closed.base} ${SIDEBAR_MARGIN.closed.sm}`;
+
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar */}
       <motion.aside
         initial={{ x: -300 }}
         animate={{ x: 0 }}
-        className={`$
-          isSidebarOpen ? "w-48 sm:w-64" : "w-16 sm:w-20"
-        } glass-strong border-r border-border transition-all duration-300 fixed h-full z-40`}
+        className={`${sidebarWidthClass} glass-strong border-r border-border transition-all duration-300 fixed h-full z-40`}
       >
         <div className="p-3 sm:p-6">
           <Link to="/admin" className="flex items-center gap-1 sm:gap-2 mb-6 sm:mb-8">
@@ -58,7 +86,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 sm:py-3 rounded-lg transition-all text-sm sm:text-base $
+                  className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 sm:py-3 rounded-lg transition-all text-sm sm:text-base ${
                     isActive
                       ? "bg-primary/20 text-primary"
                       : "text-muted-foreground hover:bg-white/5"
@@ -81,7 +109,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
       </motion.aside>
 
       {/* Main Content */}
-      <div className={`flex-1 ${isSidebarOpen ? "ml-48 sm:ml-64" : "ml-16 sm:ml-20"} transition-all duration-300`}>
+      <div className={`flex-1 ${sidebarMarginClass} transition-all duration-300`}>
         <header className="glass border-b border-border p-3 sm:p-6 sticky top-0 z-30">
           <div className="flex items-center justify-between">
             <button
