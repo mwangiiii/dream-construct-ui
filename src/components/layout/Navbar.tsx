@@ -24,6 +24,11 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Scroll to top whenever location changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [location.pathname]);
+
   // FIXED: Properly detect auth state on mount + all events
   useEffect(() => {
     let mounted = true;
@@ -153,6 +158,12 @@ const Navbar = () => {
     }
   };
 
+  // Handle navigation link clicks - scroll to top
+  const handleNavLinkClick = () => {
+    setIsMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
   const navLinks = [
     { name: "Home", path: "/" },
     { name: "Services", path: "/services" },
@@ -174,7 +185,11 @@ const Navbar = () => {
       <div className="container mx-auto px-2 sm:px-4 md:px-6">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 sm:gap-3 group">
+          <Link 
+            to="/" 
+            className="flex items-center gap-2 sm:gap-3 group"
+            onClick={handleNavLinkClick}
+          >
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform duration-300 shadow-md">
               <span className="text-background font-bold text-base sm:text-xl">DC</span>
             </div>
@@ -192,6 +207,7 @@ const Navbar = () => {
               <Link
                 key={link.path}
                 to={link.path}
+                onClick={handleNavLinkClick}
                 className={`text-sm font-medium transition-all duration-200 hover:text-primary ${
                   location.pathname === link.path
                     ? "text-primary font-semibold"
@@ -224,12 +240,12 @@ const Navbar = () => {
               </>
             ) : (
               <>
-                <Link to="/login">
+                <Link to="/login" onClick={handleNavLinkClick}>
                   <Button variant="ghost" className="text-sm">
                     Sign In
                   </Button>
                 </Link>
-                <Link to="/register">
+                <Link to="/register" onClick={handleNavLinkClick}>
                   <Button className="bg-primary hover:bg-primary/90 text-background font-medium shadow-md">
                     Get Started
                   </Button>
@@ -263,7 +279,7 @@ const Navbar = () => {
                 <Link
                   key={link.path}
                   to={link.path}
-                  onClick={() => setIsMobileMenuOpen(false)}
+                  onClick={handleNavLinkClick}
                   className={`block py-2 sm:py-3 text-base sm:text-lg font-medium transition-colors hover:text-primary ${
                     location.pathname === link.path ? "text-primary" : "text-foreground"
                   }`}
@@ -297,12 +313,12 @@ const Navbar = () => {
                   </>
                 ) : (
                   <>
-                    <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Link to="/login" onClick={handleNavLinkClick}>
                       <Button variant="outline" className="w-full text-base sm:text-lg py-4 sm:py-6">
                         Sign In
                       </Button>
                     </Link>
-                    <Link to="/register" onClick={() => setIsMobileMenuOpen(false)}>
+                    <Link to="/register" onClick={handleNavLinkClick}>
                       <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base sm:text-lg py-4 sm:py-6">
                         Get Started
                       </Button>
