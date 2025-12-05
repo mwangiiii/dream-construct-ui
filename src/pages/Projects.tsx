@@ -73,6 +73,11 @@ export default function CompletedProjects() {
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).length;
 
+  const handleStartProject = () => {
+    // Navigate to contact page with hash to trigger scroll to form
+    window.location.href = '/contact#contact-form';
+  };
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -316,7 +321,10 @@ export default function CompletedProjects() {
             <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
               Join our growing list of satisfied clients and let's create something extraordinary together
             </p>
-            <button className="bg-primary hover:bg-primary/90 text-background font-semibold px-12 py-6 text-lg rounded-xl transition-colors inline-flex items-center gap-2 group">
+            <button
+              className="bg-primary hover:bg-primary/90 text-background font-semibold px-12 py-6 text-lg rounded-xl transition-colors inline-flex items-center gap-2 group"
+              onClick={handleStartProject}
+            >
               Start Your Project
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>

@@ -1,5 +1,5 @@
 // src/pages/Contact.tsx
-// Updated with EmailJS integration for email functionality
+// Updated with EmailJS integration and auto-scroll to form
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
@@ -66,6 +66,20 @@ I would like to discuss the following:
         subject: newSubject,
         message: newMessage,
       }));
+    }
+  }, []);
+
+  // Auto-scroll to form when coming from "Start Your Project" button
+  useEffect(() => {
+    // Check if there's a hash in the URL
+    if (window.location.hash === '#contact-form') {
+      // Small delay to ensure the page has rendered
+      setTimeout(() => {
+        const formElement = document.querySelector('form');
+        if (formElement) {
+          formElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
     }
   }, []);
 
@@ -254,7 +268,7 @@ I would like to discuss the following:
         </div>
 
         {/* Main Grid: Form + Right Column */}
-        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16" id="contact-form">
           {/* Contact Form */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -360,10 +374,6 @@ I would like to discuss the following:
                     disabled={isLoading || isSuccess}
                     className="glass border-border focus:border-primary transition-colors resize-none"
                   />
-                  {/* <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    Average response time: 2-4 hours during business hours
-                  </p> */}
                 </div>
 
                 <Button
