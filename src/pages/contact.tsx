@@ -138,7 +138,7 @@ I would like to discuss the following:
     {
       icon: MapPin,
       title: "Visit Us",
-      details: ["Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited, 70135 - 00400"],
+      details: ["Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited Warehouse, 70135 - 00400"],
       link: "https://maps.app.goo.gl/gUh4dhLXzzRH35Jv9",
     },
     {
@@ -464,7 +464,7 @@ I would like to discuss the following:
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-border/50">
                   <span className="text-sm font-medium">Saturday</span>
-                  <span className="text-sm text-muted-foreground">9:00 AM - 2:00 PM</span>
+                  <span className="text-sm text-muted-foreground">9:00 AM - 4:00 PM</span>
                 </div>
                 <div className="flex justify-between items-center py-2">
                   <span className="text-sm font-medium">Sunday</span>
