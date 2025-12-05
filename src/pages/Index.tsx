@@ -289,14 +289,17 @@ const Index = () => {
             <p className="text-base sm:text-lg md:text-xl text-muted-foreground mb-6 sm:mb-8 md:mb-10 max-w-lg sm:max-w-xl md:max-w-2xl mx-auto">
               Let's transform your vision into reality with our expert team and proven track record.
             </p>
-            <Link to="/contact">
-              <Button
-                size="lg"
-                className="bg-primary hover:bg-primary/90 text-background font-semibold px-12 py-6 text-lg rounded-xl"
-              >
-                Start Your Project Today
-              </Button>
-            </Link>
+            <Link 
+  to="/contact"
+  onClick={() => window.scrollTo(0, 0)}
+>
+  <Button
+    size="lg"
+    className="bg-primary hover:bg-primary/90 text-background font-semibold px-12 py-6 text-lg rounded-xl"
+  >
+    Start Your Project Today
+  </Button>
+</Link>
           </motion.div>
         </div>
       </section>

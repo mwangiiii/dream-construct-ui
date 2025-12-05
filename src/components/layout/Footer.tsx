@@ -30,7 +30,7 @@ const Footer = () => {
       { name: "Renovations", type: "Renovations & Remodeling" },
     ],
     legal: [
-      { name: "Terms of Service", path: "#" },
+      // { name: "Terms of Service", path: "#" },
     ],
   };
 
@@ -127,7 +127,7 @@ const Footer = () => {
             <ul className="space-y-3">
               <li className="flex items-start space-x-2 text-sm text-muted-foreground">
                 <MapPin size={16} className="mt-1 flex-shrink-0" />
-                <span>Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited 70135 - 00400</span>
+                <span>Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited, 70135 - 00400</span>
               </li>
               <li className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
                 <Phone size={16} />
