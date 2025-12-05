@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Facebook, Twitter, Linkedin, Instagram, WhatsApp, Mail, Phone, MapPin } from "lucide-react";
+import { Facebook, Twitter, Linkedin, Instagram, Mail, Phone, MapPin } from "lucide-react";
+import { FaWhatsapp } from "react-icons/fa";
 
 const Footer = () => {
   const navigate = useNavigate();
@@ -29,18 +30,16 @@ const Footer = () => {
       { name: "Renovations", type: "Renovations & Remodeling" },
     ],
     legal: [
-      { name: "Privacy Policy", path: "#" },
       { name: "Terms of Service", path: "#" },
-      { name: "Cookie Policy", path: "#" },
     ],
   };
 
   const socialLinks = [
-    { icon: Facebook, href: "#", label: "Facebook" },
-    { icon: Twitter, href: "#", label: "Twitter" },
-    { icon: Linkedin, href: "#", label: "LinkedIn" },
-    { icon: Instagram, href: "#", label: "Instagram" },
-    { icon: WhatsApp, href: "https://wa.me/254707063047", label: "WhatsApp" },
+    { icon: Facebook, href: "#", label: "Facebook", isReactIcon: false },
+    { icon: Twitter, href: "#", label: "Twitter", isReactIcon: false },
+    { icon: Linkedin, href: "#", label: "LinkedIn", isReactIcon: false },
+    { icon: Instagram, href: "#", label: "Instagram", isReactIcon: false },
+    { icon: FaWhatsapp, href: "https://wa.me/254707063047", label: "WhatsApp", isReactIcon: true },
   ];
 
   return (
@@ -66,16 +65,25 @@ const Footer = () => {
               solutions, premium quality, and unwavering commitment to perfection.
             </p>
             <div className="flex space-x-4">
-              {socialLinks.map((social) => (
-                <a
-                  key={social.label}
-                  href={social.href}
-                  aria-label={social.label}
-                  className="w-10 h-10 glass rounded-lg flex items-center justify-center hover:bg-primary/10 hover:border-primary/20 transition-all duration-300"
-                >
-                  <social.icon size={18} />
-                </a>
-              ))}
+              {socialLinks.map((social) => {
+                const IconComponent = social.icon;
+                return (
+                  <a
+                    key={social.label}
+                    href={social.href}
+                    target={social.label === "WhatsApp" ? "_blank" : undefined}
+                    rel={social.label === "WhatsApp" ? "noopener noreferrer" : undefined}
+                    aria-label={social.label}
+                    className="w-10 h-10 glass rounded-lg flex items-center justify-center hover:bg-primary/10 hover:border-primary/20 transition-all duration-300"
+                  >
+                    {social.isReactIcon ? (
+                      <IconComponent size={18} />
+                    ) : (
+                      <IconComponent size={18} />
+                    )}
+                  </a>
+                );
+              })}
             </div>
           </div>
 
@@ -119,7 +127,7 @@ const Footer = () => {
             <ul className="space-y-3">
               <li className="flex items-start space-x-2 text-sm text-muted-foreground">
                 <MapPin size={16} className="mt-1 flex-shrink-0" />
-                <span>123 Construction Ave, Building City, BC 12345</span>
+                <span>Kahawa-Sukari, Murang'a Road, 70135 - 00400</span>
               </li>
               <li className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
                 <Phone size={16} />
@@ -127,7 +135,7 @@ const Footer = () => {
               </li>
               <li className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
                 <Mail size={16} />
-                <a href="mailto:info@dreamconstruct.com">info@dreamconstruct.com</a>
+                <a href="mailto:dreamconstruct254@gmail.com">dreamconstruct254@gmail.com</a>
               </li>
             </ul>
           </div>
