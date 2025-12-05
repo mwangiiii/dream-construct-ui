@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Facebook, Twitter, Linkedin, Instagram, Mail, Phone, MapPin } from "lucide-react";
+import { Facebook, Twitter, Linkedin, Instagram, WhatsApp, Mail, Phone, MapPin } from "lucide-react";
 
 const Footer = () => {
   const navigate = useNavigate();
@@ -40,6 +40,7 @@ const Footer = () => {
     { icon: Twitter, href: "#", label: "Twitter" },
     { icon: Linkedin, href: "#", label: "LinkedIn" },
     { icon: Instagram, href: "#", label: "Instagram" },
+    { icon: WhatsApp, href: "https://wa.me/254707063047", label: "WhatsApp" },
   ];
 
   return (
