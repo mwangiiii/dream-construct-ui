@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
 import { Volume2, VolumeX, Volume1, UserPlus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -38,6 +38,93 @@ import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+// Content Management Layout Component with Tabs
+const ContentManagement = () => {
+  const location = useLocation();
+  
+  const tabs = [
+    { name: "Overview", path: "/admin/content" },
+    { name: "Reviews", path: "/admin/content/reviews" },
+    { name: "Media", path: "/admin/content/media" },
+    { name: "Pages", path: "/admin/content/pages" },
+  ];
+
+  return (
+    <div className="p-8">
+      <div className="mb-6">
+        <h1 className="text-4xl font-bold">Content Management</h1>
+        <p className="text-muted-foreground mt-2">Update website content and media</p>
+      </div>
+
+      {/* Tabs Navigation */}
+      <div className="border-b border-border mb-6">
+        <nav className="flex space-x-8">
+          {tabs.map((tab) => {
+            const isActive = location.pathname === tab.path;
+            return (
+              <Link
+                key={tab.path}
+                to={tab.path}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  isActive
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                }`}
+              >
+                {tab.name}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Content Area - renders child routes */}
+      <Outlet />
+    </div>
+  );
+};
+
+// Content Overview Component
+const ContentOverview = () => (
+  <div className="space-y-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <Link to="/admin/content/reviews">
+        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
+          <h3 className="text-xl font-semibold mb-2">Reviews Management</h3>
+          <p className="text-muted-foreground">Manage customer reviews and testimonials</p>
+        </div>
+      </Link>
+      <Link to="/admin/content/media">
+        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
+          <h3 className="text-xl font-semibold mb-2">Media Library</h3>
+          <p className="text-muted-foreground">Upload and organize images and videos</p>
+        </div>
+      </Link>
+      <Link to="/admin/content/pages">
+        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
+          <h3 className="text-xl font-semibold mb-2">Pages Content</h3>
+          <p className="text-muted-foreground">Edit homepage, services, and other pages</p>
+        </div>
+      </Link>
+    </div>
+  </div>
+);
+
+// Placeholder components for other content sections
+const MediaLibrary = () => (
+  <div className="text-center py-12">
+    <h2 className="text-2xl font-semibold mb-4">Media Library</h2>
+    <p className="text-muted-foreground">Media management coming soon...</p>
+  </div>
+);
+
+const PagesContent = () => (
+  <div className="text-center py-12">
+    <h2 className="text-2xl font-semibold mb-4">Pages Content</h2>
+    <p className="text-muted-foreground">Page content editor coming soon...</p>
+  </div>
+);
 
 // Enhanced Protected Route Component with Role-Based Access
 const ProtectedRoute: React.FC<{ 
@@ -300,34 +387,23 @@ const App = () => {
               }
             />
 
-            {/* CONTENT MANAGEMENT */}
+            {/* CONTENT MANAGEMENT — Nested Routes with Tabs */}
             <Route
               path="/admin/content"
               element={
                 <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <AdminLayout>
-                    <div className="p-8">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h1 className="text-4xl font-bold">Content Management</h1>
-                          <p className="text-muted-foreground mt-2">Update website content and media</p>
-                        </div>
-                      </div>
-                    </div>
+                    <ContentManagement />
                   </AdminLayout>
                 </ProtectedRoute>
               }
-            />
-
-            {/* REVIEWS MANAGEMENT */}
-            <Route
-              path="/admin/reviews"
-              element={
-                <ProtectedRoute requiredRoles={["admin", "manager"]}>
-                  <AdminLayout><ReviewsManagement /></AdminLayout>
-                </ProtectedRoute>
-              }
-            />
+            >
+              {/* Nested Content Routes */}
+              <Route index element={<ContentOverview />} />
+              <Route path="reviews" element={<ReviewsManagement />} />
+              <Route path="media" element={<MediaLibrary />} />
+              <Route path="pages" element={<PagesContent />} />
+            </Route>
 
             {/* SETTINGS */}
             <Route
