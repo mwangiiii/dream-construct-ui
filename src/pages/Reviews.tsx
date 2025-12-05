@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star, Send, CheckCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -11,6 +12,7 @@ const Reviews = () => {
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchReviews();
@@ -64,6 +66,11 @@ const Reviews = () => {
     }
     setLoading(false);
   }
+
+  // Navigate to contact page with scroll to form
+  const handleGetStarted = () => {
+    navigate('/contact#contact-form');
+  };
 
   return (
     <div className="min-h-screen">
@@ -195,7 +202,7 @@ const Reviews = () => {
             className="text-center mb-16"
           >
             <h2 className="text-4xl md:text-6xl font-bold mb-6">
-              What <span className="text-primary">People Are Saying</span>
+              What <span className="text-primary">Are People Saying</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
               Real experiences from our valued clients and partners
@@ -284,6 +291,7 @@ const Reviews = () => {
               Join our growing community of satisfied clients and experience excellence in every project.
             </p>
             <Button
+              onClick={handleGetStarted}
               size="lg"
               className="bg-primary hover:bg-primary/90 text-background font-semibold px-12 py-6 text-lg rounded-xl"
             >
