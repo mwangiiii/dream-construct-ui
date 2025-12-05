@@ -441,7 +441,7 @@ I would like to discuss the following:
                   <Button
                     variant="outline"
                     className="glass border-primary/20 hover:bg-primary/10"
-                    onClick={() => window.open("https://maps.google.com/?q=Nairobi,Kenya", "_blank")}
+                    onClick={() => window.open("https://maps.app.goo.gl/gUh4dhLXzzRH35Jv9", "_blank")}
                   >
                     View on Google Maps
                   </Button>
