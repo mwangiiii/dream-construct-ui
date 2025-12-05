@@ -135,7 +135,7 @@ const Footer = () => {
               </li>
               <li className="flex items-start space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
                 <Mail size={16} className="mt-1 flex-shrink-0" />
-                <a href="mailto:dreamconstruct254@gmail.com" className="break-all">dreamconstruct254@gmail.com</a>
+                  <a href="mailto:dreamconstruct254@gmail.com" className="break-all" style={{ fontSize: '13px' }}>dreamconstruct254@gmail.com</a>
               </li>
             </ul>
           </div>
