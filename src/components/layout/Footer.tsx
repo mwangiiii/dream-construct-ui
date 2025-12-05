@@ -124,17 +124,17 @@ const Footer = () => {
           {/* Contact Info */}
           <div>
             <h3 className="font-semibold mb-4">Contact</h3>
-            <ul className="space-y-3">
-              <li className="flex items-start space-x-2 text-sm text-muted-foreground">
-                <MapPin size={16} className="mt-1 flex-shrink-0" />
-                <span>Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited Warehouse, 70135 - 00400</span>
+            <ul className="space-y-2">
+              <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-muted-foreground">
+                <MapPin size={14} className="mt-1 flex-shrink-0" />
+                <span className="break-words max-w-[220px] sm:max-w-[320px] md:max-w-[400px] lg:max-w-[260px] xl:max-w-none">Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited Warehouse, 70135 - 00400</span>
               </li>
-              <li className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
-                <Phone size={16} />
-                <a href="tel:0707063047">0707063047</a>
+              <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-muted-foreground hover:text-primary transition-colors">
+                <Phone size={14} />
+                <a href="tel:0707063047" className="break-all">0707063047</a>
               </li>
-              <li className="flex items-start space-x-2 text-sm text-muted-foreground hover:text-primary transition-colors">
-                <Mail size={16} className="mt-1 flex-shrink-0" />
+              <li className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-muted-foreground hover:text-primary transition-colors">
+                <Mail size={14} className="mt-1 flex-shrink-0" />
                 <a href="mailto:dreamconstruct254@gmail.com" className="break-all">dreamconstruct254@gmail.com</a>
               </li>
             </ul>
