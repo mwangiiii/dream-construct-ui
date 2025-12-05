@@ -138,20 +138,20 @@ I would like to discuss the following:
     {
       icon: MapPin,
       title: "Visit Us",
-      details: ["123 Construction Avenue", "Nairobi, Kenya"],
-      link: "https://maps.google.com/?q=Nairobi,Kenya",
+      details: ["Kahawa-Sukari, Murang'a Road, Carjet Kenya Limited, 70135 - 00400"],
+      link: "https://maps.app.goo.gl/gUh4dhLXzzRH35Jv9",
     },
     {
       icon: Phone,
       title: "Call Us",
-      details: ["+254 707 063 047", "Mon-Fri: 8AM - 6PM"],
+      details: ["+254 707 063 047", "Mon-Fri: 8AM - 6PM", "Sat: 9AM - 4PM"],
       link: "tel:+254707063047",
     },
     {
       icon: Mail,
       title: "Email Us",
-      details: ["to be set"],
-      link: "mailto:mwangiwanjiku033@gmail.com",
+      details: ["dreamconstruct254@gmail.com"],
+      link: "mailto:dreamconstruct254@gmail.com",
     },
   ];
 
