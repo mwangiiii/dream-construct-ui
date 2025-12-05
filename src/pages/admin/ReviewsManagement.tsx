@@ -21,144 +21,158 @@ const ReviewsManagement = () => {
   }, [isAuthorized, filter]);
 
   async function checkAuthorization() {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    
-    if (!authUser) {
-      setAuthError('You must be logged in to access this page.');
+    try {
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !authUser) {
+        setAuthError('You must be logged in to access this page.');
+        setLoading(false);
+        return;
+      }
+
+      setUser(authUser);
+
+      // Check if user has admin role
+      const { data: userRole, error: roleError } = await supabase
+        .from('user_roles')
+        .select('role_name')
+        .eq('user_id', authUser.id)
+        .eq('role_name', 'admin')
+        .maybeSingle();
+
+      if (roleError) {
+        console.error('Error checking user role:', roleError);
+        setAuthError('Unable to verify administrator privileges.');
+        setIsAuthorized(false);
+        setLoading(false);
+        return;
+      }
+
+      if (!userRole) {
+        setAuthError('You do not have administrator privileges.');
+        setIsAuthorized(false);
+        setLoading(false);
+        return;
+      }
+
+      // User is an admin - no need to check status
+      setIsAuthorized(true);
       setLoading(false);
-      return;
-    }
-
-    setUser(authUser);
-
-    // Check if user has admin role AND active status
-    const { data: userRole, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role_name')
-      .eq('user_id', authUser.id)
-      .eq('role_name', 'admin')
-      .single();
-
-    if (roleError || !userRole) {
-      setAuthError('You do not have administrator privileges.');
+    } catch (err) {
+      console.error('Authorization error:', err);
+      setAuthError('An error occurred while verifying permissions.');
       setIsAuthorized(false);
       setLoading(false);
-      return;
     }
-
-    // Check if user status is active
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('status')
-      .eq('user_id', authUser.id)
-      .single();
-
-    if (profileError || !profile) {
-      setAuthError('Unable to verify user status.');
-      setIsAuthorized(false);
-      setLoading(false);
-      return;
-    }
-
-    if (profile.status !== 'active') {
-      setAuthError(`Your account is ${profile.status}. Only active administrators can access this page.`);
-      setIsAuthorized(false);
-      setLoading(false);
-      return;
-    }
-
-    // User is an active admin
-    setIsAuthorized(true);
-    setLoading(false);
   }
 
   async function fetchAllReviews() {
     setLoading(true);
-    let query = supabase
-      .from('reviews')
-      .select('*')
-      .order('display_order', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: false });
+    try {
+      let query = supabase
+        .from('reviews')
+        .select('*')
+        .order('display_order', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false });
 
-    if (filter === 'displayed') {
-      query = query.eq('display', true);
-    } else if (filter === 'hidden') {
-      query = query.eq('display', false);
-    }
-
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Error fetching reviews:', error);
-      if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-        setAuthError('Authorization error: Unable to fetch reviews. Please verify your admin status.');
-        setIsAuthorized(false);
+      if (filter === 'displayed') {
+        query = query.eq('display', true);
+      } else if (filter === 'hidden') {
+        query = query.eq('display', false);
       }
-    } else if (data) {
-      setReviews(data);
+
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('Error fetching reviews:', error);
+        if (error.code === 'PGRST301' || error.message?.includes('policy')) {
+          setAuthError('Authorization error: Unable to fetch reviews. Please verify your admin status.');
+          setIsAuthorized(false);
+        }
+      } else if (data) {
+        setReviews(data);
+      }
+    } catch (err) {
+      console.error('Error in fetchAllReviews:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function toggleDisplay(id, currentStatus) {
-    const { error } = await supabase
-      .from('reviews')
-      .update({ display: !currentStatus })
-      .eq('id', id);
+    try {
+      const { error } = await supabase
+        .from('reviews')
+        .update({ display: !currentStatus })
+        .eq('id', id);
 
-    if (error) {
-      console.error('Error updating review:', error);
-      if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-        alert('Authorization error: You do not have permission to update reviews.');
-        checkAuthorization();
+      if (error) {
+        console.error('Error updating review:', error);
+        if (error.code === 'PGRST301' || error.message?.includes('policy')) {
+          alert('Authorization error: You do not have permission to update reviews.');
+          checkAuthorization();
+        } else {
+          alert('Error updating review status');
+        }
       } else {
-        alert('Error updating review status');
+        fetchAllReviews();
       }
-    } else {
-      fetchAllReviews();
+    } catch (err) {
+      console.error('Error in toggleDisplay:', err);
+      alert('An error occurred while updating the review');
     }
   }
 
   async function updateOrder(id, newOrder) {
-    const orderValue = newOrder === '' ? null : parseInt(newOrder);
-    
-    const { error } = await supabase
-      .from('reviews')
-      .update({ display_order: orderValue })
-      .eq('id', id);
+    try {
+      const orderValue = newOrder === '' ? null : parseInt(newOrder);
+      
+      const { error } = await supabase
+        .from('reviews')
+        .update({ display_order: orderValue })
+        .eq('id', id);
 
-    if (error) {
-      console.error('Error updating order:', error);
-      if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-        alert('Authorization error: You do not have permission to update reviews.');
-        checkAuthorization();
+      if (error) {
+        console.error('Error updating order:', error);
+        if (error.code === 'PGRST301' || error.message?.includes('policy')) {
+          alert('Authorization error: You do not have permission to update reviews.');
+          checkAuthorization();
+        } else {
+          alert('Error updating review order');
+        }
       } else {
-        alert('Error updating review order');
+        setEditingOrder({ ...editingOrder, [id]: false });
+        fetchAllReviews();
       }
-    } else {
-      setEditingOrder({ ...editingOrder, [id]: false });
-      fetchAllReviews();
+    } catch (err) {
+      console.error('Error in updateOrder:', err);
+      alert('An error occurred while updating the order');
     }
   }
 
   async function deleteReview(id) {
     if (!window.confirm('Are you sure you want to permanently delete this review?')) return;
 
-    const { error } = await supabase
-      .from('reviews')
-      .delete()
-      .eq('id', id);
+    try {
+      const { error } = await supabase
+        .from('reviews')
+        .delete()
+        .eq('id', id);
 
-    if (error) {
-      console.error('Error deleting review:', error);
-      if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-        alert('Authorization error: You do not have permission to delete reviews.');
-        checkAuthorization();
+      if (error) {
+        console.error('Error deleting review:', error);
+        if (error.code === 'PGRST301' || error.message?.includes('policy')) {
+          alert('Authorization error: You do not have permission to delete reviews.');
+          checkAuthorization();
+        } else {
+          alert('Error deleting review');
+        }
       } else {
-        alert('Error deleting review');
+        fetchAllReviews();
       }
-    } else {
-      fetchAllReviews();
+    } catch (err) {
+      console.error('Error in deleteReview:', err);
+      alert('An error occurred while deleting the review');
     }
   }
 
