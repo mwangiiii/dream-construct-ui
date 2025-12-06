@@ -430,7 +430,7 @@ const App = () => {
             </Route>
 
             {/* SETTINGS */}
-            <Route
+            {/* <Route
               path="/admin/settings"
               element={
                 <ProtectedRoute requiredRoles={["admin"]}>
@@ -446,7 +446,7 @@ const App = () => {
                   </AdminLayout>
                 </ProtectedRoute>
               }
-            />
+            /> */}
 
             <Route
   path="/admin/settings"
