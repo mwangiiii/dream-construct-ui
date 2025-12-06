@@ -230,7 +230,7 @@ const Services = () => {
         { step: "2.1", title: "Design Planning" },
         { step: "2.2", title: "Schematic Designing" },
         { step: "2.3", title: "Construction Documents and Approvals" },
-        { step: "2.4", title: "Contractor Selection" },
+        // { step: "2.4", title: "Contractor Selection" },
       ],
     },
     {

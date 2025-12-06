@@ -1,15 +1,17 @@
 
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { Briefcase, Users, FileText, Settings, TrendingUp, BarChart3 } from "lucide-react";
+import { Briefcase, Users, FileText, Settings, TrendingUp, BarChart3, BookText } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const adminSections = [
-  { label: "Projects", icon: Briefcase, path: "/admin/projects" },
   { label: "Users", icon: Users, path: "/admin/users" },
-  { label: "Documents", icon: FileText, path: "/admin/documents" },
-  { label: "Reports", icon: BarChart3, path: "/admin/reports" },
+  { label: "Projects", icon: Briefcase, path: "/admin/projects" },
+    // { label: "Documents", icon: FileText, path: "/admin/documents" },
+  // { label: "Reports", icon: BarChart3, path: "/admin/reports" },
+  { label: "Content", icon: BookText, path: "" },
   { label: "Settings", icon: Settings, path: "/admin/settings" },
+  
 ];
 
 const Dashboard = () => {

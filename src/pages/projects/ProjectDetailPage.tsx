@@ -179,7 +179,7 @@ export default function ProjectDetailPage() {
       console.log("[ProjectDetail] Project loaded:", proj.project_number);
       setProject(proj);
 
-      // Parallel fetch all related data with FIXED foreign key syntax
+      // Parallel fetch all related data
       const [
         { data: m },
         { data: t },
@@ -241,23 +241,36 @@ export default function ProjectDetailPage() {
     }
   };
 
+  // Check if user is a client
+  const isClient = currentUser?.roles.some(r => r.role_name === "client");
+
+  // Check if user can edit (admin, manager, or assigned project manager)
   const canEdit =
     currentUser?.roles.some(r => ["admin", "manager"].includes(r.role_name)) ||
     (currentUser?.roles.some(r => r.role_name === "project_manager") &&
       project?.manager_id === currentUser?.profile?.id);
 
-  const tabs: { id: Tab; label: string; icon: any }[] = [
+  // Define tabs based on user role
+  const allTabs: { id: Tab; label: string; icon: any }[] = [
     { id: "overview", label: "Overview", icon: Home },
     { id: "milestones", label: "Milestones", icon: Calendar },
     { id: "tasks", label: "Tasks", icon: CheckCircle2 },
     { id: "updates", label: "Updates", icon: MessageSquare },
-    { id: "approvals", label: "Approvals", icon: Gavel },
+    { id: "photos", label: "Site Photos", icon: Camera },
     { id: "documents", label: "Documents", icon: FileText },
+    { id: "approvals", label: "Approvals", icon: Gavel },
     { id: "team", label: "Team", icon: Users },
     { id: "financials", label: "Financials", icon: DollarSign },
     { id: "daily-logs", label: "Daily Logs", icon: Wrench },
-    { id: "photos", label: "Site Photos", icon: Camera },
   ];
+
+  // Client sees limited tabs
+  const clientTabs: Tab[] = ["overview", "milestones", "updates", "photos", "documents"];
+  
+  // Filter tabs based on role
+  const tabs = isClient 
+    ? allTabs.filter(tab => clientTabs.includes(tab.id))
+    : allTabs;
 
   if (loading) {
     return (
@@ -287,7 +300,7 @@ export default function ProjectDetailPage() {
           <AlertCircle className="w-16 h-16 sm:w-20 sm:h-20 text-red-500 mx-auto mb-4 sm:mb-6" />
           <div className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">Project Not Found</div>
           <button
-            onClick={() => navigate("/projects")}
+            onClick={() => navigate(isClient ? "/client/projects" : "/admin/projects")}
             className="px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base"
           >
             Return to Projects
@@ -334,10 +347,12 @@ export default function ProjectDetailPage() {
                       <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
                       <span className="text-xs sm:text-base truncate">{project.site_address || "Site address not set"}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
-                      <span className="text-xs sm:text-base truncate">Client: {project.client?.companies?.name || project.client?.full_name || "Unknown"}</span>
-                    </div>
+                    {!isClient && (
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
+                        <span className="text-xs sm:text-base truncate">Client: {project.client?.companies?.name || project.client?.full_name || "Unknown"}</span>
+                      </div>
+                    )}
                     {project.manager && (
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
@@ -449,20 +464,22 @@ export default function ProjectDetailPage() {
                 </div>
 
                 <div className="space-y-4 sm:space-y-8">
-                  <GlassCard>
-                    <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
-                    <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 sm:mb-2 break-all">
-                      {(project.budget_numeric || 0).toLocaleString()} {project.currency || "KES"}
-                    </div>
-                    <p className="text-xs sm:text-sm text-muted-foreground">Total Project Budget</p>
-                  </GlassCard>
+                  {!isClient && (
+                    <GlassCard>
+                      <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
+                      <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 sm:mb-2 break-all">
+                        {(project.budget_numeric || 0).toLocaleString()} {project.currency || "KES"}
+                      </div>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Total Project Budget</p>
+                    </GlassCard>
+                  )}
 
                   <GlassCard>
                     <h3 className="text-base sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">Quick Stats</h3>
                     <div className="space-y-4 sm:space-y-5">
                       {[
                         { label: "Milestones", value: milestones.length, icon: Calendar },
-                        { label: "Tasks", value: tasks.length, icon: CheckCircle2 },
+                        ...(isClient ? [] : [{ label: "Tasks", value: tasks.length, icon: CheckCircle2 }]),
                         { label: "Updates", value: updates.length, icon: MessageSquare },
                         { label: "Documents", value: documents.length, icon: FileText },
                       ].map((stat) => {
@@ -548,7 +565,7 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {activeTab === "tasks" && (
+            {activeTab === "tasks" && !isClient && (
               <GlassCard>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
                   <h3 className="text-base sm:text-lg md:text-2xl font-bold">Tasks ({tasks.length})</h3>
@@ -746,8 +763,8 @@ export default function ProjectDetailPage() {
               </GlassCard>
             )}
 
-            {/* Placeholder for other tabs */}
-            {["approvals", "team", "financials", "daily-logs"].includes(activeTab) && (
+            {/* Placeholder for admin-only tabs */}
+            {!isClient && ["approvals", "team", "financials", "daily-logs"].includes(activeTab) && (
               <GlassCard className="text-center py-16 sm:py-20">
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}

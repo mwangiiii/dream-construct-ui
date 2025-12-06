@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, 
   Search, 
-  Filter, 
   Edit2, 
   Trash2, 
   UserCheck, 
@@ -14,15 +13,13 @@ import {
   Phone,
   Briefcase,
   Building2,
-  MoreVertical,
   X,
   CheckCircle2,
   AlertCircle,
   RefreshCw,
   UserCog,
   Clock,
-  Archive,
-  ArrowRight
+  Archive
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -38,7 +35,8 @@ interface User {
   created_at: string;
   last_sign_in_at?: string;
   status_id: number;
-  user_roles?: Array<{ role_name: string }>;
+  user_roles: Array<{ role_name: string; assigned_at: string }>;
+  primary_role?: string; // The first/main role for display
 }
 
 interface FormData {
@@ -56,11 +54,7 @@ const UserManagement: React.FC = () => {
   const location = useLocation();
 
   const [users, setUsers] = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [roleFilter, setRoleFilter] = useState('all');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -68,7 +62,8 @@ const UserManagement: React.FC = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [hasMounted, setHasMounted] = useState(false); // Track first mount
+  const [activeTab, setActiveTab] = useState<string>('manager');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const statuses = {
     1: { name: 'Active', color: 'text-green-400 bg-green-400/10 border-green-400/30', icon: UserCheck },
@@ -79,9 +74,11 @@ const UserManagement: React.FC = () => {
   };
 
   const roles = {
-    admin: { label: 'Admin', color: 'text-accent', icon: Shield },
-    manager: { label: 'Manager', color: 'text-primary', icon: UserCog },
-    client: { label: 'Client', color: 'text-green-400', icon: Users }
+    manager: { label: 'Managers', color: 'text-primary', icon: UserCog },
+    client: { label: 'Clients', color: 'text-green-400', icon: Users },
+    admin: { label: 'Admins', color: 'text-accent', icon: Shield },
+    surveyor: { label: 'Surveyors', color: 'text-blue-400', icon: Briefcase },
+    project_manager: { label: 'Project Managers', color: 'text-purple-400', icon: UserCog },
   };
 
   // === AUTH GUARD ===
@@ -113,17 +110,14 @@ const UserManagement: React.FC = () => {
   useEffect(() => {
     if (session) {
       fetchUsers();
-      setHasMounted(true); // Mark as mounted after first load
     }
   }, [session]);
 
-  useEffect(() => {
-    filterUsers();
-  }, [searchTerm, statusFilter, roleFilter, users]);
-
+  // ✅ FIXED: Proper data fetching with auth.users join
   const fetchUsers = async () => {
     setLoading(true);
     try {
+      // Get profiles data
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('*')
@@ -131,48 +125,42 @@ const UserManagement: React.FC = () => {
 
       if (profilesError) throw profilesError;
 
+      // Get roles data
       const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
-        .select('user_id, role_name');
+        .select('user_id, role_name, assigned_at')
+        .order('assigned_at', { ascending: true }); // First role assigned = primary role
 
       if (rolesError) throw rolesError;
 
-      const usersWithRoles = profilesData?.map(profile => ({
-        ...profile,
-        user_roles: rolesData?.filter(role => role.user_id === profile.id) || []
-      })) || [];
+      // Get auth users data for email and last_sign_in_at
+      const { data: { users: authUsers }, error: authError } = await supabase.auth.admin.listUsers();
+      
+      if (authError) {
+        console.warn('Could not fetch auth users (requires service role):', authError);
+      }
+
+      // Combine all data
+      const usersWithRoles = profilesData?.map(profile => {
+        const userRoles = rolesData?.filter(role => role.user_id === profile.id) || [];
+        const authUser = authUsers?.find(u => u.id === profile.id);
+        
+        return {
+          ...profile,
+          email: authUser?.email || profile.email || 'No email',
+          last_sign_in_at: authUser?.last_sign_in_at,
+          user_roles: userRoles,
+          primary_role: userRoles[0]?.role_name || 'client' // First role is primary
+        };
+      }) || [];
 
       setUsers(usersWithRoles);
     } catch (err: any) {
       console.error('Fetch users error:', err);
-      showNotification('Failed to load users', 'error');
+      showNotification('Failed to load users: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
-  };
-
-  const filterUsers = () => {
-    let filtered = [...users];
-
-    if (searchTerm) {
-      filtered = filtered.filter(user => 
-        user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(user => user.status_id === parseInt(statusFilter));
-    }
-
-    if (roleFilter !== 'all') {
-      filtered = filtered.filter(user => 
-        user.user_roles?.some(r => r.role_name === roleFilter)
-      );
-    }
-
-    setFilteredUsers(filtered);
   };
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
@@ -180,42 +168,118 @@ const UserManagement: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // ✅ FIXED: Proper update handling for composite key
   const handleUpdateUser = async (userId: string, updates: Partial<FormData>) => {
     setActionLoading(true);
     try {
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'update', userId, updates }
-      });
+      const { role, email, ...profileUpdates } = updates;
 
-      if (error) throw error;
-      
+      // 1. Update profile table (excluding email which is in auth.users)
+      if (Object.keys(profileUpdates).length > 0) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update(profileUpdates)
+          .eq('id', userId);
+
+        if (profileError) throw new Error('Failed to update profile: ' + profileError.message);
+      }
+
+      // 2. Update email in auth.users (requires Edge Function)
+      if (email && email !== selectedUser?.email) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-user-email`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ userId, email })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to update email');
+        }
+      }
+
+      // 3. Update role in user_roles table
+      if (role && role !== selectedUser?.primary_role) {
+        // Delete old role assignments
+        const { error: deleteError } = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', userId);
+
+        if (deleteError) throw new Error('Failed to delete old roles: ' + deleteError.message);
+
+        // Insert new role
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentUserId = sessionData.session?.user.id;
+
+        const { error: insertError } = await supabase
+          .from('user_roles')
+          .insert({
+            user_id: userId,
+            role_name: role,
+            assigned_by: currentUserId
+          });
+
+        if (insertError) throw new Error('Failed to assign new role: ' + insertError.message);
+      }
+
+      // ✅ Refresh data after update
       await fetchUsers();
+      
       showNotification('User updated successfully');
       setShowEditModal(false);
       setSelectedUser(null);
     } catch (err: any) {
+      console.error('Update error:', err);
       showNotification(err.message || 'Failed to update user', 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
+  // ✅ FIXED: Proper deletion with Edge Function
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
     
     setActionLoading(true);
     try {
-      const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'delete', userId: selectedUser.id }
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) throw new Error('Not authenticated');
+
+      // Call Edge Function to delete user (handles auth.users, profiles, and user_roles)
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: selectedUser.id })
       });
 
-      if (error) throw error;
+      const result = await response.json();
       
-      await fetchUsers();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete user');
+      }
+
+      // ✅ Remove from local state
+      setUsers(prevUsers => prevUsers.filter(user => user.id !== selectedUser.id));
+      
       showNotification('User deleted successfully');
       setShowDeleteModal(false);
       setSelectedUser(null);
     } catch (err: any) {
+      console.error('Delete error:', err);
       showNotification(err.message || 'Failed to delete user', 'error');
     } finally {
       setActionLoading(false);
@@ -231,6 +295,7 @@ const UserManagement: React.FC = () => {
     });
   };
 
+  // ✅ FIXED: EditModal with proper initialization
   const EditModal = () => {
     const [formData, setFormData] = useState<FormData>({
       full_name: selectedUser?.full_name || '',
@@ -239,8 +304,47 @@ const UserManagement: React.FC = () => {
       company_name: selectedUser?.company_name || '',
       job_title: selectedUser?.job_title || '',
       status_id: selectedUser?.status_id || 1,
-      role: selectedUser?.user_roles?.[0]?.role_name || 'client'
+      role: selectedUser?.primary_role || 'client'
     });
+
+    const [modifiedFields, setModifiedFields] = useState<Set<string>>(new Set());
+
+    const handleFieldChange = (field: keyof FormData, value: string | number) => {
+      setFormData(prev => ({ ...prev, [field]: value }));
+      
+      // Check if value actually changed from original
+      const originalValue = selectedUser?.[field as keyof User] || '';
+      if (field === 'role') {
+        if (value !== selectedUser?.primary_role) {
+          setModifiedFields(prev => new Set(prev).add(field));
+        } else {
+          setModifiedFields(prev => {
+            const next = new Set(prev);
+            next.delete(field);
+            return next;
+          });
+        }
+      } else if (value !== originalValue) {
+        setModifiedFields(prev => new Set(prev).add(field));
+      } else {
+        setModifiedFields(prev => {
+          const next = new Set(prev);
+          next.delete(field);
+          return next;
+        });
+      }
+    };
+
+    const handleSave = () => {
+      if (!selectedUser || modifiedFields.size === 0) return;
+
+      const updates: Partial<FormData> = {};
+      modifiedFields.forEach(field => {
+        updates[field as keyof FormData] = formData[field as keyof FormData];
+      });
+
+      handleUpdateUser(selectedUser.id, updates);
+    };
 
     return (
       <motion.div
@@ -274,7 +378,7 @@ const UserManagement: React.FC = () => {
                 <input
                   type="text"
                   value={formData.full_name}
-                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                  onChange={(e) => handleFieldChange('full_name', e.target.value)}
                   className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
@@ -284,7 +388,7 @@ const UserManagement: React.FC = () => {
                 <input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  onChange={(e) => handleFieldChange('email', e.target.value)}
                   className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
@@ -295,7 +399,8 @@ const UserManagement: React.FC = () => {
                   <input
                     type="tel"
                     value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                    onChange={(e) => handleFieldChange('phone', e.target.value)}
+                    placeholder="Optional"
                     className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                   />
                 </div>
@@ -305,7 +410,8 @@ const UserManagement: React.FC = () => {
                   <input
                     type="text"
                     value={formData.job_title}
-                    onChange={(e) => setFormData({...formData, job_title: e.target.value})}
+                    onChange={(e) => handleFieldChange('job_title', e.target.value)}
+                    placeholder="Optional"
                     className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                   />
                 </div>
@@ -316,7 +422,8 @@ const UserManagement: React.FC = () => {
                 <input
                   type="text"
                   value={formData.company_name}
-                  onChange={(e) => setFormData({...formData, company_name: e.target.value})}
+                  onChange={(e) => handleFieldChange('company_name', e.target.value)}
+                  placeholder="Optional"
                   className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
@@ -326,7 +433,7 @@ const UserManagement: React.FC = () => {
                   <label className="text-sm font-medium text-muted-foreground mb-2 block">Status</label>
                   <select
                     value={formData.status_id}
-                    onChange={(e) => setFormData({...formData, status_id: parseInt(e.target.value)})}
+                    onChange={(e) => handleFieldChange('status_id', parseInt(e.target.value))}
                     className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                   >
                     {Object.entries(statuses).map(([id, status]) => (
@@ -339,7 +446,7 @@ const UserManagement: React.FC = () => {
                   <label className="text-sm font-medium text-muted-foreground mb-2 block">Role</label>
                   <select
                     value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
+                    onChange={(e) => handleFieldChange('role', e.target.value)}
                     className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                   >
                     {Object.entries(roles).map(([key, role]) => (
@@ -348,6 +455,14 @@ const UserManagement: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {modifiedFields.size > 0 && (
+                <div className="p-4 bg-primary/10 border border-primary/30 rounded-xl">
+                  <p className="text-sm text-primary font-medium">
+                    Modified fields: {Array.from(modifiedFields).join(', ')}
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-4 pt-6">
                 <Button
@@ -358,11 +473,18 @@ const UserManagement: React.FC = () => {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => selectedUser && handleUpdateUser(selectedUser.id, formData)}
-                  disabled={actionLoading}
+                  onClick={handleSave}
+                  disabled={actionLoading || modifiedFields.size === 0}
                   className="flex-1 h-14 text-lg rounded-xl bg-primary hover:bg-primary/90"
                 >
-                  {actionLoading ? 'Saving...' : 'Save Changes'}
+                  {actionLoading ? (
+                    <span className="flex items-center gap-2">
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : (
+                    'Save Changes'
+                  )}
                 </Button>
               </div>
             </div>
@@ -388,71 +510,74 @@ const UserManagement: React.FC = () => {
         className="w-full max-w-md"
       >
         <GlassCard className="p-8 border-destructive/30">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="w-8 h-8 text-destructive" />
-            </div>
-            <h2 className="text-2xl md:text-3xl font-bold mb-4">Delete User</h2>
-            <p className="text-muted-foreground mb-8">
-              Are you sure you want to delete <strong className="text-foreground">{selectedUser?.full_name}</strong>? This action cannot be undone.
-            </p>
-            <div className="flex gap-4">
-              <Button
-                onClick={() => setShowDeleteModal(false)}
-                variant="outline"
-                className="flex-1 h-14 text-lg rounded-xl"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleDeleteUser}
-                disabled={actionLoading}
-                className="flex-1 h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
-              >
-                {actionLoading ? 'Deleting...' : 'Delete'}
-              </Button>
-            </div>
+          <div className="flex items-center justify-center w-16 h-16 bg-destructive/20 rounded-2xl mx-auto mb-6">
+            <AlertCircle className="w-8 h-8 text-destructive" />
+          </div>
+          <h2 className="text-2xl font-bold text-center mb-4">Delete User</h2>
+          <p className="text-muted-foreground text-center mb-8">
+            Are you sure you want to delete <span className="font-semibold text-foreground">{selectedUser?.full_name}</span>? This action cannot be undone.
+          </p>
+          <div className="flex gap-4">
+            <Button
+              onClick={() => setShowDeleteModal(false)}
+              variant="outline"
+              className="flex-1 h-14 text-lg rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteUser}
+              disabled={actionLoading}
+              className="flex-1 h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
+            >
+              {actionLoading ? (
+                <span className="flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  Deleting...
+                </span>
+              ) : (
+                'Delete User'
+              )}
+            </Button>
           </div>
         </GlassCard>
       </motion.div>
     </motion.div>
   );
 
-  if (checkingAuth || !session) return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <span className="text-lg text-muted-foreground">Loading...</span>
-    </div>
-  );
+  if (checkingAuth || !session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Background */}
       <div className="fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-primary/5" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
-        <div className="absolute inset-0 opacity-5">
-          <div className="absolute inset-0" style={{
-            backgroundImage: 'url("data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%23ffffff" fill-opacity="1"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-          }} />
-        </div>
       </div>
 
-      <div className="container mx-auto px-2 sm:px-4 md:px-6 py-8 md:py-16 max-w-2xl md:max-w-4xl lg:max-w-7xl">
+      <div className="container mx-auto px-2 sm:px-4 md:px-6 py-8 md:py-16 max-w-7xl">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
           className="mb-8 md:mb-16"
         >
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
             <div>
-              <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-2 sm:mb-4">
+              <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-4">
                 User
                 <br />
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
                   Management
                 </span>
               </h1>
-              <p className="text-base sm:text-xl md:text-2xl text-muted-foreground">
+              <p className="text-xl md:text-2xl text-muted-foreground">
                 Manage team members and access control
               </p>
             </div>
@@ -460,203 +585,177 @@ const UserManagement: React.FC = () => {
               onClick={fetchUsers}
               size="lg"
               variant="outline"
-              className="glass rounded-xl h-12 sm:h-14 px-4 sm:px-6"
+              className="glass rounded-xl h-14 px-6"
             >
               <RefreshCw className="w-5 h-5" />
             </Button>
           </div>
+        </motion.div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
-            {[
-              { label: 'Total Users', value: users.length, icon: Users, color: 'primary' },
-              { label: 'Active', value: users.filter(u => u.status_id === 1).length, icon: UserCheck, color: 'green' },
-              { label: 'Pending', value: users.filter(u => u.status_id === 4).length, icon: Clock, color: 'blue' },
-              { label: 'Suspended', value: users.filter(u => u.status_id === 3).length, icon: UserX, color: 'red' }
-            ].map((stat, i) => {
-              const Icon = stat.icon;
-              return (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 + i * 0.1, duration: 0.6 }}
-                >
-                  <GlassCard className="text-center">
-                    <Icon className="w-8 sm:w-10 h-8 sm:h-10 mx-auto mb-2 sm:mb-4 text-primary" />
-                    <div className="text-2xl sm:text-4xl font-bold mb-1 sm:mb-2 text-primary">{stat.value}</div>
-                    <div className="text-xs sm:text-sm text-muted-foreground">{stat.label}</div>
-                  </GlassCard>
-                </motion.div>
-              );
-            })}
+        {/* Filters */}
+        <GlassCard className="p-6 mb-8">
+          <div className="flex gap-4 mb-4 overflow-x-auto pb-2">
+            {Object.entries(roles).map(([key, role]) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`px-6 py-3 rounded-xl font-semibold text-lg transition-all border-b-2 whitespace-nowrap ${
+                  activeTab === key
+                    ? 'border-primary text-primary bg-background/80'
+                    : 'border-transparent text-muted-foreground bg-background/40 hover:bg-background/60'
+                }`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <role.icon className={`w-5 h-5 ${role.color}`} />
+                  {role.label}
+                </span>
+              </button>
+            ))}
           </div>
-        </motion.div>
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+            />
+          </div>
+        </GlassCard>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.8 }}
-        >
-          <GlassCard className="p-4 sm:p-6 mb-6 sm:mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search users..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
-                />
-              </div>
-
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
-              >
-                <option value="all">All Statuses</option>
-                {Object.entries(statuses).map(([id, status]) => (
-                  <option key={id} value={id}>{status.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
-              >
-                <option value="all">All Roles</option>
-                {Object.entries(roles).map(([key, role]) => (
-                  <option key={key} value={key}>{role.label}</option>
-                ))}
-              </select>
-            </div>
-          </GlassCard>
-        </motion.div>
-
+        {/* User List */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-12 h-12 text-primary animate-spin" />
           </div>
         ) : (
-          <motion.div className="space-y-4">
+          <div className="space-y-4">
             <AnimatePresence mode="wait">
-              {filteredUsers.map((user, i) => {
-                const StatusIcon = statuses[user.status_id]?.icon || UserCheck;
-                const roleInfo = roles[user.user_roles?.[0]?.role_name as keyof typeof roles] || roles.client;
-                const RoleIcon = roleInfo.icon;
+              {users
+                .filter(user =>
+                  user.primary_role === activeTab &&
+                  (searchTerm === '' ||
+                    user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+                  )
+                )
+                .map((user, i) => {
+                  const StatusIcon = statuses[user.status_id]?.icon || UserCheck;
+                  const roleInfo = roles[user.primary_role as keyof typeof roles] || roles.client;
 
-                return (
-                  <motion.div
-                    key={user.id}
-                    layout
-                    initial={hasMounted ? false : { opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ 
-                      layout: { duration: 0.3 },
-                      opacity: { duration: 0.3 },
-                      y: { duration: 0.4, delay: hasMounted ? 0 : i * 0.05 }
-                    }}
-                    className="relative"
-                  >
-                    <GlassCard className="p-6 hover:border-primary/30 transition-all group">
-                      <div className="flex items-center justify-between gap-6">
-                        <div className="flex items-center gap-6 flex-1">
-                          <div className="w-16 h-16 bg-gradient-to-br from-primary via-accent to-primary rounded-2xl flex items-center justify-center text-background text-xl font-bold flex-shrink-0">
-                            {user.full_name?.charAt(0) || '?'}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-2 flex-wrap">
-                              <h3 className="text-xl font-semibold truncate">{user.full_name}</h3>
-                              <span className={`px-3 py-1 rounded-lg text-xs font-medium border ${statuses[user.status_id]?.color}`}>
-                                {statuses[user.status_id]?.name}
-                              </span>
-                              <span className={`px-3 py-1 rounded-lg text-xs font-medium ${roleInfo.color} bg-background/50`}>
-                                {roleInfo.label}
-                              </span>
+                  return (
+                    <motion.div
+                      key={user.id}
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ delay: i * 0.05 }}
+                    >
+                      <GlassCard className="p-6 hover:border-primary/30 transition-all">
+                        <div className="flex items-center justify-between gap-6">
+                          <div className="flex items-center gap-6 flex-1">
+                            <div className="w-16 h-16 bg-gradient-to-br from-primary via-accent to-primary rounded-2xl flex items-center justify-center text-background text-xl font-bold flex-shrink-0">
+                              {user.full_name?.charAt(0) || '?'}
                             </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm text-muted-foreground">
-                              <div className="flex items-center gap-2">
-                                <Mail className="w-4 h-4 flex-shrink-0" />
-                                <span className="truncate">{user.email}</span>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3 mb-2 flex-wrap">
+                                <h3 className="text-xl font-semibold truncate">{user.full_name}</h3>
+                                <span className={`px-3 py-1 rounded-lg text-xs font-medium border ${statuses[user.status_id]?.color}`}>
+                                  {statuses[user.status_id]?.name}
+                                </span>
+                                <span className={`px-3 py-1 rounded-lg text-xs font-medium ${roleInfo.color} bg-background/50`}>
+                                  {roleInfo.label}
+                                </span>
                               </div>
-                              {user.phone && (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-muted-foreground">
                                 <div className="flex items-center gap-2">
-                                  <Phone className="w-4 h-4 flex-shrink-0" />
-                                  <span>{user.phone}</span>
+                                  <Mail className="w-4 h-4 flex-shrink-0" />
+                                  <span className="truncate">{user.email}</span>
                                 </div>
-                              )}
-                              {user.company_name && (
-                                <div className="flex items-center gap-2">
-                                  <Building2 className="w-4 h-4 flex-shrink-0" />
-                                  <span className="truncate">{user.company_name}</span>
-                                </div>
-                              )}
-                              {user.job_title && (
-                                <div className="flex items-center gap-2">
-                                  <Briefcase className="w-4 h-4 flex-shrink-0" />
-                                  <span className="truncate">{user.job_title}</span>
-                                </div>
-                              )}
-                            </div>
-                            
-                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                              <span>Joined: {formatDate(user.created_at)}</span>
-                              <span>Last login: {formatDate(user.last_sign_in_at)}</span>
+                                {user.phone && (
+                                  <div className="flex items-center gap-2">
+                                    <Phone className="w-4 h-4 flex-shrink-0" />
+                                    <span>{user.phone}</span>
+                                  </div>
+                                )}
+                                {user.company_name && (
+                                  <div className="flex items-center gap-2">
+                                    <Building2 className="w-4 h-4 flex-shrink-0" />
+                                    <span className="truncate">{user.company_name}</span>
+                                  </div>
+                                )}
+                                {user.job_title && (
+                                  <div className="flex items-center gap-2">
+                                    <Briefcase className="w-4 h-4 flex-shrink-0" />
+                                    <span className="truncate">{user.job_title}</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                <span>Joined: {formatDate(user.created_at)}</span>
+                                <span>Last login: {formatDate(user.last_sign_in_at)}</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <Button
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setShowEditModal(true);
+                              }}
+                              variant="outline"
+                              size="lg"
+                              className="glass rounded-xl"
+                            >
+                              <Edit2 className="w-5 h-5" />
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setShowDeleteModal(true);
+                              }}
+                              variant="outline"
+                              size="lg"
+                              className="glass rounded-xl text-destructive border-destructive/30 hover:bg-destructive/10"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </Button>
+                          </div>
                         </div>
-
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Button
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowEditModal(true);
-                            }}
-                            variant="outline"
-                            size="lg"
-                            className="glass rounded-xl"
-                          >
-                            <Edit2 className="w-5 h-5" />
-                          </Button>
-                          <Button
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowDeleteModal(true);
-                            }}
-                            variant="outline"
-                            size="lg"
-                            className="glass rounded-xl text-destructive border-destructive/30 hover:bg-destructive/10"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </Button>
-                        </div>
-                      </div>
-                    </GlassCard>
-                  </motion.div>
-                );
-              })}
+                      </GlassCard>
+                    </motion.div>
+                  );
+                })}
             </AnimatePresence>
 
-            {filteredUsers.length === 0 && (
+            {users.filter(user => 
+              user.primary_role === activeTab && 
+              (searchTerm === '' || 
+                user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                user.email?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+              )
+            ).length === 0 && (
               <div className="text-center py-20">
                 <Users className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
                 <p className="text-xl text-muted-foreground">No users found</p>
               </div>
             )}
-          </motion.div>
+          </div>
         )}
       </div>
 
+      {/* Modals */}
       <AnimatePresence>
         {showEditModal && <EditModal />}
         {showDeleteModal && <DeleteModal />}
       </AnimatePresence>
 
+      {/* Notifications */}
       <AnimatePresence>
         {notification && (
           <motion.div

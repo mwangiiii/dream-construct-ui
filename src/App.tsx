@@ -13,6 +13,9 @@ import { getCurrentUser } from "@/lib/auth";
 
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
+import ClientLayout from "./components/layout/ClientLayout";
+import AdminSettingsPage from "./pages/admin/settings";
+import ClientSettingsPage from "./pages/client/settings";
 
 // Public Pages
 import Index from "./pages/Index";
@@ -33,6 +36,9 @@ import ReviewsManagement from "./pages/admin/ReviewsManagement";
 // Project Management Pages
 import ProjectManagementDashboard from "./components/dashboard/ProjectManagementDashboard";
 import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
+import ClientDashboard from "./pages/client/Dashboard";
+import ClientProjects from "./pages/client/projects";
+import ClientNotifications from "./pages/client/clientNotifications";
 
 // 404
 import NotFound from "./pages/NotFound";
@@ -343,11 +349,11 @@ const App = () => {
               }
             />
 
-            {/* PROJECT DETAIL PAGE — Accessible by admin, manager, project_manager, client */}
+            {/* PROJECT DETAIL PAGE — Accessible by admin, manager, project_manager */}
             <Route
               path="/admin/projects/:id"
               element={
-                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager", "client"]}>
+                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager"]}>
                   <AdminLayout>
                     <ProjectDetailPage />
                   </AdminLayout>
@@ -355,22 +361,28 @@ const App = () => {
               }
             />
 
-            {/* CLIENT PROJECT DASHBOARD — Separate view for clients */}
+            {/* === CLIENT ROUTES === */}
+            
+            {/* CLIENT DASHBOARD */}
             <Route
+              path="/client/dashboard"
+              element={
+                <ProtectedRoute requiredRoles={["client"]}>
+                  <ClientLayout>
+                    <ClientDashboard />
+                  </ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* CLIENT PROJECTS LIST */}
+            <Route 
               path="/client/projects"
               element={
                 <ProtectedRoute requiredRoles={["client"]}>
-                  <AdminLayout>
-                    <div className="p-8">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h1 className="text-4xl font-bold">My Projects</h1>
-                          <p className="text-muted-foreground mt-2">View your construction projects</p>
-                        </div>
-                      </div>
-                      <ProjectManagementDashboard />
-                    </div>
-                  </AdminLayout>
+                  <ClientLayout>
+                    <ClientProjects />
+                  </ClientLayout>
                 </ProtectedRoute>
               }
             />
@@ -380,14 +392,26 @@ const App = () => {
               path="/client/projects/:id"
               element={
                 <ProtectedRoute requiredRoles={["client"]}>
-                  <AdminLayout>
+                  <ClientLayout>
                     <ProjectDetailPage />
-                  </AdminLayout>
+                  </ClientLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* CONTENT MANAGEMENT — Nested Routes with Tabs */}
+            {/* CLIENT NOTIFICATIONS PAGE */}
+            <Route
+              path="/client/notifications"
+              element={
+                <ProtectedRoute requiredRoles={["client"]}>
+                  <ClientLayout>
+                    <ClientNotifications />
+                  </ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* === CONTENT MANAGEMENT — Nested Routes with Tabs === */}
             <Route
               path="/admin/content"
               element={
@@ -424,6 +448,27 @@ const App = () => {
               }
             />
 
+            <Route
+  path="/admin/settings"
+  element={
+    <ProtectedRoute>
+      <AdminLayout>
+        <AdminSettingsPage />
+      </AdminLayout>
+    </ProtectedRoute>
+  }
+  
+/>
+<Route
+  path="/client/settings"
+  element={
+    <ProtectedRoute>
+      <ClientLayout>
+        <ClientSettingsPage />
+      </ClientLayout>
+    </ProtectedRoute>
+  }
+/>
             {/* === 404 === */}
             <Route path="*" element={<NotFound />} />
           </Routes>

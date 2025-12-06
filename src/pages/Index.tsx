@@ -46,7 +46,7 @@ const Index = () => {
     {
       title: "Residential Excellence",
       description: "From concept to completion, we create living spaces that are Family-Friendly and Reflect your Lifestyle.",
-      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763447970/residential-excellencee_qwuy0i.mp4",
+      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1765045116/WhatsApp_Video_2025-12-06_at_21.16.56_3392bcdc_f1hnsk.mp4",
     },
     {
       title: "Commercial Mastery",
@@ -122,7 +122,7 @@ const Index = () => {
                 <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold mb-4 leading-tight break-words">
                   {heroSlides[currentSlide].title}
                   <br />
-                  <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
+                    <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
                     {heroSlides[currentSlide].highlight}
                   </span>
                 </h1>

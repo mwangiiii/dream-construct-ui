@@ -20,15 +20,16 @@ const Login = () => {
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 
   // Extract redirectTo from URL
-  const getRedirectPath = () => {
-    const params = new URLSearchParams(location.search);
-    const redirectTo = params.get("redirectTo");
-    if (redirectTo && redirectTo.startsWith("/")) {
-      return decodeURIComponent(redirectTo);
-    }
-    return "/admin"; // default fallback
-  };
+  // const getRedirectPath = () => {
+  //   const params = new URLSearchParams(location.search);
+  //   const redirectTo = params.get("redirectTo");
+  //   if (redirectTo && redirectTo.startsWith("/")) {
+  //     return decodeURIComponent(redirectTo);
+  //   }
+  //   return "/admin"; // default fallback
+  // };
 
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErrors({}); // Clear previous errors
@@ -134,7 +135,29 @@ const Login = () => {
       });
 
       // SUCCESS: Redirect to intended destination
-      const redirectPath = getRedirectPath();
+      // Fetch user roles and redirect based on role
+      const { data: userRoles, error: rolesError } = await supabase
+        .from("user_roles")
+        .select("role_name")
+        .eq("user_id", data.user.id);
+
+      if (rolesError) {
+        console.error("Error fetching user roles:", rolesError);
+        navigate("/client/dashboard", { replace: true }); // fallback
+        return;
+      }
+
+      const role = userRoles?.[0]?.role_name;
+      let redirectPath = "/client/dashboard"; // default
+      if (role === "client") {
+        redirectPath = "/client/dashboard";
+      } else if (role === "manager") {
+        redirectPath = "/manager";
+      } else if (role === "admin") {
+        redirectPath = "/admin";
+      } else {
+        redirectPath = "/client"; // fallback
+      }
       navigate(redirectPath, { replace: true });
 
     } catch (error: any) {

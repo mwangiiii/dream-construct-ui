@@ -1,4 +1,6 @@
 import { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabaseClient";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -41,6 +43,12 @@ interface AdminLayoutProps {
 const AdminLayout = ({ children }: AdminLayoutProps) => {
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
 
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
@@ -101,7 +109,10 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
         </div>
 
         <div className="absolute bottom-3 sm:bottom-6 left-0 right-0 px-3 sm:px-6">
-          <button className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 sm:py-3 rounded-lg text-muted-foreground hover:bg-white/5 w-full transition-all text-sm sm:text-base">
+          <button
+            className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 sm:py-3 rounded-lg text-muted-foreground hover:bg-white/5 w-full transition-all text-sm sm:text-base"
+            onClick={handleLogout}
+          >
             <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
             {isSidebarOpen && <span className="font-medium">Logout</span>}
           </button>
