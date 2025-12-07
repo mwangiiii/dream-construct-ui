@@ -98,6 +98,7 @@ const MediaGalleryPage = () => {
   const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<MediaPost | null>(null);
+  const [initialMediaId, setInitialMediaId] = useState<string | null>(null);
   
   // Refs
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -256,10 +257,43 @@ const MediaGalleryPage = () => {
   // EFFECTS
   // ============================================
 
-  // Initial load
+  // Initial load and check for media query param
   useEffect(() => {
+    // Check for ?media=... in URL
+    const params = new URLSearchParams(window.location.search);
+    const mediaId = params.get("media");
+    if (mediaId) {
+      setInitialMediaId(mediaId);
+    }
     fetchMedia(0, false);
   }, []);
+  // Open lightbox for shared media if present in URL
+  useEffect(() => {
+    if (!initialMediaId) return;
+    // Try to find the media in loaded media or pinnedMedia
+    const allMedia = [...pinnedMedia, ...media];
+    const found = allMedia.find(m => m.id === initialMediaId);
+    if (found) {
+      setSelectedMedia(found);
+      setInitialMediaId(null); // Only open once
+    } else if (!isLoading && !error) {
+      // If not found, fetch directly from supabase
+      (async () => {
+        try {
+          const { data, error: fetchError } = await supabase
+            .from('media_posts')
+            .select('*')
+            .eq('id', initialMediaId)
+            .eq('status', 'published')
+            .is('deleted_at', null)
+            .single();
+          if (fetchError || !data) return;
+          setSelectedMedia(data);
+        } catch {}
+        setInitialMediaId(null);
+      })();
+    }
+  }, [initialMediaId, media, pinnedMedia, isLoading, error]);
 
   // Refetch when filters change
   useEffect(() => {
