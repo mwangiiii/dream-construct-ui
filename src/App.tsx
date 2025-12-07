@@ -1,3 +1,4 @@
+import MediaGalleryPage from "./pages/MediaGalleryPage";
 // src/App.tsx
 import { useEffect, useState, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
@@ -39,6 +40,9 @@ import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
 import ClientDashboard from "./pages/client/Dashboard";
 import ClientProjects from "./pages/client/projects";
 import ClientNotifications from "./pages/client/clientNotifications";
+
+// Media Management
+import MediaCreate from "./pages/admin/multimedia/mediaCreate";
 
 // 404
 import NotFound from "./pages/NotFound";
@@ -117,13 +121,63 @@ const ContentOverview = () => (
   </div>
 );
 
-// Placeholder components for other content sections
-const MediaLibrary = () => (
-  <div className="text-center py-12">
-    <h2 className="text-2xl font-semibold mb-4">Media Library</h2>
-    <p className="text-muted-foreground">Media management coming soon...</p>
-  </div>
-);
+// Media Library Tabs: Library & Create Media
+import { useNavigate } from "react-router-dom";
+
+const MediaLibraryTabs = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const tabs = [
+    { name: "Library", path: "/admin/content/media" },
+    { name: "Create Media", path: "/admin/content/media/create" },
+  ];
+  
+  // Check if we're on the create page
+  const isCreatePage = location.pathname === "/admin/content/media/create";
+  
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-3xl font-bold">Media Library</h2>
+        <p className="text-muted-foreground mt-2">Manage and upload advertisements, images, and videos</p>
+      </div>
+      
+      <div className="border-b border-border mb-6">
+        <nav className="flex space-x-8">
+          {tabs.map((tab) => {
+            const isActive = location.pathname === tab.path;
+            return (
+              <button
+                key={tab.path}
+                onClick={() => navigate(tab.path)}
+                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                  isActive
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                }`}
+              >
+                {tab.name}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+      
+      {/* Render content based on current path */}
+      {isCreatePage ? (
+        <MediaCreate />
+      ) : (
+        <div className="text-center py-12">
+          <h2 className="text-2xl font-semibold mb-4">Media Library</h2>
+          <p className="text-muted-foreground">Media management coming soon...</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MediaLibrary = MediaLibraryTabs;
 
 const PagesContent = () => (
   <div className="text-center py-12">
@@ -284,6 +338,7 @@ const App = () => {
             <Route path="/team" element={<MainLayout><Team /></MainLayout>} />
             <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
             <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
+            <Route path="/media" element={<MainLayout><MediaGalleryPage /></MainLayout>} />
 
             {/* === AUTH ROUTES === */}
             <Route path="/login" element={<Login />} />
@@ -425,50 +480,60 @@ const App = () => {
               {/* Nested Content Routes */}
               <Route index element={<ContentOverview />} />
               <Route path="reviews" element={<ReviewsManagement />} />
-              <Route path="media" element={<MediaLibrary />} />
               <Route path="pages" element={<PagesContent />} />
             </Route>
 
-            {/* SETTINGS */}
-            {/* <Route
-              path="/admin/settings"
+            {/* MEDIA LIBRARY ROUTES - Separate from nested content routes */}
+            <Route
+              path="/admin/content/media"
               element={
-                <ProtectedRoute requiredRoles={["admin"]}>
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
                   <AdminLayout>
                     <div className="p-8">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h1 className="text-4xl font-bold">Settings</h1>
-                          <p className="text-muted-foreground mt-2">Configure system settings</p>
-                        </div>
-                      </div>
+                      <MediaLibrary />
                     </div>
                   </AdminLayout>
                 </ProtectedRoute>
               }
-            /> */}
+            />
 
             <Route
-  path="/admin/settings"
-  element={
-    <ProtectedRoute>
-      <AdminLayout>
-        <AdminSettingsPage />
-      </AdminLayout>
-    </ProtectedRoute>
-  }
-  
-/>
-<Route
-  path="/client/settings"
-  element={
-    <ProtectedRoute>
-      <ClientLayout>
-        <ClientSettingsPage />
-      </ClientLayout>
-    </ProtectedRoute>
-  }
-/>
+              path="/admin/content/media/create"
+              element={
+                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                  <AdminLayout>
+                    <div className="p-8">
+                      <MediaLibrary />
+                    </div>
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ADMIN SETTINGS */}
+            <Route
+              path="/admin/settings"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <AdminSettingsPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* CLIENT SETTINGS */}
+            <Route
+              path="/client/settings"
+              element={
+                <ProtectedRoute>
+                  <ClientLayout>
+                    <ClientSettingsPage />
+                  </ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
             {/* === 404 === */}
             <Route path="*" element={<NotFound />} />
           </Routes>

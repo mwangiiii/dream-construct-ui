@@ -171,6 +171,7 @@ const Navbar = () => {
     { name: "Team", path: "/team" },
     { name: "Contact", path: "/contact" },
     { name: "Reviews", path: "/reviews" },
+    {name: "Media", path: "/media" },
   ];
 
   return (
