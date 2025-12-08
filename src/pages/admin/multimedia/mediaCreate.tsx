@@ -338,15 +338,15 @@ export default function MediaCreate() {
 
   return (
     <div className="max-w-4xl mx-auto py-12 px-4">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+      {/* <div className="mb-8"> */}
+        {/* <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           Create New Media
-        </h1>
-        <p className="text-muted-foreground">
+        </h1> */}
+        {/* <p className="text-muted-foreground">
           Upload stunning visuals to showcase Dream Construct's latest projects and achievements.
-        </p>
+        </p> */}
 
-        <div className="mt-4 flex items-center gap-2">
+        {/* <div className="mt-4 flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowLogs(!showLogs)} className="gap-2">
             <Terminal className="w-4 h-4" />
             {showLogs ? "Hide" : "Show"} Debug Logs ({logs.length})
@@ -357,8 +357,8 @@ export default function MediaCreate() {
               <Button variant="ghost" size="sm" onClick={exportLogs}>Export</Button>
             </>
           )}
-        </div>
-      </div>
+        </div> */}
+      {/* </div> */}
 
       {/* Debug Panel */}
       {showLogs && (
