@@ -139,6 +139,11 @@ const Navbar = () => {
     };
   }, []);
 
+  const handleStartProject = () => {
+    // Navigate to contact page with hash to trigger scroll to form
+    window.location.href = '/contact#contact-form';
+  };
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -246,7 +251,7 @@ const Navbar = () => {
                     Sign In
                   </Button>
                 </Link>
-                <Link to="/register" onClick={handleNavLinkClick}>
+                <Link to="/contact" onClick={handleStartProject}>
                   <Button className="bg-primary hover:bg-primary/90 text-background font-medium shadow-md">
                     Get Started
                   </Button>
@@ -319,8 +324,8 @@ const Navbar = () => {
                         Sign In
                       </Button>
                     </Link>
-                    <Link to="/register" onClick={handleNavLinkClick}>
-                      <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base sm:text-lg py-4 sm:py-6">
+                    <Link to="/contact" onClick={handleStartProject}> 
+                      <Button className="w-full bg-primary hover:bg-primary/90 text-background font-medium text-base sm:text-lg py-4 sm:py-6" >
                         Get Started
                       </Button>
                     </Link>

@@ -362,7 +362,7 @@ const App = () => {
 
             {/* === AUTH ROUTES === */}
             <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+            {/* <Route path="/register" element={<Register />} /> */}
 
             {/* === ADMIN ROUTES === */}
             <Route
