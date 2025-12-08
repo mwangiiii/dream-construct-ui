@@ -54,8 +54,8 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
     { icon: Users, label: "Users", path: "/admin/users" },
     { icon: Briefcase, label: "Projects", path: "/admin/projects" },
-    { icon: FileText, label: "Content", path: "/admin/content" },
-    { icon: Settings, label: "Settings", path: "/admin/" },
+    { icon: FileText, label: "Content", path: "/admin/content/media" },
+    { icon: Settings, label: "Settings", path: "/admin/settings" },
   ];
 
   // Determine sidebar width and margin classes

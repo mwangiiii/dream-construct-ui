@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
-import { Volume2, VolumeX, Volume1, UserPlus, Plus } from "lucide-react";
+import { Volume2, VolumeX, Volume1, UserPlus, Plus, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
@@ -17,6 +17,7 @@ import AdminLayout from "./components/layout/AdminLayout";
 import ClientLayout from "./components/layout/ClientLayout";
 import AdminSettingsPage from "./pages/admin/settings";
 import ClientSettingsPage from "./pages/client/settings";
+import MediaManagement from "./pages/admin/mediaManagement";
 
 // Public Pages
 import Index from "./pages/Index";
@@ -105,12 +106,29 @@ const ContentOverview = () => (
           <p className="text-muted-foreground">Manage customer reviews and testimonials</p>
         </div>
       </Link>
-      <Link to="/admin/content/media">
-        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
-          <h3 className="text-xl font-semibold mb-2">Media Library</h3>
-          <p className="text-muted-foreground">Upload and organize images and videos</p>
+
+      <Link to="/admin/content/media" className="block">
+        <div className="p-6 border rounded-xl hover:border-primary/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer group">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors">
+              Media Library
+            </h3>
+            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <ImageIcon className="w-6 h-6 text-primary" />
+            </div>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            Upload and organize images, videos, and more • Manage drafts, published & archived content
+          </p>
+          <div className="mt-4 flex items-center text-primary text-sm font-medium">
+            Open Library
+            <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
         </div>
       </Link>
+
       <Link to="/admin/content/pages">
         <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
           <h3 className="text-xl font-semibold mb-2">Pages Content</h3>
@@ -124,6 +142,7 @@ const ContentOverview = () => (
 // Media Library Tabs: Library & Create Media
 import { useNavigate } from "react-router-dom";
 
+// Media Library Tabs: Library & Create Media
 const MediaLibraryTabs = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -133,7 +152,6 @@ const MediaLibraryTabs = () => {
     { name: "Create Media", path: "/admin/content/media/create" },
   ];
   
-  // Check if we're on the create page
   const isCreatePage = location.pathname === "/admin/content/media/create";
   
   return (
@@ -164,14 +182,11 @@ const MediaLibraryTabs = () => {
         </nav>
       </div>
       
-      {/* Render content based on current path */}
+      {/* Fixed: comment moved above the JSX */}
       {isCreatePage ? (
         <MediaCreate />
       ) : (
-        <div className="text-center py-12">
-          <h2 className="text-2xl font-semibold mb-4">Media Library</h2>
-          <p className="text-muted-foreground">Media management coming soon...</p>
-        </div>
+        <MediaManagement />
       )}
     </div>
   );
@@ -186,7 +201,8 @@ const PagesContent = () => (
   </div>
 );
 
-// Enhanced Protected Route Component with Role-Based Access
+// ... (ProtectedRoute and rest of your code unchanged)
+
 const ProtectedRoute: React.FC<{ 
   children: React.ReactNode;
   requiredRoles?: string[];
@@ -201,7 +217,6 @@ const ProtectedRoute: React.FC<{
 
   const checkAuthorization = async () => {
     try {
-      // Check if user is authenticated
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
@@ -210,14 +225,12 @@ const ProtectedRoute: React.FC<{
         return;
       }
 
-      // If no role requirement, just check authentication
       if (!requiredRoles || requiredRoles.length === 0) {
         setIsAuthorized(true);
         setLoading(false);
         return;
       }
 
-      // Check user roles
       const user = await getCurrentUser();
       
       if (!user) {
@@ -226,7 +239,6 @@ const ProtectedRoute: React.FC<{
         return;
       }
 
-      // Check if user has any of the required roles
       const hasRequiredRole = user.roles.some(role => 
         requiredRoles.includes(role.role_name)
       );
@@ -392,7 +404,6 @@ const App = () => {
 
             {/* === PROJECT MANAGEMENT ROUTES === */}
             
-            {/* PROJECT MANAGEMENT DASHBOARD — Accessible by admin, manager, project_manager */}
             <Route
               path="/admin/projects"
               element={
@@ -404,7 +415,6 @@ const App = () => {
               }
             />
 
-            {/* PROJECT DETAIL PAGE — Accessible by admin, manager, project_manager */}
             <Route
               path="/admin/projects/:id"
               element={
@@ -418,7 +428,6 @@ const App = () => {
 
             {/* === CLIENT ROUTES === */}
             
-            {/* CLIENT DASHBOARD */}
             <Route
               path="/client/dashboard"
               element={
@@ -430,7 +439,6 @@ const App = () => {
               }
             />
 
-            {/* CLIENT PROJECTS LIST */}
             <Route 
               path="/client/projects"
               element={
@@ -442,7 +450,6 @@ const App = () => {
               }
             />
 
-            {/* CLIENT PROJECT DETAIL */}
             <Route
               path="/client/projects/:id"
               element={
@@ -454,7 +461,6 @@ const App = () => {
               }
             />
 
-            {/* CLIENT NOTIFICATIONS PAGE */}
             <Route
               path="/client/notifications"
               element={
@@ -477,7 +483,6 @@ const App = () => {
                 </ProtectedRoute>
               }
             >
-              {/* Nested Content Routes */}
               <Route index element={<ContentOverview />} />
               <Route path="reviews" element={<ReviewsManagement />} />
               <Route path="pages" element={<PagesContent />} />

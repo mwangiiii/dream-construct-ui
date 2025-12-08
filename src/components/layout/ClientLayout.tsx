@@ -54,7 +54,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     { icon: LayoutDashboard, label: "Dashboard", path: "/client/dashboard" },
     { icon: Users, label: "My Project List", path: "/client/projects" },
     { icon: Briefcase, label: "Notification Center", path: "/client/notifications" },
-    { icon: FileText, label: "Content", path: "" },
+    // { icon: FileText, label: "Content", path: "" },
     { icon: Settings, label: "Settings", path: "/client/settings" },
   ];
 

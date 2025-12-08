@@ -129,6 +129,11 @@ const UserCreate: React.FC = () => {
     { value: 'client', label: 'Client', description: 'Can view their own projects' },
     { value: 'manager', label: 'Manager', description: 'Can manage users and projects' },
     { value: 'admin', label: 'Admin', description: 'Full system access' },
+    { value: 'project_manager', label: 'Project Manager', description: 'Project Manager Role' },
+    { value: 'surveyor', label: 'Surveyor', description: 'Quantity surveyor role' },
+    { value: 'finance', label: 'Finance', description: 'Finance role' },
+    
+
   ] as const;
 
   if (checkingAuth || !session) return (
