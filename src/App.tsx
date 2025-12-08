@@ -19,7 +19,9 @@ import AdminSettingsPage from "./pages/admin/settings";
 import ClientSettingsPage from "./pages/client/settings";
 import MediaManagement from "./pages/admin/mediaManagement";
 
+
 import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 // Public Pages
 import Index from "./pages/Index";
@@ -356,6 +358,7 @@ const App = () => {
 
             {/* === PASSWORD RESET ROUTE === */}
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* === AUTH ROUTES === */}
             <Route path="/login" element={<Login />} />
