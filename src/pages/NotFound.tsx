@@ -14,7 +14,7 @@ const NotFound = () => {
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden py-8 px-4 sm:px-8">
       {/* Video Background */}
       <video
-        src="/src/assets/31290-385265697_small.mp4"
+        src="/31290-385265697_small.mp4"
         className="absolute inset-0 w-full h-full object-cover brightness-75 contrast-110 blur-[1px] pointer-events-none select-none"
         autoPlay
         loop
