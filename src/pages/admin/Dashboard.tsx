@@ -9,7 +9,7 @@ const adminSections = [
   { label: "Projects", icon: Briefcase, path: "/admin/projects" },
     // { label: "Documents", icon: FileText, path: "/admin/documents" },
   // { label: "Reports", icon: BarChart3, path: "/admin/reports" },
-  { label: "Content", icon: BookText, path: "admin/content" },
+  { label: "Content", icon: BookText, path: "/admin/content" },
   { label: "Settings", icon: Settings, path: "/admin/settings" },
   
 ];
