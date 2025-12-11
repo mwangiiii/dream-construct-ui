@@ -1,227 +1,376 @@
-// src/types/project.ts
+// src/lib/api/projectApi.ts
 
-export interface Project {
-  id: string;
-  project_number: string;
-  title: string;
-  description: string | null;
-  client_id: string;
-  manager_id: string | null;
-  start_date: string | null;
-  expected_completion_date: string | null;
-  actual_completion_date: string | null;
-  budget_numeric: number | null;
-  currency: string;
-  site_address: string | null;
-  site_city: string | null;
-  site_state: string | null;
-  site_zip: string | null;
-  site_country: string | null;
-  status: ProjectStatus;
-  progress_percent: number;
-  created_at: string;
-  updated_at: string;
-  created_by: string;
-  // Relations
-  client?: {
-    id: string;
-    full_name: string;
-    company_id: string | null;
-    companies?: {
-      name: string;
-    } | null;
-  } | null;
-  manager?: {
-    id: string;
-    full_name: string;
-  } | null;
-}
+import { supabase } from '@/lib/supabase';
+import type { Project, Milestone, Task, ProjectUpdate, Approval, Document } from '@/types/project';
 
-export type ProjectStatus = 
-  | "planning" 
-  | "pre_construction" 
-  | "in_construction" 
-  | "inspections" 
-  | "completed" 
-  | "on_hold";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-export interface Milestone {
-  id: string;
-  project_id: string;
-  title: string;
-  description: string | null;
-  planned_start_date: string | null;
-  planned_end_date: string | null;
-  actual_start_date: string | null;
-  actual_end_date: string | null;
-  progress_percent: number;
-  status: MilestoneStatus;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-  created_by: string | null;
-}
+export const projectApi = {
+  /**
+   * Fetch complete project details including all related data
+   */
+  async fetchProjectDetails(projectId: string) {
+    try {
+      // 1. Fetch main project data
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select(`
+          *,
+          client:profiles!projects_client_id_fkey(
+            id,
+            full_name,
+            company_id,
+            companies(name)
+          ),
+          manager:profiles!projects_manager_id_fkey(
+            id,
+            full_name
+          )
+        `)
+        .eq('id', projectId)
+        .single();
 
-export type MilestoneStatus = 
-  | "not_started" 
-  | "in_progress" 
-  | "completed" 
-  | "delayed";
+      if (projectError) throw projectError;
 
-export interface Task {
-  id: string;
-  project_id: string | null;
-  milestone_id: string | null;
-  title: string;
-  description: string | null;
-  assigned_to: string | null;
-  due_date: string | null;
-  completed_at: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-  // Relations
-  assigned_user?: {
-    full_name: string;
-    email: string;
-  } | null;
-}
+      // 2. Fetch milestones
+      const { data: milestones, error: milestonesError } = await supabase
+        .from('project_milestones')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('sort_order', { ascending: true });
 
-export type TaskStatus = "todo" | "in_progress" | "review" | "done";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
+      if (milestonesError) console.error('Milestones error:', milestonesError);
 
-export interface ProjectUpdate {
-  id: string;
-  project_id: string;
-  title: string;
-  body: string; // Note: DB uses 'body', not 'content'
-  update_type: UpdateType;
-  posted_by: string;
-  posted_at: string;
-  is_pinned: boolean;
-  // Relations
-  posted_by_user?: {
-    full_name: string;
-  } | null;
-}
+      // 3. Fetch tasks (without foreign key hint)
+      const { data: tasks, error: tasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
 
-export type UpdateType = 
-  | "general" 
-  | "progress" 
-  | "delay" 
-  | "safety" 
-  | "weather" 
-  | "inspection" 
-  | "change_order" 
-  | "issue";
+      if (tasksError) console.error('Tasks error:', tasksError);
 
-export interface Approval {
-  id: string;
-  project_id: string;
-  title: string;
-  description: string | null;
-  requested_by: string;
-  requested_at: string;
-  approval_type: ApprovalType;
-  status: ApprovalStatus;
-  approved_by: string | null;
-  approved_at: string | null;
-  rejection_reason: string | null;
-  amount: number | null;
-  days_requested: number | null;
-  // Relations
-  requested_by_user?: {
-    full_name: string;
-  } | null;
-  approved_by_user?: {
-    full_name: string;
-  } | null;
-}
+      // 4. If we have tasks with assigned users, fetch those profiles
+      let tasksWithUsers: Task[] = [];
+      if (tasks && tasks.length > 0) {
+        const assignedIds = [...new Set(tasks
+          .map(t => t.assigned_to)
+          .filter(Boolean))] as string[];
 
-export type ApprovalType = 
-  | "change_order" 
-  | "extension" 
-  | "budget_increase" 
-  | "final_completion" 
-  | "payment_release";
+        if (assignedIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', assignedIds);
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled";
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc, p) => {
+              acc[p.id] = { full_name: p.full_name, email: p.email };
+              return acc;
+            }, {} as Record<string, { full_name: string; email: string }>);
 
-export interface Document {
-  id: string;
-  project_id: string | null;
-  milestone_id: string | null;
-  task_id: string | null;
-  name: string;
-  file_path: string;
-  file_size: number | null;
-  mime_type: string | null;
-  uploaded_by: string;
-  uploaded_at: string;
-  folder: string;
-  is_public: boolean;
-  // Relations
-  uploaded_by_user?: {
-    full_name: string;
-  } | null;
-}
+            tasksWithUsers = tasks.map(task => ({
+              ...task,
+              assigned_user: task.assigned_to ? profilesMap[task.assigned_to] : null,
+            })) as Task[];
+          }
+        } else {
+          tasksWithUsers = tasks as Task[];
+        }
+      }
 
-export interface TeamMember {
-  id: string;
-  project_id: string;
-  user_id: string;
-  role: TeamRole;
-  added_at: string;
-  added_by: string;
-  // Relations
-  user?: {
-    full_name: string;
-    email: string;
-    phone: string | null;
-  } | null;
-}
+      // 5. Fetch project updates (without foreign key hint)
+      const { data: updates, error: updatesError } = await supabase
+        .from('project_updates')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('posted_at', { ascending: false });
 
-export type TeamRole = 
-  | "project_manager" 
-  | "foreman" 
-  | "engineer" 
-  | "subcontractor" 
-  | "inspector" 
-  | "architect";
+      if (updatesError) console.error('Updates error:', updatesError);
 
-export interface BudgetLineItem {
-  id: string;
-  project_id: string;
-  category: string;
-  description: string;
-  budgeted_amount: number;
-  actual_amount: number;
-  created_at: string;
-  updated_at: string;
-}
+      // 6. Fetch profiles for updates
+      let updatesWithUsers: ProjectUpdate[] = [];
+      if (updates && updates.length > 0) {
+        const postedByIds = [...new Set(updates
+          .map(u => u.posted_by)
+          .filter(Boolean))] as string[];
 
-export interface AuditLog {
-  id: number;
-  table_name: string;
-  record_id: string | null;
-  action: "INSERT" | "UPDATE" | "DELETE";
-  old_data: any;
-  new_data: any;
-  changed_by: string | null;
-  changed_at: string;
-}
+        if (postedByIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', postedByIds);
 
-// API Response Types
-export interface ApiResponse<T> {
-  data: T | null;
-  error: string | null;
-}
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc, p) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {} as Record<string, { full_name: string }>);
 
-export interface EdgeFunctionResponse {
-  success: boolean;
-  message?: string;
-  data?: any;
-  error?: string;
-}
+            updatesWithUsers = updates.map(update => ({
+              ...update,
+              posted_by_user: update.posted_by ? profilesMap[update.posted_by] : null,
+            })) as ProjectUpdate[];
+          }
+        } else {
+          updatesWithUsers = updates as ProjectUpdate[];
+        }
+      }
+
+      // 7. Fetch approvals (without foreign key hints)
+      const { data: approvals, error: approvalsError } = await supabase
+        .from('project_approvals')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('requested_at', { ascending: false });
+
+      if (approvalsError) console.error('Approvals error:', approvalsError);
+
+      // 8. Fetch profiles for approvals
+      let approvalsWithUsers: Approval[] = [];
+      if (approvals && approvals.length > 0) {
+        const userIds = [...new Set([
+          ...approvals.map(a => a.requested_by),
+          ...approvals.map(a => a.approved_by).filter(Boolean)
+        ])].filter(Boolean) as string[];
+
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', userIds);
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc, p) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {} as Record<string, { full_name: string }>);
+
+            approvalsWithUsers = approvals.map(approval => ({
+              ...approval,
+              requested_by_user: approval.requested_by ? profilesMap[approval.requested_by] : null,
+              approved_by_user: approval.approved_by ? profilesMap[approval.approved_by] : null,
+            })) as Approval[];
+          }
+        } else {
+          approvalsWithUsers = approvals as Approval[];
+        }
+      }
+
+      // 9. Fetch documents (without foreign key hint)
+      const { data: documents, error: documentsError } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('project_id', projectId)
+        .neq('folder', 'progress_photos')
+        .order('uploaded_at', { ascending: false });
+
+      if (documentsError) console.error('Documents error:', documentsError);
+
+      // 10. Fetch profiles for documents
+      let documentsWithUsers: Document[] = [];
+      if (documents && documents.length > 0) {
+        const uploadedByIds = [...new Set(documents
+          .map(d => d.uploaded_by)
+          .filter(Boolean))] as string[];
+
+        if (uploadedByIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', uploadedByIds);
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc, p) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {} as Record<string, { full_name: string }>);
+
+            documentsWithUsers = documents.map(doc => ({
+              ...doc,
+              uploaded_by_user: doc.uploaded_by ? profilesMap[doc.uploaded_by] : null,
+            })) as Document[];
+          }
+        } else {
+          documentsWithUsers = documents as Document[];
+        }
+      }
+
+      // 11. Fetch team members
+      const { data: teamMembers, error: teamError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, phone, user_roles(role_name), user_statuses(status_name)')
+        .in('id', 
+          supabase
+            .from('project_team')
+            .select('user_id')
+            .eq('project_id', projectId)
+        );
+
+      if (teamError) console.error('Team error:', teamError);
+
+      return {
+        project: project as Project,
+        milestones: (milestones || []) as Milestone[],
+        tasks: tasksWithUsers,
+        updates: updatesWithUsers,
+        approvals: approvalsWithUsers,
+        documents: documentsWithUsers,
+        teamMembers: teamMembers || [],
+      };
+    } catch (error) {
+      console.error('[projectApi] Error fetching project details:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new task
+   */
+  async createTask(taskData: {
+    project_id: string;
+    milestone_id?: string | null;
+    title: string;
+    description?: string | null;
+    assigned_to?: string | null;
+    due_date?: string | null;
+    priority?: string;
+    status?: string;
+  }) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/create-task`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(taskData),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create task');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('[projectApi] Error creating task:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Update an existing task
+   */
+  async updateTask(taskId: string, updates: Partial<Task>) {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .update(updates)
+        .eq('id', taskId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Fetch the assigned user profile if needed
+      if (data.assigned_to) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', data.assigned_to)
+          .single();
+
+        return {
+          ...data,
+          assigned_user: profile,
+        };
+      }
+
+      return data;
+    } catch (error) {
+      console.error('[projectApi] Error updating task:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Delete a task
+   */
+  async deleteTask(taskId: string) {
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', taskId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('[projectApi] Error deleting task:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new milestone
+   */
+  async createMilestone(milestoneData: Partial<Milestone>) {
+    try {
+      const { data, error } = await supabase
+        .from('project_milestones')
+        .insert(milestoneData)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[projectApi] Error creating milestone:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Update a milestone
+   */
+  async updateMilestone(milestoneId: string, updates: Partial<Milestone>) {
+    try {
+      const { data, error } = await supabase
+        .from('project_milestones')
+        .update(updates)
+        .eq('id', milestoneId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[projectApi] Error updating milestone:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Delete a milestone
+   */
+  async deleteMilestone(milestoneId: string) {
+    try {
+      const { error } = await supabase
+        .from('project_milestones')
+        .delete()
+        .eq('id', milestoneId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('[projectApi] Error deleting milestone:', error);
+      throw error;
+    }
+  },
+};

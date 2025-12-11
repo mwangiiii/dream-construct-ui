@@ -27,8 +27,13 @@ import {
   Download,
   Plus,
 } from "lucide-react";
+
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
 import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
+import TasksTab from "@/components/projects/tabs/TasksTab";
+import UpdatesTab from "@/components/projects/tabs/UpdatesTab";
+import PhotosTab from "@/components/projects/tabs/PhotosTab";
+import DocumentsTab from "@/components/projects/tabs/DocumentsTab";
 
 type Tab =
   | "overview"
@@ -37,10 +42,10 @@ type Tab =
   | "updates"
   | "approvals"
   | "documents"
+  | "photos"
   | "team"
   | "financials"
-  | "daily-logs"
-  | "photos";
+  | "daily-logs";
 
 interface Milestone {
   id: string;
@@ -69,13 +74,13 @@ interface Task {
   assigned_to: string | null;
   milestone_id: string | null;
   completed_at: string | null;
-  assigned_user?: { full_name: string } | null;
+  assigned_user?: { full_name: string; email?: string } | null;
 }
 
 interface Update {
   id: string;
   title: string;
-  body: string; // Fixed: was 'content', now matches DB
+  body: string;
   update_type: string;
   posted_at: string;
   posted_by: string;
@@ -116,17 +121,18 @@ interface Document {
 }
 
 interface TeamMember {
-  id: string;
   user_id: string;
-  role: string;
-  user?: {
+  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "surveyor";
+  user: {
+    id: string;
     full_name: string;
-    email: string;
-    phone: string | null;
+    user_statuses: {
+      is_active: boolean;
+      status_name: string;
+    } | null;
   } | null;
 }
 
-// Glass Card Component
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
     {children}
@@ -141,14 +147,13 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
-  // Sub-data
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [updates, setUpdates] = useState<Update[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [team, setTeam] = useState<TeamMember[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
+  const [team, setTeam] = useState<TeamMember[]>([]);
 
   useEffect(() => {
     initializeUser();
@@ -162,22 +167,16 @@ export default function ProjectDetailPage() {
 
   const initializeUser = async () => {
     try {
-      console.log("[ProjectDetail] Fetching current user...");
       const user = await getCurrentUser();
-      
       if (!user) {
-        console.error("[ProjectDetail] No user found, redirecting to login");
         navigate("/login");
         return;
       }
-
       if (!user.status.is_active) {
         alert("Your account is not active. Contact admin.");
         navigate("/");
         return;
       }
-
-      console.log("[ProjectDetail] User loaded:", user.email);
       setCurrentUser(user);
     } catch (error) {
       console.error("[ProjectDetail] Error initializing user:", error);
@@ -187,12 +186,9 @@ export default function ProjectDetailPage() {
 
   const fetchProjectAndData = async () => {
     if (!id) return;
-    
     setLoading(true);
-    console.log("[ProjectDetail] Fetching project:", id);
 
     try {
-      // Fetch project
       const { data: proj, error: projError } = await supabase
         .from("projects")
         .select(`
@@ -204,70 +200,181 @@ export default function ProjectDetailPage() {
         .single();
 
       if (projError || !proj) {
-        console.error("[ProjectDetail] Project not found:", projError);
         alert("Project not found");
         navigate("/projects");
         return;
       }
-
-      console.log("[ProjectDetail] Project loaded:", proj.project_number);
       setProject(proj);
 
-      // Parallel fetch all related data
+      const { data: tasksData, error: tasksError } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("project_id", id)
+        .order("created_at", { ascending: false });
+
+      if (tasksError) {
+        console.error("[ProjectDetail] Tasks fetch error:", tasksError);
+      }
+
+      let tasksWithUsers: Task[] = [];
+      if (tasksData && tasksData.length > 0) {
+        const assignedIds = [...new Set(tasksData
+          .map((t: any) => t.assigned_to)
+          .filter(Boolean))];
+
+        if (assignedIds.length > 0) {
+          const { data: profiles, error: profilesError } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", assignedIds);
+
+          if (profilesError) {
+            console.error("[ProjectDetail] Profiles fetch error:", profilesError);
+          }
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc: any, p: any) => {
+              acc[p.id] = { full_name: p.full_name, email: p.email };
+              return acc;
+            }, {});
+
+            tasksWithUsers = tasksData.map((task: any) => ({
+              ...task,
+              assigned_user: task.assigned_to ? profilesMap[task.assigned_to] : null,
+            }));
+          } else {
+            tasksWithUsers = tasksData;
+          }
+        } else {
+          tasksWithUsers = tasksData;
+        }
+      }
+
+      console.log("[ProjectDetail] Tasks loaded:", tasksWithUsers.length);
+
       const [
         { data: m },
-        { data: t },
         { data: u },
         { data: a },
         { data: d },
         { data: p },
+        { data: teamData },
       ] = await Promise.all([
+        supabase.from("project_milestones").select("*").eq("project_id", id).order("sort_order"),
+        supabase.from("project_updates").select("*").eq("project_id", id).order("posted_at", { ascending: false }),
+        supabase.from("project_approvals").select("*").eq("project_id", id).order("requested_at", { ascending: false }),
+        supabase.from("documents").select("*").eq("project_id", id).neq("folder", "progress_photos").order("uploaded_at", { ascending: false }),
+        supabase.from("documents").select("*").eq("project_id", id).eq("folder", "progress_photos").order("uploaded_at", { ascending: false }),
         supabase
-          .from("project_milestones")
-          .select("*")
-          .eq("project_id", id)
-          .order("sort_order"),
-        supabase
-          .from("tasks")
-          .select("*, assigned_user:profiles!tasks_assigned_to_fkey(full_name)")
-          .eq("project_id", id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("project_updates")
-          .select("*, posted_by_user:profiles!project_updates_posted_by_fkey(full_name)")
-          .eq("project_id", id)
-          .order("posted_at", { ascending: false }),
-        supabase
-          .from("project_approvals")
+          .from("user_roles")
           .select(`
-            *,
-            requested_by_user:profiles!project_approvals_requested_by_fkey(full_name),
-            approved_by_user:profiles!project_approvals_approved_by_fkey(full_name)
+            user_id,
+            role_name,
+            user:profiles!user_id (
+              id,
+              full_name,
+              user_statuses!status_id (is_active, status_name)
+            )
           `)
-          .eq("project_id", id)
-          .order("requested_at", { ascending: false }),
-        supabase
-          .from("documents")
-          .select("*, uploaded_by_user:profiles!documents_uploaded_by_fkey(full_name)")
-          .eq("project_id", id)
-          .neq("folder", "progress_photos")
-          .order("uploaded_at", { ascending: false }),
-        supabase
-          .from("documents")
-          .select("*")
-          .eq("project_id", id)
-          .eq("folder", "progress_photos")
-          .order("uploaded_at", { ascending: false }),
+          .in("role_name", ["manager", "project_manager", "finance", "surveyor", "admin", "client"])
       ]);
 
+      let updatesWithUsers: Update[] = [];
+      if (u && u.length > 0) {
+        const postedByIds = [...new Set(u.map((update: any) => update.posted_by).filter(Boolean))];
+        if (postedByIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .in("id", postedByIds);
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc: any, p: any) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {});
+
+            updatesWithUsers = u.map((update: any) => ({
+              ...update,
+              posted_by_user: update.posted_by ? profilesMap[update.posted_by] : null,
+            }));
+          }
+        } else {
+          updatesWithUsers = u;
+        }
+      }
+
+      let approvalsWithUsers: Approval[] = [];
+      if (a && a.length > 0) {
+        const userIds = [...new Set([
+          ...a.map((approval: any) => approval.requested_by),
+          ...a.map((approval: any) => approval.approved_by).filter(Boolean)
+        ])].filter(Boolean);
+
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .in("id", userIds);
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc: any, p: any) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {});
+
+            approvalsWithUsers = a.map((approval: any) => ({
+              ...approval,
+              requested_by_user: approval.requested_by ? profilesMap[approval.requested_by] : null,
+              approved_by_user: approval.approved_by ? profilesMap[approval.approved_by] : null,
+            }));
+          }
+        } else {
+          approvalsWithUsers = a;
+        }
+      }
+
+      let documentsWithUsers: Document[] = [];
+      if (d && d.length > 0) {
+        const uploadedByIds = [...new Set(d.map((doc: any) => doc.uploaded_by).filter(Boolean))];
+        if (uploadedByIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .in("id", uploadedByIds);
+
+          if (profiles) {
+            const profilesMap = profiles.reduce((acc: any, p: any) => {
+              acc[p.id] = { full_name: p.full_name };
+              return acc;
+            }, {});
+
+            documentsWithUsers = d.map((doc: any) => ({
+              ...doc,
+              uploaded_by_user: doc.uploaded_by ? profilesMap[doc.uploaded_by] : null,
+            }));
+          }
+        } else {
+          documentsWithUsers = d;
+        }
+      }
+
       setMilestones(m || []);
-      setTasks(t || []);
-      setUpdates(u || []);
-      setApprovals(a || []);
-      setDocuments(d || []);
+      setTasks(tasksWithUsers);
+      setUpdates(updatesWithUsers);
+      setApprovals(approvalsWithUsers);
+      setDocuments(documentsWithUsers);
       setPhotos(p || []);
 
-      console.log("[ProjectDetail] All data loaded successfully");
+      const formattedTeam = (teamData || []).map((item: any) => ({
+        id: item.user_id,
+        full_name: item.user?.full_name || "Unknown",
+        role_name: item.role_name,
+        is_active: item.user?.user_statuses?.is_active ?? false,
+        status_name: item.user?.user_statuses?.status_name || "unknown"
+      }));
+      setTeam(formattedTeam);
+
     } catch (error) {
       console.error("[ProjectDetail] Error fetching data:", error);
       alert("Error loading project data");
@@ -276,16 +383,13 @@ export default function ProjectDetailPage() {
     }
   };
 
-  // Check if user is a client
   const isClient = currentUser?.roles.some(r => r.role_name === "client");
 
-  // Check if user can edit (admin, manager, or assigned project manager)
   const canEdit =
     currentUser?.roles.some(r => ["admin", "manager"].includes(r.role_name)) ||
     (currentUser?.roles.some(r => r.role_name === "project_manager") &&
       project?.manager_id === currentUser?.profile?.id);
 
-  // Define tabs based on user role
   const allTabs: { id: Tab; label: string; icon: any }[] = [
     { id: "overview", label: "Overview", icon: Home },
     { id: "milestones", label: "Milestones", icon: Calendar },
@@ -299,22 +403,14 @@ export default function ProjectDetailPage() {
     { id: "daily-logs", label: "Daily Logs", icon: Wrench },
   ];
 
-  // Client sees limited tabs
-  const clientTabs: Tab[] = ["overview", "milestones", "updates", "photos", "documents"];
-  
-  // Filter tabs based on role
-  const tabs = isClient 
-    ? allTabs.filter(tab => clientTabs.includes(tab.id))
-    : allTabs;
+  // Fixed: Clients can now see Tasks tab
+  const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];
+  const tabs = isClient ? allTabs.filter(tab => clientTabs.includes(tab.id)) : allTabs;
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center"
-        >
+        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
           <div className="w-16 h-16 sm:w-20 sm:h-20 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4 sm:mb-6"></div>
           <div className="text-xl sm:text-2xl font-semibold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             Loading project...
@@ -327,11 +423,7 @@ export default function ProjectDetailPage() {
   if (!project) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center"
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center">
           <AlertCircle className="w-16 h-16 sm:w-20 sm:h-20 text-red-500 mx-auto mb-4 sm:mb-6" />
           <div className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">Project Not Found</div>
           <button
@@ -357,17 +449,10 @@ export default function ProjectDetailPage() {
         </div>
         
         <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12 relative z-10">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 mb-6 sm:mb-8">
               <div className="flex items-start gap-3 sm:gap-4 w-full sm:w-auto">
-                <button
-                  onClick={() => navigate(-1)}
-                  className="p-2 sm:p-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all flex-shrink-0"
-                >
+                <button onClick={() => navigate(-1)} className="p-2 sm:p-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all flex-shrink-0">
                   <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
                 <div className="flex-1 min-w-0">
@@ -401,10 +486,7 @@ export default function ProjectDetailPage() {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    // TODO: Navigate to project edit page
-                    alert("Edit project functionality coming soon!");
-                  }}
+                  onClick={() => alert("Edit project functionality coming soon!")}
                   className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base w-full sm:w-auto justify-center"
                 >
                   <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -444,14 +526,7 @@ export default function ProjectDetailPage() {
       {/* Tab Content */}
       <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12">
         <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
-            {/* Overview Tab - Now using separate component */}
+          <motion.div key={activeTab} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
             {activeTab === "overview" && (
               <OverviewTab
                 project={project}
@@ -465,323 +540,56 @@ export default function ProjectDetailPage() {
               />
             )}
 
-            {/* Milestones Tab */}
             {activeTab === "milestones" && (
-              <MilestonesTab
+              <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+            )}
+
+            {/* Fixed: Tasks tab now renders for everyone (including clients) */}
+            {activeTab === "tasks" && (
+              <TasksTab
                 projectId={id!}
+                tasks={tasks}
                 milestones={milestones}
+                teamMembers={team}
                 canEdit={canEdit}
                 onUpdate={fetchProjectAndData}
               />
             )}
 
-            {/* Tasks Tab - Admin only, inline for now */}
-            {activeTab === "tasks" && !isClient && (
-              <GlassCard>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
-                  <h3 className="text-base sm:text-lg md:text-2xl font-bold">Tasks ({tasks.length})</h3>
-                  {canEdit && (
-                    <button 
-                      onClick={() => alert("Create task modal coming soon!")}
-                      className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base"
-                    >
-                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Add Task
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-3 sm:space-y-4">
-                  {tasks.length === 0 ? (
-                    <div className="py-12 sm:py-16 text-center text-muted-foreground">
-                      <CheckCircle2 className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-                      <p className="text-base sm:text-xl">No tasks assigned yet</p>
-                    </div>
-                  ) : (
-                    tasks.map((task, idx) => (
-                      <motion.div
-                        key={task.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 sm:p-5 transition-all"
-                      >
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
-                          <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
-                            <input
-                              type="checkbox"
-                              checked={task.status === "done"}
-                              readOnly
-                              className="w-5 h-5 sm:w-6 sm:h-6 rounded accent-primary mt-0.5 sm:mt-0 flex-shrink-0"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-sm sm:text-base md:text-lg break-words">{task.title}</h4>
-                              {task.assigned_user && (
-                                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                                  Assigned to {task.assigned_user.full_name}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-xs sm:text-sm text-muted-foreground pl-8 sm:pl-0">
-                            {task.due_date && `Due ${format(new Date(task.due_date), "dd MMM yyyy")}`}
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
-                </div>
-              </GlassCard>
-            )}
-
-            {/* Updates Tab - Inline for now */}
             {activeTab === "updates" && (
-              <div className="space-y-4 sm:space-y-8">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Project Updates</h3>
-                  {canEdit && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => alert("Post update modal coming soon!")}
-                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
-                    >
-                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Post Update
-                    </motion.button>
-                  )}
-                </div>
-                {updates.length === 0 ? (
-                  <GlassCard className="text-center py-12 sm:py-16">
-                    <MessageSquare className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-                    <p className="text-base sm:text-xl text-muted-foreground">No updates posted yet</p>
-                  </GlassCard>
-                ) : (
-                  updates.map((update, idx) => (
-                    <motion.div
-                      key={update.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.1 }}
-                    >
-                      <GlassCard>
-                        <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-base sm:text-lg md:text-2xl font-bold mb-1 sm:mb-2 break-words">{update.title}</h4>
-                            <p className="text-xs sm:text-sm text-muted-foreground">
-                              Posted by {update.posted_by_user?.full_name || "Unknown"} •{" "}
-                              {format(new Date(update.posted_at), "dd MMM yyyy, HH:mm")}
-                            </p>
-                          </div>
-                          {update.is_pinned && (
-                            <span className="px-3 py-1 bg-accent/20 text-accent border border-accent/30 rounded-lg text-xs font-semibold">
-                              Pinned
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm sm:text-base leading-relaxed text-muted-foreground break-words">{update.body}</p>
-                      </GlassCard>
-                    </motion.div>
-                  ))
-                )}
-              </div>
+              <UpdatesTab projectId={id!} updates={updates} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {/* Photos Tab - Inline for now */}
             {activeTab === "photos" && (
-              <div>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
-                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Site Progress Photos</h3>
-                  {canEdit && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => alert("Bulk photo upload modal coming soon!")}
-                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
-                    >
-                      <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Photos
-                    </motion.button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
-                  {photos.length === 0 ? (
-                    <div className="col-span-full">
-                      <GlassCard className="text-center py-16 sm:py-20">
-                        <Camera className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 text-primary/30" />
-                        <p className="text-base sm:text-xl text-muted-foreground">No photos uploaded yet</p>
-                      </GlassCard>
-                    </div>
-                  ) : (
-                    photos.map((photo, idx) => (
-                      <motion.div
-                        key={photo.id}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="group relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl sm:rounded-2xl overflow-hidden hover:border-primary/50 transition-all"
-                      >
-                        <img
-                          src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${photo.file_path}`}
-                          alt={photo.name}
-                          className="w-full h-32 sm:h-40 md:h-64 object-cover"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all flex items-end p-3 sm:p-5">
-                          <div className="text-white w-full">
-                            <p className="font-semibold text-xs sm:text-base mb-0 sm:mb-1 truncate">{photo.name}</p>
-                            <p className="text-[10px] sm:text-xs text-white/80">{format(new Date(photo.uploaded_at), "dd MMM yyyy")}</p>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
-                  )}
-                </div>
-              </div>
+              <PhotosTab projectId={id!} photos={photos} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {/* Documents Tab - Inline for now */}
             {activeTab === "documents" && (
-              <GlassCard>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
-                  <h3 className="text-base sm:text-lg md:text-2xl font-bold">Documents ({documents.length})</h3>
-                  {canEdit && (
-                    <button 
-                      onClick={() => alert("Upload document modal coming soon!")}
-                      className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base"
-                    >
-                      <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Document
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-3 sm:space-y-4">
-                  {documents.length === 0 ? (
-                    <div className="py-12 sm:py-16 text-center text-muted-foreground">
-                      <FileText className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-                      <p className="text-base sm:text-xl">No documents uploaded yet</p>
-                    </div>
-                  ) : (
-                    documents.map((doc, idx) => (
-                      <motion.div
-                        key={doc.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 sm:p-5 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0"
-                      >
-                        <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                          <div className="p-2 sm:p-3 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl flex-shrink-0">
-                            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-semibold text-sm sm:text-base md:text-lg break-words">{doc.name}</h4>
-                            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                              Uploaded by {doc.uploaded_by_user?.full_name || "Unknown"} •{" "}
-                              {format(new Date(doc.uploaded_at), "dd MMM yyyy")}
-                            </p>
-                          </div>
-                        </div>
-                        <motion.button
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => {
-                            const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${doc.file_path}`;
-                            window.open(url, '_blank');
-                          }}
-                          className="text-primary hover:text-primary/80 p-2 self-end sm:self-auto"
-                        >
-                          <Download className="w-5 h-5 sm:w-6 sm:h-6" />
-                        </motion.button>
-                      </motion.div>
-                    ))
-                  )}
-                </div>
-              </GlassCard>
+              <DocumentsTab projectId={id!} documents={documents} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {/* Approvals Tab - Admin only, placeholder */}
             {activeTab === "approvals" && !isClient && (
               <div className="space-y-4 sm:space-y-8">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Change Orders & Approvals</h3>
                   {canEdit && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => alert("Create change order modal coming soon!")}
-                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
-                    >
+                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => alert("Create change order modal coming soon!")}
+                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center">
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> New Change Order
                     </motion.button>
                   )}
                 </div>
-                {approvals.length === 0 ? (
-                  <GlassCard className="text-center py-12 sm:py-16">
-                    <Gavel className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-                    <p className="text-base sm:text-xl text-muted-foreground">No approvals requested yet</p>
-                  </GlassCard>
-                ) : (
-                  approvals.map((approval, idx) => (
-                    <motion.div
-                      key={approval.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.1 }}
-                    >
-                      <GlassCard>
-                        <div className="flex flex-col sm:flex-row items-start justify-between gap-3 mb-4">
-                          <div className="flex-1">
-                            <h4 className="text-base sm:text-lg md:text-xl font-bold mb-2">{approval.title}</h4>
-                            <p className="text-xs sm:text-sm text-muted-foreground">
-                              {approval.approval_type.replace(/_/g, " ").toUpperCase()}
-                            </p>
-                          </div>
-                          <span
-                            className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap ${
-                              approval.status === "approved"
-                                ? "bg-green-500/20 text-green-300 border-green-500/30"
-                                : approval.status === "rejected"
-                                ? "bg-red-500/20 text-red-300 border-red-500/30"
-                                : "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
-                            }`}
-                          >
-                            {approval.status}
-                          </span>
-                        </div>
-                        {approval.description && (
-                          <p className="text-sm text-muted-foreground mb-3">{approval.description}</p>
-                        )}
-                        <div className="flex flex-wrap gap-4 text-xs sm:text-sm text-muted-foreground">
-                          {approval.amount && (
-                            <div>
-                              <span className="font-semibold">Amount:</span> {approval.amount.toLocaleString()} {project.currency}
-                            </div>
-                          )}
-                          {approval.days_requested && (
-                            <div>
-                              <span className="font-semibold">Days:</span> {approval.days_requested}
-                            </div>
-                          )}
-                          <div>
-                            <span className="font-semibold">Requested by:</span> {approval.requested_by_user?.full_name || "Unknown"}
-                          </div>
-                        </div>
-                      </GlassCard>
-                    </motion.div>
-                  ))
-                )}
               </div>
             )}
 
-            {/* Placeholder for other admin-only tabs */}
             {!isClient && ["team", "financials", "daily-logs"].includes(activeTab) && (
               <GlassCard className="text-center py-16 sm:py-20">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                >
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
                   <div className="w-16 h-16 sm:w-20 sm:h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
                     <Clock className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
                   </div>
                   <h3 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Coming Soon</h3>
-                  <p className="text-base sm:text-lg text-muted-foreground">
-                    This section is currently under development
-                  </p>
+                  <p className="text-base sm:text-lg text-muted-foreground">This section is currently under development</p>
                 </motion.div>
               </GlassCard>
             )}
