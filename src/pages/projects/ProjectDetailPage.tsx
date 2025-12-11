@@ -27,6 +27,8 @@ import {
   Download,
   Plus,
 } from "lucide-react";
+import OverviewTab from "@/components/projects/tabs/OverviewTab";
+import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
 
 type Tab =
   | "overview"
@@ -42,31 +44,42 @@ type Tab =
 
 interface Milestone {
   id: string;
+  project_id: string;
   title: string;
   description: string | null;
-  status: string;
   planned_start_date: string | null;
   planned_end_date: string | null;
   actual_start_date: string | null;
   actual_end_date: string | null;
+  progress_percent: number;
+  status: string;
   sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
 }
 
 interface Task {
   id: string;
   title: string;
+  description: string | null;
   status: string;
+  priority: string;
   due_date: string | null;
   assigned_to: string | null;
+  milestone_id: string | null;
+  completed_at: string | null;
   assigned_user?: { full_name: string } | null;
 }
 
 interface Update {
   id: string;
   title: string;
-  content: string;
+  body: string; // Fixed: was 'content', now matches DB
+  update_type: string;
   posted_at: string;
   posted_by: string;
+  is_pinned: boolean;
   posted_by_user?: { full_name: string } | null;
 }
 
@@ -74,10 +87,15 @@ interface Approval {
   id: string;
   approval_type: string;
   status: string;
+  title: string;
+  description: string | null;
   requested_by: string;
   approved_by: string | null;
   requested_at: string;
   approved_at: string | null;
+  amount: number | null;
+  days_requested: number | null;
+  rejection_reason: string | null;
   requested_by_user?: { full_name: string } | null;
   approved_by_user?: { full_name: string } | null;
 }
@@ -87,12 +105,28 @@ interface Document {
   name: string;
   file_path: string;
   folder: string;
+  file_size: number | null;
+  mime_type: string | null;
   uploaded_at: string;
   uploaded_by: string;
+  project_id: string | null;
+  milestone_id: string | null;
+  task_id: string | null;
   uploaded_by_user?: { full_name: string } | null;
 }
 
-// Glass Card Component matching Index.tsx style
+interface TeamMember {
+  id: string;
+  user_id: string;
+  role: string;
+  user?: {
+    full_name: string;
+    email: string;
+    phone: string | null;
+  } | null;
+}
+
+// Glass Card Component
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
     {children}
@@ -113,7 +147,7 @@ export default function ProjectDetailPage() {
   const [updates, setUpdates] = useState<Update[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [team, setTeam] = useState<any[]>([]);
+  const [team, setTeam] = useState<TeamMember[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
 
   useEffect(() => {
@@ -216,6 +250,7 @@ export default function ProjectDetailPage() {
           .from("documents")
           .select("*, uploaded_by_user:profiles!documents_uploaded_by_fkey(full_name)")
           .eq("project_id", id)
+          .neq("folder", "progress_photos")
           .order("uploaded_at", { ascending: false }),
         supabase
           .from("documents")
@@ -366,6 +401,10 @@ export default function ProjectDetailPage() {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    // TODO: Navigate to project edit page
+                    alert("Edit project functionality coming soon!");
+                  }}
                   className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base w-full sm:w-auto justify-center"
                 >
                   <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -412,165 +451,40 @@ export default function ProjectDetailPage() {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
           >
+            {/* Overview Tab - Now using separate component */}
             {activeTab === "overview" && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
-                <div className="lg:col-span-2 space-y-4 sm:space-y-8">
-                  <GlassCard>
-                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Project Progress</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-sm sm:text-base mb-3">
-                          <span className="font-medium">Overall Progress</span>
-                          <span className="font-bold text-primary text-lg sm:text-xl">{project.progress_percent}%</span>
-                        </div>
-                        <div className="w-full bg-white/10 rounded-full h-3 sm:h-4 overflow-hidden backdrop-blur-xl border border-white/20">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${project.progress_percent}%` }}
-                            transition={{ duration: 1, ease: "easeOut" }}
-                            className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </GlassCard>
-
-                  <GlassCard>
-                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Key Dates</h3>
-                    <div className="grid grid-cols-2 gap-4 sm:gap-6">
-                      <div>
-                        <p className="text-xs sm:text-sm text-muted-foreground mb-2">Start Date</p>
-                        <p className="text-base sm:text-lg font-semibold">
-                          {project.start_date ? format(new Date(project.start_date), "dd MMM yyyy") : "Not set"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs sm:text-sm text-muted-foreground mb-2">Expected Completion</p>
-                        <p className="text-base sm:text-lg font-semibold">
-                          {project.expected_completion_date
-                            ? format(new Date(project.expected_completion_date), "dd MMM yyyy")
-                            : "Not set"}
-                        </p>
-                      </div>
-                    </div>
-                  </GlassCard>
-
-                  <GlassCard>
-                    <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Project Description</h3>
-                    <p className="text-sm sm:text-base leading-relaxed text-muted-foreground">
-                      {project.description || "No description provided"}
-                    </p>
-                  </GlassCard>
-                </div>
-
-                <div className="space-y-4 sm:space-y-8">
-                  {!isClient && (
-                    <GlassCard>
-                      <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
-                      <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 sm:mb-2 break-all">
-                        {(project.budget_numeric || 0).toLocaleString()} {project.currency || "KES"}
-                      </div>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Total Project Budget</p>
-                    </GlassCard>
-                  )}
-
-                  <GlassCard>
-                    <h3 className="text-base sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">Quick Stats</h3>
-                    <div className="space-y-4 sm:space-y-5">
-                      {[
-                        { label: "Milestones", value: milestones.length, icon: Calendar },
-                        ...(isClient ? [] : [{ label: "Tasks", value: tasks.length, icon: CheckCircle2 }]),
-                        { label: "Updates", value: updates.length, icon: MessageSquare },
-                        { label: "Documents", value: documents.length, icon: FileText },
-                      ].map((stat) => {
-                        const Icon = stat.icon;
-                        return (
-                          <div key={stat.label} className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 sm:gap-3">
-                              <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-                              <span className="text-xs sm:text-sm md:text-base">{stat.label}</span>
-                            </div>
-                            <span className="text-base sm:text-lg md:text-xl font-bold text-primary">{stat.value}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </GlassCard>
-                </div>
-              </div>
+              <OverviewTab
+                project={project}
+                milestones={milestones}
+                tasks={tasks}
+                updates={updates}
+                documents={documents}
+                canEdit={canEdit}
+                isClient={isClient}
+                onProjectUpdate={fetchProjectAndData}
+              />
             )}
 
+            {/* Milestones Tab */}
             {activeTab === "milestones" && (
-              <div className="space-y-4 sm:space-y-8">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Project Milestones</h3>
-                  {canEdit && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
-                    >
-                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Add Milestone
-                    </motion.button>
-                  )}
-                </div>
-                {milestones.length === 0 ? (
-                  <GlassCard className="text-center py-12 sm:py-16">
-                    <Calendar className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-                    <p className="text-base sm:text-xl text-muted-foreground mb-4 sm:mb-6">No milestones yet</p>
-                    {canEdit && (
-                      <button className="text-primary hover:text-primary/80 font-semibold text-base sm:text-lg">
-                        Create your first milestone
-                      </button>
-                    )}
-                  </GlassCard>
-                ) : (
-                  milestones.map((m, idx) => (
-                    <motion.div
-                      key={m.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.1 }}
-                    >
-                      <GlassCard>
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4">
-                          <h4 className="text-base sm:text-lg md:text-2xl font-bold">{m.title}</h4>
-                          <span
-                            className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap ${
-                              m.status === "completed"
-                                ? "bg-green-500/20 text-green-300 border-green-500/30"
-                                : m.status === "in_progress"
-                                ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
-                                : "bg-gray-500/20 text-gray-300 border-gray-500/30"
-                            }`}
-                          >
-                            {m.status.replace("_", " ")}
-                          </span>
-                        </div>
-                        {m.description && <p className="text-xs sm:text-sm md:text-base text-muted-foreground mb-4 sm:mb-6">{m.description}</p>}
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-6 text-xs sm:text-sm text-muted-foreground">
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary flex-shrink-0" />
-                            <span>
-                              <span className="font-semibold">Planned:</span>{" "}
-                              {m.planned_start_date && format(new Date(m.planned_start_date), "dd MMM")} -{" "}
-                              {m.planned_end_date && format(new Date(m.planned_end_date), "dd MMM yyyy")}
-                            </span>
-                          </div>
-                        </div>
-                      </GlassCard>
-                    </motion.div>
-                  ))
-                )}
-              </div>
+              <MilestonesTab
+                projectId={id!}
+                milestones={milestones}
+                canEdit={canEdit}
+                onUpdate={fetchProjectAndData}
+              />
             )}
 
+            {/* Tasks Tab - Admin only, inline for now */}
             {activeTab === "tasks" && !isClient && (
               <GlassCard>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
                   <h3 className="text-base sm:text-lg md:text-2xl font-bold">Tasks ({tasks.length})</h3>
                   {canEdit && (
-                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base">
+                    <button 
+                      onClick={() => alert("Create task modal coming soon!")}
+                      className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base"
+                    >
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Add Task
                     </button>
                   )}
@@ -618,6 +532,7 @@ export default function ProjectDetailPage() {
               </GlassCard>
             )}
 
+            {/* Updates Tab - Inline for now */}
             {activeTab === "updates" && (
               <div className="space-y-4 sm:space-y-8">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -626,6 +541,7 @@ export default function ProjectDetailPage() {
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
+                      onClick={() => alert("Post update modal coming soon!")}
                       className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
                     >
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> Post Update
@@ -654,8 +570,13 @@ export default function ProjectDetailPage() {
                               {format(new Date(update.posted_at), "dd MMM yyyy, HH:mm")}
                             </p>
                           </div>
+                          {update.is_pinned && (
+                            <span className="px-3 py-1 bg-accent/20 text-accent border border-accent/30 rounded-lg text-xs font-semibold">
+                              Pinned
+                            </span>
+                          )}
                         </div>
-                        <p className="text-sm sm:text-base leading-relaxed text-muted-foreground break-words">{update.content}</p>
+                        <p className="text-sm sm:text-base leading-relaxed text-muted-foreground break-words">{update.body}</p>
                       </GlassCard>
                     </motion.div>
                   ))
@@ -663,6 +584,7 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
+            {/* Photos Tab - Inline for now */}
             {activeTab === "photos" && (
               <div>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
@@ -671,6 +593,7 @@ export default function ProjectDetailPage() {
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
+                      onClick={() => alert("Bulk photo upload modal coming soon!")}
                       className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
                     >
                       <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Photos
@@ -712,12 +635,16 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
+            {/* Documents Tab - Inline for now */}
             {activeTab === "documents" && (
               <GlassCard>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
                   <h3 className="text-base sm:text-lg md:text-2xl font-bold">Documents ({documents.length})</h3>
                   {canEdit && (
-                    <button className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base">
+                    <button 
+                      onClick={() => alert("Upload document modal coming soon!")}
+                      className="text-primary hover:text-primary/80 flex items-center gap-2 font-semibold text-sm sm:text-base"
+                    >
                       <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Document
                     </button>
                   )}
@@ -752,6 +679,10 @@ export default function ProjectDetailPage() {
                         <motion.button
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
+                          onClick={() => {
+                            const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${doc.file_path}`;
+                            window.open(url, '_blank');
+                          }}
                           className="text-primary hover:text-primary/80 p-2 self-end sm:self-auto"
                         >
                           <Download className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -763,8 +694,82 @@ export default function ProjectDetailPage() {
               </GlassCard>
             )}
 
-            {/* Placeholder for admin-only tabs */}
-            {!isClient && ["approvals", "team", "financials", "daily-logs"].includes(activeTab) && (
+            {/* Approvals Tab - Admin only, placeholder */}
+            {activeTab === "approvals" && !isClient && (
+              <div className="space-y-4 sm:space-y-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Change Orders & Approvals</h3>
+                  {canEdit && (
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => alert("Create change order modal coming soon!")}
+                      className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
+                    >
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> New Change Order
+                    </motion.button>
+                  )}
+                </div>
+                {approvals.length === 0 ? (
+                  <GlassCard className="text-center py-12 sm:py-16">
+                    <Gavel className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
+                    <p className="text-base sm:text-xl text-muted-foreground">No approvals requested yet</p>
+                  </GlassCard>
+                ) : (
+                  approvals.map((approval, idx) => (
+                    <motion.div
+                      key={approval.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                    >
+                      <GlassCard>
+                        <div className="flex flex-col sm:flex-row items-start justify-between gap-3 mb-4">
+                          <div className="flex-1">
+                            <h4 className="text-base sm:text-lg md:text-xl font-bold mb-2">{approval.title}</h4>
+                            <p className="text-xs sm:text-sm text-muted-foreground">
+                              {approval.approval_type.replace(/_/g, " ").toUpperCase()}
+                            </p>
+                          </div>
+                          <span
+                            className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap ${
+                              approval.status === "approved"
+                                ? "bg-green-500/20 text-green-300 border-green-500/30"
+                                : approval.status === "rejected"
+                                ? "bg-red-500/20 text-red-300 border-red-500/30"
+                                : "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
+                            }`}
+                          >
+                            {approval.status}
+                          </span>
+                        </div>
+                        {approval.description && (
+                          <p className="text-sm text-muted-foreground mb-3">{approval.description}</p>
+                        )}
+                        <div className="flex flex-wrap gap-4 text-xs sm:text-sm text-muted-foreground">
+                          {approval.amount && (
+                            <div>
+                              <span className="font-semibold">Amount:</span> {approval.amount.toLocaleString()} {project.currency}
+                            </div>
+                          )}
+                          {approval.days_requested && (
+                            <div>
+                              <span className="font-semibold">Days:</span> {approval.days_requested}
+                            </div>
+                          )}
+                          <div>
+                            <span className="font-semibold">Requested by:</span> {approval.requested_by_user?.full_name || "Unknown"}
+                          </div>
+                        </div>
+                      </GlassCard>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Placeholder for other admin-only tabs */}
+            {!isClient && ["team", "financials", "daily-logs"].includes(activeTab) && (
               <GlassCard className="text-center py-16 sm:py-20">
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}
