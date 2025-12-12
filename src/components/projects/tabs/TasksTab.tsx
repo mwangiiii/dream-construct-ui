@@ -214,20 +214,26 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
   };
 
   const handleUpdateTask = async (taskId: string) => {
-    if (editForm.due_date && editForm.due_date !== "" && !validateDueDate(editForm.due_date)) {
+    if (editForm.due_date && !validateDueDate(editForm.due_date)) {
       return showToast("Due date cannot be in the past", "warning");
     }
 
     setLoading(true);
     try {
-      // Critical Fix: Convert empty string to null for due_date
-      const cleanedDueDate = editForm.due_date === "" ? null : editForm.due_date;
-
-      await projectApi.updateTask(taskId, {
-        ...editForm,
-        due_date: cleanedDueDate,
+      // Extract only database fields, excluding computed fields like assigned_user
+      const { assigned_user, ...dbFields } = editForm as any;
+      
+      // Clean up the data - convert empty strings to null for date fields
+      const cleanedData = {
+        ...dbFields,
+        due_date: dbFields.due_date || null, // Convert empty string to null
+        assigned_to: dbFields.assigned_to || null, // Convert empty string to null
+        milestone_id: dbFields.milestone_id || null, // Convert empty string to null
+        description: dbFields.description || null, // Convert empty string to null
         completed_at: editForm.status === "done" ? new Date().toISOString() : null,
-      });
+      };
+      
+      await projectApi.updateTask(taskId, cleanedData);
       showToast("Task updated successfully!", "success");
       setEditingTaskId(null);
       setEditForm({});
@@ -240,6 +246,7 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    // Create custom confirmation dialog using toast system
     const confirmDelete = window.confirm("Delete this task permanently?");
     if (!confirmDelete) return;
 

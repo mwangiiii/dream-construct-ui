@@ -25,6 +25,43 @@ const Services = () => {
   });
 
   const services = [
+        {
+          icon: Factory, // Reuse Factory icon for infrastructure, or replace with a more suitable icon if available
+          title: "Infrastructure",
+          description: "Robust infrastructure solutions for public and private sectors, ensuring long-term reliability and efficiency.",
+          features: [
+            {
+              name: "Roads & Highways",
+              description: "Design and construction of durable roads, highways, and bridges with a focus on safety, sustainability, and traffic flow.",
+              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792000/road-highway-example.jpg",
+              mediaType: "image" as const,
+            },
+            {
+              name: "Water Supply & Drainage",
+              description: "Comprehensive water supply systems, drainage networks, and sewage treatment plants for urban and rural developments.",
+              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792100/water-infrastructure-example.jpg",
+              mediaType: "image" as const,
+            },
+            {
+              name: "Power & Energy Infrastructure",
+              description: "Construction of substations, power lines, and renewable energy facilities to support growing energy needs.",
+              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792200/power-infrastructure-example.jpg",
+              mediaType: "image" as const,
+            },
+            {
+              name: "Telecommunications",
+              description: "Deployment of telecom towers, fiber optic networks, and digital infrastructure for enhanced connectivity.",
+              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792300/telecom-infrastructure-example.jpg",
+              mediaType: "image" as const,
+            },
+            {
+              name: "Public Utilities",
+              description: "Development of essential public utilities including gas pipelines, street lighting, and waste management systems.",
+              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792400/public-utilities-example.jpg",
+              mediaType: "image" as const,
+            },
+          ],
+        },
     {
       icon: Home,
       title: "Residential Construction",

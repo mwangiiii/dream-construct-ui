@@ -1,4 +1,3 @@
-// src/lib/api/projectApi.ts
 import { supabase } from "@/lib/supabaseClient";
 import { EdgeFunctionResponse } from "@/types/project";
 
@@ -6,8 +5,137 @@ import { EdgeFunctionResponse } from "@/types/project";
  * Centralized API client for all project-related edge functions
  * Maps to the 25 edge functions defined in the project requirements
  */
-
 export const projectApi = {
+    /**
+     * Permanently delete a project update from the database
+     */
+    permanentDeleteUpdate: async (updateId: string) => {
+      try {
+        const { error } = await supabase
+          .from('project_updates')
+          .delete()
+          .eq('id', updateId);
+        if (error) throw error;
+        return { success: true };
+      } catch (error) {
+        console.error('[projectApi] Error permanently deleting update:', error);
+        throw error;
+      }
+    },
+  /**
+   * Update the content (title, body, update_type) of a project update
+   */
+  updateUpdateContent: async (updateId: string, updates: { title: string; body: string; update_type: string }) => {
+    try {
+      const { error } = await supabase
+        .from('project_updates')
+        .update({
+          title: updates.title,
+          body: updates.body,
+          update_type: updates.update_type,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', updateId);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('[projectApi] Error updating update content:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Add media paths to a project update (append to media_paths array)
+   */
+  addMediaToUpdate: async (updateId: string, mediaPaths: string[]) => {
+    try {
+      // Fetch current media_paths
+      const { data, error: fetchError } = await supabase
+        .from('project_updates')
+        .select('media_paths')
+        .eq('id', updateId)
+        .single();
+      if (fetchError) throw fetchError;
+      const currentMedia: string[] = data?.media_paths || [];
+      const newMedia = [...currentMedia, ...mediaPaths];
+      const { error } = await supabase
+        .from('project_updates')
+        .update({ media_paths: newMedia })
+        .eq('id', updateId);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('[projectApi] Error adding media to update:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Remove media paths from a project update (remove from media_paths array)
+   */
+  removeMediaFromUpdate: async (updateId: string, mediaPathsToRemove: string[]) => {
+    try {
+      // Fetch current media_paths
+      const { data, error: fetchError } = await supabase
+        .from('project_updates')
+        .select('media_paths')
+        .eq('id', updateId)
+        .single();
+      if (fetchError) throw fetchError;
+      const currentMedia: string[] = data?.media_paths || [];
+      // Remove specified media paths
+      const newMedia = currentMedia.filter((path) => !mediaPathsToRemove.includes(path));
+      const { error } = await supabase
+        .from('project_updates')
+        .update({ media_paths: newMedia })
+        .eq('id', updateId);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('[projectApi] Error removing media from update:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get all documents (photos) for a project
+   */
+  getProjectDocuments: async (projectId: string) => {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("folder", "photos")
+      .order("uploaded_at", { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Update a document (photo)
+   */
+  updateDocument: async (documentId: string, updates: any) => {
+    const { data, error } = await supabase
+      .from("documents")
+      .update(updates)
+      .eq("id", documentId)
+      .select();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Delete a document (photo)
+   */
+  deleteDocument: async (documentId: string) => {
+    const { data, error } = await supabase
+      .from("documents")
+      .delete()
+      .eq("id", documentId);
+    if (error) throw error;
+    return data;
+  },
+
   // ========================================
   // PROJECT MANAGEMENT (Functions #1-4, #22-24)
   // ========================================
@@ -195,38 +323,64 @@ export const projectApi = {
    * #9: Pin/unpin update
    */
   pinUpdate: async (updateId: string, isPinned: boolean) => {
-    const { data, error } = await supabase.functions.invoke("pin-update", {
-      body: { updateId, isPinned },
+    const { data, error } = await supabase.functions.invoke("toggle-update-pin", {
+      body: { update_id: updateId, is_pinned: isPinned },
     });
     if (error) throw error;
     return data as EdgeFunctionResponse;
   },
-
-  // ========================================
-  // DOCUMENT MANAGEMENT (Functions #10-13)
-  // ========================================
 
   /**
-   * #10: Upload single document
-   * Note: File upload happens client-side to Supabase Storage first,
-   * then this function creates the database record
+   * Toggle the pin state of a project update
    */
-  uploadDocument: async (docData: {
-    project_id: string;
-    milestone_id?: string | null;
-    task_id?: string | null;
-    name: string;
-    file_path: string;
-    file_size?: number;
-    mime_type?: string;
-    folder: string;
-  }) => {
-    const { data, error } = await supabase.functions.invoke("upload-document", {
-      body: docData,
-    });
-    if (error) throw error;
-    return data as EdgeFunctionResponse;
+  toggleUpdatePin: async (updateId: string) => {
+    const { data, error: fetchError } = await supabase
+      .from('project_updates')
+      .select('is_pinned')
+      .eq('id', updateId)
+      .single();
+    if (fetchError) throw fetchError;
+    const currentPinned: boolean = !!data?.is_pinned;
+    return await projectApi.pinUpdate(updateId, !currentPinned);
   },
+
+  // ========================================
+// DOCUMENT MANAGEMENT (Functions #10-13)
+// ========================================
+
+/**
+ * #10: Upload single document
+ */
+uploadDocument: async (docData: {
+  project_id: string;
+  milestone_id?: string | null;
+  task_id?: string | null;
+  name: string;
+  file_path: string;
+  file_size?: number;
+  mime_type?: string;
+  folder: string;
+}) => {
+  // Force refresh if token is expired
+  const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError || !session?.access_token) {
+    console.error("Failed to refresh session:", refreshError);
+    throw new Error("Authentication expired - please log in again");
+  }
+
+  const { data, error } = await supabase.functions.invoke("upload-document", {
+    body: docData,
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+
+  if (error) {
+    console.error("Edge function error (upload-document):", error);
+    throw error;
+  }
+  return data as EdgeFunctionResponse;
+},
 
   /**
    * #11: Bulk upload photos
@@ -240,41 +394,71 @@ export const projectApi = {
       file_size?: number;
     }[];
   }) => {
+    const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !session?.access_token) {
+      throw new Error("Authentication expired - please log in again");
+    }
+
     const { data, error } = await supabase.functions.invoke("bulk-upload-photos", {
       body: photosData,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
-    if (error) throw error;
-    return data as EdgeFunctionResponse;
-  },
 
-  /**
-   * #12: Delete document (removes from storage + database)
-   */
-  deleteDocument: async (documentId: string) => {
-    const { data, error } = await supabase.functions.invoke("delete-document", {
-      body: { documentId },
-    });
     if (error) throw error;
-    return data as EdgeFunctionResponse;
-  },
-
-  /**
-   * #13: Move document to different folder or link to different milestone/task
-   */
-  moveDocument: async (
-    documentId: string,
-    updates: {
-      folder?: string;
-      milestone_id?: string | null;
-      task_id?: string | null;
+    if (!data || !data.success) {
+      throw new Error(data?.error || "Unknown upload error");
     }
-  ) => {
-    const { data, error } = await supabase.functions.invoke("move-document", {
-      body: { documentId, ...updates },
-    });
-    if (error) throw error;
     return data as EdgeFunctionResponse;
   },
+
+/**
+ * #12: Delete photo
+ */
+deletePhoto: async (photoId: string) => {
+  const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError || !session?.access_token) {
+    throw new Error("Authentication expired - please log in again");
+  }
+
+  const { data, error } = await supabase.functions.invoke("delete-photo", {
+    body: { photo_id: photoId },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+
+  if (error) throw error;
+  return data;
+},
+
+/**
+ * #13: Move document
+ */
+moveDocument: async (
+  documentId: string,
+  updates: {
+    folder?: string;
+    milestone_id?: string | null;
+    task_id?: string | null;
+  }
+) => {
+  const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError || !session?.access_token) {
+    throw new Error("Authentication expired - please log in again");
+  }
+
+  const { data, error } = await supabase.functions.invoke(`move-document?id=${encodeURIComponent(documentId)}`, {
+    body: { ...updates },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+
+  if (error) throw error;
+  return data as EdgeFunctionResponse;
+},
 
   // ========================================
   // CHANGE ORDERS & APPROVALS (Functions #14-15)
@@ -415,6 +599,51 @@ export const projectApi = {
     });
     if (error) throw error;
     return data as EdgeFunctionResponse;
+  },
+
+  /**
+   * Soft delete a project update (set is_deleted, deleted_at, deleted_by)
+   */
+  softDeleteUpdate: async (updateId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No active session');
+      const userId = session.user.id;
+      const { error } = await supabase
+        .from('project_updates')
+        .update({
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          deleted_by: userId,
+        })
+        .eq('id', updateId);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('[projectApi] Error soft-deleting update:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Restore a soft-deleted project update (set is_deleted to false, clear deleted_at, deleted_by)
+   */
+  restoreUpdate: async (updateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('project_updates')
+        .update({
+          is_deleted: false,
+          deleted_at: null,
+          deleted_by: null,
+        })
+        .eq('id', updateId);
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error('[projectApi] Error restoring update:', error);
+      throw error;
+    }
   },
 };
 

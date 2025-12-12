@@ -200,19 +200,57 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async () => {
+  // Soft delete (suspend) user
+  const handleSoftDeleteUser = async (statusId = 3) => {
     if (!selectedUser) return;
-    
+    setActionLoading(true);
+    try {
+      const { error } = await supabase.functions.invoke('manage-user', {
+        body: { action: 'soft-delete', userId: selectedUser.id, statusId }
+      });
+      if (error) throw error;
+      await fetchUsers();
+      showNotification('User suspended (soft deleted)');
+      setShowDeleteModal(false);
+      setSelectedUser(null);
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to suspend user', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Restore user (set status to active)
+  const handleRestoreUser = async () => {
+    if (!selectedUser) return;
+    setActionLoading(true);
+    try {
+      const { error } = await supabase.functions.invoke('manage-user', {
+        body: { action: 'restore', userId: selectedUser.id }
+      });
+      if (error) throw error;
+      await fetchUsers();
+      showNotification('User restored to active');
+      setShowDeleteModal(false);
+      setSelectedUser(null);
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to restore user', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Hard delete user (permanent)
+  const handleHardDeleteUser = async () => {
+    if (!selectedUser) return;
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
         body: { action: 'delete', userId: selectedUser.id }
       });
-
       if (error) throw error;
-      
       await fetchUsers();
-      showNotification('User deleted successfully');
+      showNotification('User permanently deleted');
       setShowDeleteModal(false);
       setSelectedUser(null);
     } catch (err: any) {
@@ -372,51 +410,78 @@ const UserManagement: React.FC = () => {
     );
   };
 
-  const DeleteModal = () => (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
-      onClick={() => setShowDeleteModal(false)}
-    >
+  const DeleteModal = () => {
+    const isSuspended = selectedUser?.status_id === 3;
+    return (
       <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
+        onClick={() => setShowDeleteModal(false)}
       >
-        <GlassCard className="p-8 border-destructive/30">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="w-8 h-8 text-destructive" />
+        <motion.div
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.95, opacity: 0 }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-md"
+        >
+          <GlassCard className="p-8 border-destructive/30">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertCircle className="w-8 h-8 text-destructive" />
+              </div>
+              <h2 className="text-2xl md:text-3xl font-bold mb-4">
+                {isSuspended ? 'Restore or Delete User' : 'Suspend or Delete User'}
+              </h2>
+              <p className="text-muted-foreground mb-8">
+                {isSuspended
+                  ? <>This user is currently <strong>suspended</strong>. You can restore them to active, or permanently delete.<br/>What would you like to do?</>
+                  : <>Are you sure you want to <strong>suspend</strong> (soft delete) <span className="text-foreground">{selectedUser?.full_name}</span>?<br/>You can restore them later, or permanently delete.</>
+                }
+              </p>
+              <div className="flex flex-col gap-3">
+                <Button
+                  onClick={() => setShowDeleteModal(false)}
+                  variant="outline"
+                  className="h-14 text-lg rounded-xl"
+                  disabled={actionLoading}
+                >
+                  Cancel
+                </Button>
+                {!isSuspended && (
+                  <Button
+                    onClick={() => handleSoftDeleteUser(3)}
+                    disabled={actionLoading}
+                    className="h-14 text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
+                  >
+                    {actionLoading ? 'Suspending...' : 'Suspend (Soft Delete)'}
+                  </Button>
+                )}
+                {isSuspended && (
+                  <Button
+                    onClick={handleRestoreUser}
+                    disabled={actionLoading}
+                    className="h-14 text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
+                  >
+                    {actionLoading ? 'Restoring...' : 'Restore to Active'}
+                  </Button>
+                )}
+                <Button
+                  onClick={handleHardDeleteUser}
+                  disabled={actionLoading}
+                  className="h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
+                >
+                  {actionLoading ? 'Deleting...' : 'Delete Permanently'}
+                </Button>
+              </div>
             </div>
-            <h2 className="text-2xl md:text-3xl font-bold mb-4">Delete User</h2>
-            <p className="text-muted-foreground mb-8">
-              Are you sure you want to delete <strong className="text-foreground">{selectedUser?.full_name}</strong>? This action cannot be undone.
-            </p>
-            <div className="flex gap-4">
-              <Button
-                onClick={() => setShowDeleteModal(false)}
-                variant="outline"
-                className="flex-1 h-14 text-lg rounded-xl"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleDeleteUser}
-                disabled={actionLoading}
-                className="flex-1 h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
-              >
-                {actionLoading ? 'Deleting...' : 'Delete'}
-              </Button>
-            </div>
-          </div>
-        </GlassCard>
+          </GlassCard>
+        </motion.div>
       </motion.div>
-    </motion.div>
-  );
+    );
+  };
 
   if (checkingAuth || !session) return (
     <div className="min-h-screen flex items-center justify-center bg-background">

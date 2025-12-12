@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { projectApi } from "@/lib/api/projectApi";
 import {
   ArrowLeft,
   Calendar,
@@ -26,6 +27,12 @@ import {
   Home,
   Download,
   Plus,
+  X,
+  Check,
+  XCircle,
+  AlertTriangle,
+  Trash2,
+  Archive,
 } from "lucide-react";
 
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
@@ -74,7 +81,7 @@ interface Task {
   assigned_to: string | null;
   milestone_id: string | null;
   completed_at: string | null;
-  assigned_user?: { full_name: string; email?: string } | null;
+  assigned_user?: { full_name: string } | null;
 }
 
 interface Update {
@@ -85,7 +92,13 @@ interface Update {
   posted_at: string;
   posted_by: string;
   is_pinned: boolean;
+  media_paths: string[] | null;
+  is_deleted: boolean;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  updated_at: string | null;
   posted_by_user?: { full_name: string } | null;
+  deleted_by_user?: { full_name: string } | null;
 }
 
 interface Approval {
@@ -133,6 +146,50 @@ interface TeamMember {
   } | null;
 }
 
+interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error" | "warning";
+}
+
+const ToastNotification: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = ({ toast, onDismiss }) => {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(toast.id), 4000);
+    return () => clearTimeout(timer);
+  }, [toast.id, onDismiss]);
+
+  const config = {
+    success: { icon: <Check className="w-5 h-5" />, bg: "bg-green-500/20", border: "border-green-500/50", text: "text-green-200" },
+    error: { icon: <XCircle className="w-5 h-5" />, bg: "bg-red-500/20", border: "border-red-500/50", text: "text-red-200" },
+    warning: { icon: <AlertTriangle className="w-5 h-5" />, bg: "bg-yellow-500/20", border: "border-yellow-500/50", text: "text-yellow-200" },
+  };
+
+  const { icon, bg, border, text } = config[toast.type];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 100, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 100, scale: 0.9 }}
+      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      className={`flex items-center gap-3 min-w-80 max-w-md backdrop-blur-xl ${bg} ${border} ${text} border rounded-xl shadow-2xl p-4 cursor-pointer hover:opacity-90 transition-all pointer-events-auto`}
+      onClick={() => onDismiss(toast.id)}
+    >
+      <div className="p-2 bg-white/20 rounded-lg">{icon}</div>
+      <p className="font-medium text-sm">{toast.message}</p>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss(toast.id);
+        }}
+        className="ml-auto opacity-70 hover:opacity-100"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </motion.div>
+  );
+};
+
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
     {children}
@@ -146,14 +203,25 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [updates, setUpdates] = useState<Update[]>([]);
+  const [activeUpdates, setActiveUpdates] = useState<Update[]>([]);
+  const [deletedUpdates, setDeletedUpdates] = useState<Update[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
+
+  const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, message, type }]);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   useEffect(() => {
     initializeUser();
@@ -173,8 +241,8 @@ export default function ProjectDetailPage() {
         return;
       }
       if (!user.status.is_active) {
-        alert("Your account is not active. Contact admin.");
-        navigate("/");
+        showToast("Your account is not active. Contact admin.", "error");
+        setTimeout(() => navigate("/"), 2000);
         return;
       }
       setCurrentUser(user);
@@ -184,210 +252,202 @@ export default function ProjectDetailPage() {
     }
   };
 
+  // Helper to enrich items with user full_names
+  const enrichWithUsers = async (items: any[], userField: string, enrichField: string) => {
+    if (!items || items.length === 0) return items;
+    const userIds = [...new Set(items.map(item => item[userField]).filter(Boolean))];
+    if (userIds.length === 0) return items;
+
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", userIds);
+
+    if (!profiles) return items;
+
+    const profilesMap = profiles.reduce((acc: Record<string, { full_name: string }>, p: any) => {
+      acc[p.id] = { full_name: p.full_name };
+      return acc;
+    }, {});
+
+    return items.map((item: any) => ({
+      ...item,
+      [enrichField]: item[userField] ? profilesMap[item[userField]] : null,
+    }));
+  };
+
   const fetchProjectAndData = async () => {
     if (!id) return;
     setLoading(true);
 
     try {
-      const { data: proj, error: projError } = await supabase
-        .from("projects")
-        .select(`
-          *,
-          client:profiles!projects_client_id_fkey(id, full_name, company_id, companies(name)),
-          manager:profiles!projects_manager_id_fkey(id, full_name)
-        `)
-        .eq("id", id)
-        .single();
-
-      if (projError || !proj) {
-        alert("Project not found");
-        navigate("/projects");
-        return;
-      }
-      setProject(proj);
-
-      const { data: tasksData, error: tasksError } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("project_id", id)
-        .order("created_at", { ascending: false });
-
-      if (tasksError) {
-        console.error("[ProjectDetail] Tasks fetch error:", tasksError);
-      }
-
-      let tasksWithUsers: Task[] = [];
-      if (tasksData && tasksData.length > 0) {
-        const assignedIds = [...new Set(tasksData
-          .map((t: any) => t.assigned_to)
-          .filter(Boolean))];
-
-        if (assignedIds.length > 0) {
-          const { data: profiles, error: profilesError } = await supabase
-            .from("profiles")
-            .select("id, full_name, email")
-            .in("id", assignedIds);
-
-          if (profilesError) {
-            console.error("[ProjectDetail] Profiles fetch error:", profilesError);
-          }
-
-          if (profiles) {
-            const profilesMap = profiles.reduce((acc: any, p: any) => {
-              acc[p.id] = { full_name: p.full_name, email: p.email };
-              return acc;
-            }, {});
-
-            tasksWithUsers = tasksData.map((task: any) => ({
-              ...task,
-              assigned_user: task.assigned_to ? profilesMap[task.assigned_to] : null,
-            }));
-          } else {
-            tasksWithUsers = tasksData;
-          }
-        } else {
-          tasksWithUsers = tasksData;
+      // Try centralized API first
+      let details: any = null;
+      try {
+        console.log("[ProjectDetail] Attempting API fetch...");
+        details = await projectApi.fetchProjectDetails(id);
+        console.log("[ProjectDetail] API fetch succeeded:", details);
+      } catch (apiErr) {
+        console.warn("[ProjectDetail] API fetch failed, falling back to manual queries:", apiErr);
+        // Fallback: Original manual fetches
+        let teamDataRaw: any[] = [];
+        try {
+          const { data: teamRaw } = await supabase
+            .from("project_team")
+            .select("user_id")
+            .eq("project_id", id);
+          teamDataRaw = teamRaw || [];
+        } catch (teamErr) {
+          console.warn("[ProjectDetail] project_team table not found or empty - skipping team fetch:", teamErr);
+          teamDataRaw = []; // Proceed without team
         }
-      }
 
-      console.log("[ProjectDetail] Tasks loaded:", tasksWithUsers.length);
-
-      const [
-        { data: m },
-        { data: u },
-        { data: a },
-        { data: d },
-        { data: p },
-        { data: teamData },
-      ] = await Promise.all([
-        supabase.from("project_milestones").select("*").eq("project_id", id).order("sort_order"),
-        supabase.from("project_updates").select("*").eq("project_id", id).order("posted_at", { ascending: false }),
-        supabase.from("project_approvals").select("*").eq("project_id", id).order("requested_at", { ascending: false }),
-        supabase.from("documents").select("*").eq("project_id", id).neq("folder", "progress_photos").order("uploaded_at", { ascending: false }),
-        supabase.from("documents").select("*").eq("project_id", id).eq("folder", "progress_photos").order("uploaded_at", { ascending: false }),
-        supabase
-          .from("user_roles")
-          .select(`
-            user_id,
-            role_name,
-            user:profiles!user_id (
-              id,
-              full_name,
-              user_statuses!status_id (is_active, status_name)
-            )
-          `)
-          .in("role_name", ["manager", "project_manager", "finance", "surveyor", "admin", "client"])
-      ]);
-
-      let updatesWithUsers: Update[] = [];
-      if (u && u.length > 0) {
-        const postedByIds = [...new Set(u.map((update: any) => update.posted_by).filter(Boolean))];
-        if (postedByIds.length > 0) {
+        const teamUserIds = teamDataRaw.map((row: any) => row.user_id);
+        let teamData: any[] = [];
+        if (teamUserIds.length > 0) {
           const { data: profiles } = await supabase
             .from("profiles")
-            .select("id, full_name")
-            .in("id", postedByIds);
-
-          if (profiles) {
-            const profilesMap = profiles.reduce((acc: any, p: any) => {
-              acc[p.id] = { full_name: p.full_name };
-              return acc;
-            }, {});
-
-            updatesWithUsers = u.map((update: any) => ({
-              ...update,
-              posted_by_user: update.posted_by ? profilesMap[update.posted_by] : null,
-            }));
-          }
-        } else {
-          updatesWithUsers = u;
+            .select("id, full_name, phone, user_roles(role_name), user_statuses(status_name)")
+            .in("id", teamUserIds);
+          teamData = profiles || [];
         }
+
+        const [
+          { data: proj },
+          { data: tasksData },
+          { data: m },
+          { data: a },
+          { data: docsRaw },
+        ] = await Promise.all([
+          supabase
+            .from("projects")
+            .select(`
+              *,
+              client:profiles!projects_client_id_fkey(id, full_name, company_id, companies(name)),
+              manager:profiles!projects_manager_id_fkey(id, full_name)
+            `)
+            .eq("id", id)
+            .single(),
+          supabase
+            .from("tasks")
+            .select("*")
+            .eq("project_id", id)
+            .order("created_at", { ascending: false }),
+          supabase.from("project_milestones").select("*").eq("project_id", id).order("sort_order"),
+          supabase.from("project_approvals").select("*").eq("project_id", id).order("requested_at", { ascending: false }),
+          supabase
+            .from("documents")
+            .select("*")
+            .eq("project_id", id)
+            .neq("folder", "progress_photos")
+            .order("uploaded_at", { ascending: false }),
+        ]);
+
+        if (!proj) throw new Error("Project not found");
+
+        details = {
+          project: proj,
+          milestones: m || [],
+          tasks: await enrichWithUsers(tasksData || [], "assigned_to", "assigned_user"),
+          approvals: await enrichWithUsers(
+            a || [],
+            "requested_by",
+            "requested_by_user"
+          ).then((enriched) =>
+            enrichWithUsers(enriched as any[], "approved_by", "approved_by_user")
+          ),
+          documents: await enrichWithUsers(docsRaw || [], "uploaded_by", "uploaded_by_user"),
+          teamMembers: teamData,
+        };
       }
 
-      let approvalsWithUsers: Approval[] = [];
-      if (a && a.length > 0) {
-        const userIds = [...new Set([
-          ...a.map((approval: any) => approval.requested_by),
-          ...a.map((approval: any) => approval.approved_by).filter(Boolean)
-        ])].filter(Boolean);
+      // Set core data from details (API or fallback)
+      setProject(details.project);
+      setMilestones(details.milestones);
+      setTasks(details.tasks);
+      setApprovals(details.approvals);
+      setDocuments(details.documents);
 
-        if (userIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, full_name")
-            .in("id", userIds);
-
-          if (profiles) {
-            const profilesMap = profiles.reduce((acc: any, p: any) => {
-              acc[p.id] = { full_name: p.full_name };
-              return acc;
-            }, {});
-
-            approvalsWithUsers = a.map((approval: any) => ({
-              ...approval,
-              requested_by_user: approval.requested_by ? profilesMap[approval.requested_by] : null,
-              approved_by_user: approval.approved_by ? profilesMap[approval.approved_by] : null,
-            }));
-          }
-        } else {
-          approvalsWithUsers = a;
-        }
-      }
-
-      let documentsWithUsers: Document[] = [];
-      if (d && d.length > 0) {
-        const uploadedByIds = [...new Set(d.map((doc: any) => doc.uploaded_by).filter(Boolean))];
-        if (uploadedByIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, full_name")
-            .in("id", uploadedByIds);
-
-          if (profiles) {
-            const profilesMap = profiles.reduce((acc: any, p: any) => {
-              acc[p.id] = { full_name: p.full_name };
-              return acc;
-            }, {});
-
-            documentsWithUsers = d.map((doc: any) => ({
-              ...doc,
-              uploaded_by_user: doc.uploaded_by ? profilesMap[doc.uploaded_by] : null,
-            }));
-          }
-        } else {
-          documentsWithUsers = d;
-        }
-      }
-
-      setMilestones(m || []);
-      setTasks(tasksWithUsers);
-      setUpdates(updatesWithUsers);
-      setApprovals(approvalsWithUsers);
-      setDocuments(documentsWithUsers);
-      setPhotos(p || []);
-
-      const formattedTeam = (teamData || []).map((item: any) => ({
-        id: item.user_id,
-        full_name: item.user?.full_name || "Unknown",
-        role_name: item.role_name,
-        is_active: item.user?.user_statuses?.is_active ?? false,
-        status_name: item.user?.user_statuses?.status_name || "unknown"
+      // Format team
+      const formattedTeam = (details.teamMembers || []).map((item: any) => ({
+        user_id: item.id,
+        role_name: item.user_roles?.[0]?.role_name || "member",
+        user: {
+          id: item.id,
+          full_name: item.full_name,
+          user_statuses: item.user_statuses || null,
+        },
       }));
       setTeam(formattedTeam);
 
+      // Photos: Try edge function, fallback to direct
+      let allPhotos: Document[] = [];
+      try {
+        const photosData = await projectApi.getProjectDocuments(id);
+        allPhotos = photosData || [];
+      } catch (photosErr) {
+        console.warn("Photos API failed, using direct query:", photosErr);
+        const { data: fallback } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("project_id", id)
+          .eq("folder", "photos");
+        allPhotos = fallback || [];
+      }
+      setPhotos(await enrichWithUsers(allPhotos, "uploaded_by", "uploaded_by_user"));
+
+      // Updates: Manual (not in API yet)
+
+      // Always include media_paths explicitly in the select
+      const { data: activeUpdatesData } = await supabase
+        .from("project_updates")
+        .select("id, title, body, update_type, posted_at, posted_by, is_pinned, media_paths, is_deleted, deleted_at, deleted_by, updated_at")
+        .eq("project_id", id)
+        .eq("is_deleted", false)
+        .order("posted_at", { ascending: false });
+
+      const isAdmin = currentUser?.roles.some((r: any) => r.role_name === "admin");
+      let deletedUpdatesData = null;
+
+      if (isAdmin) {
+        const { data: deleted } = await supabase
+          .from("project_updates")
+          .select("id, title, body, update_type, posted_at, posted_by, is_pinned, media_paths, is_deleted, deleted_at, deleted_by, updated_at")
+          .eq("project_id", id)
+          .eq("is_deleted", true)
+          .order("deleted_at", { ascending: false });
+        deletedUpdatesData = deleted;
+      }
+
+      setActiveUpdates(await enrichWithUsers(activeUpdatesData || [], "posted_by", "posted_by_user"));
+      setDeletedUpdates(
+        deletedUpdatesData
+          ? await enrichWithUsers(
+              await enrichWithUsers(deletedUpdatesData, "posted_by", "posted_by_user"),
+              "deleted_by",
+              "deleted_by_user"
+            )
+          : []
+      );
+
+      console.log("[ProjectDetail] Data loaded successfully");
+
     } catch (error) {
-      console.error("[ProjectDetail] Error fetching data:", error);
-      alert("Error loading project data");
+      console.error("[ProjectDetail] Final error in fetch:", error);
+      showToast("Error loading project data", "error");
+      // Ultra-fallback: Redirect
+      setTimeout(() => navigate("/projects"), 2000);
     } finally {
       setLoading(false);
     }
   };
 
-  const isClient = currentUser?.roles.some(r => r.role_name === "client");
+  const isClient = currentUser?.roles.some((r: any) => r.role_name === "client");
+  const isAdmin = currentUser?.roles.some((r: any) => r.role_name === "admin");
 
   const canEdit =
-    currentUser?.roles.some(r => ["admin", "manager"].includes(r.role_name)) ||
-    (currentUser?.roles.some(r => r.role_name === "project_manager") &&
+    currentUser?.roles.some((r: any) => ["admin", "manager"].includes(r.role_name)) ||
+    (currentUser?.roles.some((r: any) => r.role_name === "project_manager") &&
       project?.manager_id === currentUser?.profile?.id);
 
   const allTabs: { id: Tab; label: string; icon: any }[] = [
@@ -403,9 +463,8 @@ export default function ProjectDetailPage() {
     { id: "daily-logs", label: "Daily Logs", icon: Wrench },
   ];
 
-  // Fixed: Clients can now see Tasks tab
   const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];
-  const tabs = isClient ? allTabs.filter(tab => clientTabs.includes(tab.id)) : allTabs;
+  const tabs = isClient ? allTabs.filter((tab) => clientTabs.includes(tab.id)) : allTabs;
 
   if (loading) {
     return (
@@ -486,7 +545,7 @@ export default function ProjectDetailPage() {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => alert("Edit project functionality coming soon!")}
+                  onClick={() => showToast("Edit project functionality coming soon!", "warning")}
                   className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base w-full sm:w-auto justify-center"
                 >
                   <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -532,7 +591,7 @@ export default function ProjectDetailPage() {
                 project={project}
                 milestones={milestones}
                 tasks={tasks}
-                updates={updates}
+                updates={activeUpdates}
                 documents={documents}
                 canEdit={canEdit}
                 isClient={isClient}
@@ -544,7 +603,6 @@ export default function ProjectDetailPage() {
               <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {/* Fixed: Tasks tab now renders for everyone (including clients) */}
             {activeTab === "tasks" && (
               <TasksTab
                 projectId={id!}
@@ -557,11 +615,25 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "updates" && (
-              <UpdatesTab projectId={id!} updates={updates} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+              <UpdatesTab 
+                projectId={id!} 
+                updates={activeUpdates}
+                deletedUpdates={deletedUpdates}
+                canEdit={canEdit} 
+                currentUserId={currentUser?.profile?.id}
+                isAdmin={isAdmin}
+                onUpdate={fetchProjectAndData} 
+              />
             )}
 
             {activeTab === "photos" && (
-              <PhotosTab projectId={id!} photos={photos} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+              <PhotosTab
+                projectId={project.id}
+                photos={photos}
+                milestones={milestones}
+                canEdit={canEdit}
+                onUpdate={fetchProjectAndData}
+              />
             )}
 
             {activeTab === "documents" && (
@@ -573,7 +645,7 @@ export default function ProjectDetailPage() {
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Change Orders & Approvals</h3>
                   {canEdit && (
-                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => alert("Create change order modal coming soon!")}
+                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => showToast("Create change order modal coming soon!", "warning")}
                       className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center">
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5" /> New Change Order
                     </motion.button>
@@ -594,6 +666,15 @@ export default function ProjectDetailPage() {
               </GlassCard>
             )}
           </motion.div>
+        </AnimatePresence>
+      </div>
+
+      {/* Floating Toasts */}
+      <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
+          ))}
         </AnimatePresence>
       </div>
     </div>

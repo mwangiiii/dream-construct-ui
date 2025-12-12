@@ -1,501 +1,511 @@
 // src/components/projects/tabs/PhotosTab.tsx
-import { useState } from "react";
-import { format } from "date-fns";
+import { useState, useRef, useCallback } from "react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Camera,
-  Upload,
-  X,
-  Trash2,
+import { supabase } from "@/lib/supabaseClient";
+import { projectApi } from "@/lib/api/projectApi";
+import { uploadFileToStorage } from "@/types/project";
+import { 
+  Camera, 
+  Image, 
+  UploadCloud, 
+  X, 
+  Loader2, 
+  CheckCircle, 
+  AlertCircle,
   Download,
-  ZoomIn,
-  ChevronLeft,
-  ChevronRight,
+  Trash2,
   Calendar,
-  User,
+  Plus,
 } from "lucide-react";
-import { projectApi, uploadFileToStorage, deleteFileFromStorage } from "@/lib/api/projectApi";
-import { Document } from "@/types/project";
+import type { Document } from "@/types/project";
 
-interface PhotosTabProps {
+interface PhotoUpload {
+  file: File;
+  preview: string;
+  progress: number;
+  status: "pending" | "uploading" | "success" | "error";
+  uploadedPath?: string;
+  error?: string;
+}
+
+interface Milestone {
+  id: string;
+  title: string;
+  planned_start_date: string | null;
+  planned_end_date: string | null;
+}
+
+interface Props {
   projectId: string;
   photos: Document[];
-  milestones?: any[];
+  milestones: Milestone[];
   canEdit: boolean;
   onUpdate: () => void;
 }
 
-const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
-    {children}
-  </div>
-);
+const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, onUpdate }) => {
+  // Debug log for diagnosis
+  console.log('[PhotosTab] photos prop:', photos);
+  const [uploads, setUploads] = useState<PhotoUpload[]>([]);
+  const [selectedMilestone, setSelectedMilestone] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [deleting, setDeleting] = useState<string[]>([]);
+  const [editingPhotoId, setEditingPhotoId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>("");
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [viewPhoto, setViewPhoto] = useState<Document | null>(null);
 
-export default function PhotosTab({ projectId, photos, milestones = [], canEdit, onUpdate }: PhotosTabProps) {
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showLightbox, setShowLightbox] = useState(false);
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  // Bulletproof photo upload wrapper (uses correct bucket)
+  const uploadProjectPhoto = useCallback(async (file: File) => {
+  console.log('Wrapper called with projectId:', projectId);
+  // Only pass file, projectId, and folder; let uploadFileToStorage use its default bucket
+  const result = await uploadFileToStorage(
+    file,
+    projectId,
+    "photos"
+  );
+  console.log('Wrapper result:', result);
+  return result;
+}, [projectId]);
 
-  // Upload form state
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [selectedMilestone, setSelectedMilestone] = useState("");
+  const handleBulkUpload = async (files: File[]) => {
+    const newUploads: PhotoUpload[] = files.map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+      progress: 0,
+      status: "pending",
+    }));
 
-  // Edge Function #11: Bulk Upload Photos
-  const handleBulkUpload = async () => {
-    if (selectedFiles.length === 0 || !canEdit) return;
-    setLoading(true);
-    setUploadProgress(0);
+    setUploads(prev => [...prev, ...newUploads]);
 
-    try {
-      const totalFiles = selectedFiles.length;
-      const uploadedPhotos: any[] = [];
+    const uploadPromises = newUploads.map(async (upload, index) => {
+      try {
+        setUploads(prev => prev.map(u => 
+          u.preview === upload.preview ? { ...u, status: "uploading" } : u
+        ));
 
-      // Upload files one by one with progress
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        
-        // Upload to storage
-        const { path, error: uploadError } = await uploadFileToStorage(
-          file,
-          "documents",
-          "progress_photos"
-        );
-        
-        if (uploadError) throw uploadError;
+        // Check user session before uploading
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !sessionData?.session?.access_token) {
+          setUploads(prev => prev.map(u =>
+            u.preview === upload.preview
+              ? { ...u, status: "error", error: "You must be logged in to upload photos." }
+              : u
+          ));
+          throw new Error("No active session. Please log in again.");
+        }
 
-        uploadedPhotos.push({
-          name: file.name,
-          file_path: path,
-          file_size: file.size,
+        const { path: uploadedPath, error } = await uploadProjectPhoto(upload.file);
+        if (error || !uploadedPath) {
+          console.error(`Upload failed for ${upload.file.name}:`, error);
+          throw new Error(`Failed to upload ${upload.file.name}: ${error?.message || "Unknown error"}`);
+        }
+
+        // Call edge function to add to DB
+        const uploadResult = await projectApi.bulkUploadPhotos({
+          project_id: projectId,
+          milestone_id: selectedMilestone || null,
+          photos: [{
+            name: upload.file.name,
+            file_path: uploadedPath,
+            file_size: upload.file.size,
+          }],
         });
+        console.log('PhotosTab bulkUploadPhotos result:', uploadResult);
+        if (!uploadResult?.success) throw new Error(uploadResult?.error || "Unknown upload error");
 
-        // Update progress
-        setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
+        setUploads(prev => prev.map(u =>
+          u.preview === upload.preview
+            ? { ...u, status: "success", uploadedPath }
+            : u
+        ));
+
+        onUpdate();  // Refresh photos list
+
+      } catch (err: any) {
+        console.error("Bulk photo upload failed:", err);
+        setUploads(prev => prev.map(u => 
+          u.preview === upload.preview 
+            ? { ...u, status: "error", error: err.message } 
+            : u
+        ));
+      }
+    });
+
+    await Promise.all(uploadPromises);
+  };
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(file => 
+      file.type.startsWith("image/")
+    );
+    if (files.length > 0) {
+      handleBulkUpload(files);
+    }
+  }, [handleBulkUpload]);
+
+  const handleFileSelect = useCallback(() => {
+    const files = Array.from(fileInputRef.current?.files || []).filter(file => 
+      file.type.startsWith("image/")
+    );
+    if (files.length > 0) {
+      handleBulkUpload(files);
+    }
+  }, [handleBulkUpload]);
+
+  const removeUpload = useCallback((preview: string) => {
+    setUploads(prev => prev.filter(u => u.preview !== preview));
+    URL.revokeObjectURL(preview);
+  }, []);
+
+  const handleDeletePhoto = async (photoId: string) => {
+    setDeleting(prev => [...prev, photoId]);
+    try {
+      // First, delete from storage
+      const { data: photoDoc } = await supabase
+        .from("documents")
+        .select("file_path")
+        .eq("id", photoId)
+        .single();
+
+      if (photoDoc?.file_path) {
+        const { error: storageError } = await supabase.storage
+          .from("documents-and-images")
+          .remove([photoDoc.file_path]);
+        if (storageError) throw storageError;
       }
 
-      // Create document records in bulk
-      await projectApi.bulkUploadPhotos({
-        project_id: projectId,
-        milestone_id: selectedMilestone || undefined,
-        photos: uploadedPhotos,
-      });
+      // Delete from DB via edge function (bypasses RLS)
+      await projectApi.deletePhoto(photoId);
 
-      alert(`Successfully uploaded ${uploadedPhotos.length} photo(s)!`);
-      setShowUploadModal(false);
-      setSelectedFiles([]);
-      setPreviewUrls([]);
-      setSelectedMilestone("");
-      setUploadProgress(0);
       onUpdate();
-    } catch (error: any) {
-      console.error("Error uploading photos:", error);
-      alert(error.message || "Failed to upload photos");
+      showToast("Photo deleted successfully", "success");
+    } catch (err: any) {
+      console.error("Delete failed:", err);
+      showToast(`Delete failed: ${err.message}`, "error");
     } finally {
-      setLoading(false);
+      setDeleting(prev => prev.filter(id => id !== photoId));
     }
   };
 
-  // Edge Function #12: Delete Document/Photo
-  const handleDeletePhoto = async (photo: Document) => {
-    if (!canEdit) return;
-    if (!confirm(`Delete "${photo.name}"?`)) return;
-
-    setLoading(true);
-    try {
-      await projectApi.deleteDocument(photo.id);
-      alert("Photo deleted successfully!");
-      onUpdate();
-    } catch (error: any) {
-      console.error("Error deleting photo:", error);
-      alert(error.message || "Failed to delete photo");
-    } finally {
-      setLoading(false);
-    }
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    // Implement your toast logic here, or use a global one
+    console.log(`${type.toUpperCase()}: ${message}`);
   };
 
-  // Handle file selection
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+  const groupedPhotos = photos.reduce((acc, photo) => {
+    const dateKey = photo.uploaded_at ? new Date(photo.uploaded_at).toLocaleDateString() : "Uncategorized";
+    if (!acc[dateKey]) acc[dateKey] = [];
+    acc[dateKey].push(photo);
+    return acc;
+  }, {} as Record<string, Document[]>);
+  console.log('[PhotosTab] groupedPhotos:', groupedPhotos);
 
-    // Filter for images only
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    
-    if (imageFiles.length !== files.length) {
-      alert("Only image files are allowed");
-    }
-
-    // Limit to 50 photos per upload
-    if (selectedFiles.length + imageFiles.length > 50) {
-      alert("Maximum 50 photos per upload");
-      return;
-    }
-
-    setSelectedFiles([...selectedFiles, ...imageFiles]);
-
-    // Create preview URLs
-    const newPreviewUrls = imageFiles.map((file) => URL.createObjectURL(file));
-    setPreviewUrls([...previewUrls, ...newPreviewUrls]);
+  // Edit Photo Modal
+  const handleEditPhoto = (photo: Document) => {
+    setEditingPhotoId(photo.id);
+    setEditName(photo.name);
+    setEditModalOpen(true);
   };
 
-  const removeFile = (index: number) => {
-    const newFiles = [...selectedFiles];
-    const newPreviews = [...previewUrls];
-    
-    URL.revokeObjectURL(newPreviews[index]);
-    
-    newFiles.splice(index, 1);
-    newPreviews.splice(index, 1);
-    
-    setSelectedFiles(newFiles);
-    setPreviewUrls(newPreviews);
-  };
-
-  // Lightbox navigation
-  const openLightbox = (index: number) => {
-    setCurrentPhotoIndex(index);
-    setShowLightbox(true);
-  };
-
-  const nextPhoto = () => {
-    setCurrentPhotoIndex((prev) => (prev + 1) % photos.length);
-  };
-
-  const prevPhoto = () => {
-    setCurrentPhotoIndex((prev) => (prev - 1 + photos.length) % photos.length);
-  };
-
-  const downloadPhoto = (photo: Document) => {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${photo.file_path}`;
-    window.open(url, "_blank");
+  // View Photo Modal
+  const handleViewPhoto = (photo: Document) => {
+    setViewPhoto(photo);
+    setViewModalOpen(true);
   };
 
   return (
-    <div className="space-y-4 sm:space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Site Progress Photos</h3>
-          <p className="text-sm sm:text-base text-muted-foreground mt-2">
-            {photos.length} photo{photos.length !== 1 ? "s" : ""} uploaded
-          </p>
-        </div>
-        {canEdit && (
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl text-sm sm:text-base w-full sm:w-auto justify-center"
-          >
-            <Upload className="w-4 h-4 sm:w-5 sm:h-5" /> Upload Photos
-          </motion.button>
-        )}
-      </div>
+    <div className="space-y-6">
+      {/* Upload Section */}
+      {canEdit && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4"
+        >
+          <div className="flex items-center gap-3">
+            <Camera className="w-5 h-5 text-primary" />
+            <h3 className="text-xl font-semibold">Upload Progress Photos</h3>
+          </div>
 
-      {/* Empty State */}
-      {photos.length === 0 ? (
-        <GlassCard className="text-center py-16 sm:py-20">
-          <Camera className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 text-primary/30" />
-          <p className="text-base sm:text-xl text-muted-foreground mb-4 sm:mb-6">No photos uploaded yet</p>
-          {canEdit && (
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="text-primary hover:text-primary/80 font-semibold text-base sm:text-lg"
-            >
-              Upload your first photos
-            </button>
+          {/* Milestone Selector */}
+          {milestones.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-muted-foreground" />
+              <select
+                value={selectedMilestone || ""}
+                onChange={(e) => setSelectedMilestone(e.target.value || null)}
+                className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">No milestone</option>
+                {milestones.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.title} ({m.planned_start_date} - {m.planned_end_date})
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
-        </GlassCard>
-      ) : (
-        /* Photo Grid */
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-          {photos.map((photo, idx) => (
-            <motion.div
-              key={photo.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: idx * 0.03 }}
-              className="group relative backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl overflow-hidden hover:border-primary/50 transition-all cursor-pointer"
-              onClick={() => openLightbox(idx)}
+
+          {/* Drag & Drop Area */}
+          <div
+            className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+              dragging
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-primary/30"
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <UploadCloud className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+            <p className="text-sm text-muted-foreground mb-2">
+              Drag & drop images here, or click to select
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-primary text-primary bg-primary/5 hover:bg-primary/10 rounded-lg transition-colors"
             >
-              {/* Image */}
-              <img
-                src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${photo.file_path}`}
-                alt={photo.name}
-                className="w-full h-32 sm:h-40 md:h-48 object-cover"
-                loading="lazy"
-              />
+              <Plus className="w-4 h-4" />
+              Select Photos
+            </button>
+          </div>
 
-              {/* Overlay on Hover */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-end p-3">
-                <div className="text-white mb-2">
-                  <p className="font-semibold text-xs sm:text-sm truncate">{photo.name}</p>
-                  <p className="text-[10px] sm:text-xs text-white/80">
-                    {format(new Date(photo.uploaded_at), "dd MMM yyyy")}
-                  </p>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-2">
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openLightbox(idx);
-                    }}
-                    className="flex-1 p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm transition-all"
+          {/* Upload Progress */}
+          <AnimatePresence>
+            {uploads.length > 0 && (
+              <div className="space-y-3">
+                {uploads.map((upload) => (
+                  <motion.div
+                    key={upload.preview}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-center gap-3 p-3 bg-background/50 rounded-lg border"
                   >
-                    <ZoomIn className="w-4 h-4 mx-auto" />
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      downloadPhoto(photo);
-                    }}
-                    className="flex-1 p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm transition-all"
-                  >
-                    <Download className="w-4 h-4 mx-auto" />
-                  </motion.button>
-                  {canEdit && (
-                    <motion.button
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeletePhoto(photo);
-                      }}
-                      className="flex-1 p-2 bg-red-500/40 hover:bg-red-500/60 rounded-lg backdrop-blur-sm transition-all"
-                    >
-                      <Trash2 className="w-4 h-4 mx-auto" />
-                    </motion.button>
-                  )}
-                </div>
+                    <img
+                      src={upload.preview}
+                      alt={upload.file.name}
+                      className="w-12 h-12 object-cover rounded"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{upload.file.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {upload.file.size / 1024 / 1024 > 1
+                          ? `${(upload.file.size / 1024 / 1024).toFixed(1)} MB`
+                          : `${(upload.file.size / 1024).toFixed(0)} KB`}
+                      </p>
+                    </div>
+                    <div className="w-20">
+                      {upload.status === "uploading" && (
+                        <div className="w-full bg-muted rounded-full h-2">
+                          <div
+                            className="bg-primary h-2 rounded-full transition-all"
+                            style={{ width: `${upload.progress}%` }}
+                          />
+                        </div>
+                      )}
+                      {upload.status === "success" && (
+                        <CheckCircle className="w-5 h-5 text-green-500" />
+                      )}
+                      {upload.status === "error" && (
+                        <AlertCircle className="w-5 h-5 text-red-500" />
+                      )}
+                    </div>
+                    {(upload.status === "error" || upload.status === "success") && (
+                      <button
+                        onClick={() => removeUpload(upload.preview)}
+                        className="ml-2 p-1 hover:bg-muted rounded-full"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                    {upload.status === "error" && (
+                      <p className="text-xs text-red-500 ml-2">{upload.error}</p>
+                    )}
+                  </motion.div>
+                ))}
               </div>
-            </motion.div>
-          ))}
-        </div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
 
-      {/* Upload Modal */}
-      <AnimatePresence>
-        {showUploadModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-2xl font-bold">Upload Site Photos</h3>
-                <button
-                  onClick={() => setShowUploadModal(false)}
-                  disabled={loading}
-                  className="p-2 hover:bg-white/10 rounded-lg transition-all"
+      {/* Photos Grid */}
+      <div className="space-y-6">
+        {Object.entries(groupedPhotos).map(([dateKey, groupPhotos]) => (
+          <div key={dateKey} className="space-y-3">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              {dateKey}
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {groupPhotos.map((photo) => (
+                <motion.div
+                  key={photo.id}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="relative group bg-background rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow"
                 >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {/* Milestone Selection */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">Link to Milestone (Optional)</label>
-                  <select
-                    value={selectedMilestone}
-                    onChange={(e) => setSelectedMilestone(e.target.value)}
-                    disabled={loading}
-                    className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
+                  <button
+                    type="button"
+                    className="w-full h-32 p-0 border-none bg-transparent cursor-pointer"
+                    style={{ display: 'block' }}
+                    onClick={() => handleViewPhoto(photo)}
+                    tabIndex={0}
+                    aria-label={`View photo: ${photo.name}`}
                   >
-                    <option value="" className="bg-background">No Milestone</option>
-                    {milestones.map((milestone) => (
-                      <option key={milestone.id} value={milestone.id} className="bg-background">
-                        {milestone.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* File Selection Area */}
-                {previewUrls.length === 0 ? (
-                  <label className="flex flex-col items-center justify-center gap-4 px-6 py-12 backdrop-blur-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-primary/50 rounded-xl cursor-pointer transition-all">
-                    <Camera className="w-16 h-16 text-primary/50" />
-                    <div className="text-center">
-                      <p className="text-lg font-semibold mb-1">Click to select photos</p>
-                      <p className="text-sm text-muted-foreground">or drag and drop (max 50 photos)</p>
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={handleFileSelect}
-                      disabled={loading}
-                      className="hidden"
+                    <img
+                      src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents-and-images/${photo.file_path}`}
+                      alt={photo.name}
+                      className="w-full h-32 object-cover rounded-t-lg"
                     />
-                  </label>
-                ) : (
-                  <>
-                    {/* Preview Grid */}
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                      {previewUrls.map((url, index) => (
-                        <div key={index} className="relative group">
-                          <img
-                            src={url}
-                            alt={`Preview ${index + 1}`}
-                            className="w-full h-20 object-cover rounded-lg border border-white/20"
-                          />
-                          <button
-                            onClick={() => removeFile(index)}
-                            disabled={loading}
-                            className="absolute top-1 right-1 p-1 bg-red-500 hover:bg-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <X className="w-3 h-3 text-white" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add More Button */}
-                    {selectedFiles.length < 50 && !loading && (
-                      <label className="flex items-center justify-center gap-2 px-4 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/15 border border-white/20 rounded-xl cursor-pointer transition-all">
-                        <Camera className="w-5 h-5" />
-                        <span>Add More Photos</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                      </label>
+                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        handleDeletePhoto(photo.id);
+                      }}
+                      disabled={deleting.includes(photo.id)}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/80 hover:bg-red-500 text-white p-1 rounded-full disabled:opacity-50"
+                    >
+                      {deleting.includes(photo.id) ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-2 truncate flex items-center">
+                    {photo.name}
+                    {canEdit && (
+                      <button
+                        onClick={() => handleEditPhoto(photo)}
+                        className="ml-2 text-xs text-blue-300 underline"
+                      >
+                        Edit
+                      </button>
                     )}
-                  </>
-                )}
-
-                {/* Upload Progress */}
-                {loading && uploadProgress > 0 && (
-                  <div>
-                    <div className="flex justify-between text-sm mb-2">
-                      <span>Uploading...</span>
-                      <span className="font-semibold text-primary">{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden backdrop-blur-xl border border-white/20">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${uploadProgress}%` }}
-                        className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
-                      />
-                    </div>
                   </div>
-                )}
-
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-4">
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleBulkUpload}
-                    disabled={loading || selectedFiles.length === 0}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-background font-semibold rounded-xl transition-all"
-                  >
-                    {loading ? (
-                      <>
-                        <Upload className="w-4 h-4 animate-pulse" />
-                        Uploading {uploadProgress}%...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4" />
-                        Upload {selectedFiles.length} Photo{selectedFiles.length !== 1 ? "s" : ""}
-                      </>
-                    )}
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setShowUploadModal(false)}
-                    disabled={loading}
-                    className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
-                  >
-                    Cancel
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
+                </motion.div>
+              ))}
+            </div>
           </div>
-        )}
-      </AnimatePresence>
-
-      {/* Lightbox Modal */}
-      <AnimatePresence>
-        {showLightbox && photos.length > 0 && (
-          <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="w-full h-full flex flex-col"
+        ))}
+      </div>
+      {/* Edit Photo Name Modal - Responsive and Styled */}
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent
+          className="w-full max-w-md sm:max-w-lg p-0 rounded-2xl bg-background shadow-2xl border border-border flex flex-col items-center"
+        >
+          <div className="w-full px-6 py-5 flex flex-col gap-4">
+            <DialogTitle className="text-xl font-bold mb-2 text-primary tracking-tight">Edit Photo Name</DialogTitle>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (editingPhotoId) {
+                  await projectApi.updateDocument(editingPhotoId, { name: editName });
+                  setEditingPhotoId(null);
+                  setEditModalOpen(false);
+                  onUpdate();
+                }
+              }}
+              className="flex flex-col gap-4"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-white">
-                  <p className="font-semibold">{photos[currentPhotoIndex].name}</p>
-                  <p className="text-sm text-white/60">
-                    {format(new Date(photos[currentPhotoIndex].uploaded_at), "dd MMM yyyy")} •{" "}
-                    {photos[currentPhotoIndex].uploaded_by_user?.full_name || "Unknown"}
-                  </p>
-                </div>
+              <input
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                className="px-4 py-2 text-base rounded-lg border border-border focus:border-primary focus:ring-2 focus:ring-primary/30 bg-background text-foreground placeholder:text-muted-foreground transition-all outline-none shadow-sm min-w-0"
+                autoFocus
+                placeholder="Enter new photo name..."
+                style={{ letterSpacing: '0.01em' }}
+              />
+              <div className="flex gap-2 justify-end">
                 <button
-                  onClick={() => setShowLightbox(false)}
-                  className="p-2 hover:bg-white/10 rounded-lg transition-all text-white"
+                  type="button"
+                  onClick={() => { setEditModalOpen(false); setEditingPhotoId(null); }}
+                  className="px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground font-semibold text-sm shadow transition-all border border-border"
+                >Cancel</button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold text-sm shadow transition-all"
+                >Save</button>
+              </div>
+            </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Photo Modal - Responsive, Scrollable, Styled */}
+      <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
+        <DialogContent
+          className="w-full max-w-3xl sm:max-w-4xl p-0 bg-background rounded-2xl shadow-2xl border border-border flex flex-col items-center overflow-hidden"
+        >
+          {viewPhoto && (
+            <div className="w-full flex flex-col items-center justify-center max-h-[80vh] overflow-y-auto">
+              <div className="w-full flex justify-end p-3">
+                <button
+                  onClick={() => setViewModalOpen(false)}
+                  className="p-2 rounded-full hover:bg-muted transition-colors focus:outline-none"
+                  aria-label="Close"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="w-6 h-6 text-muted-foreground" />
                 </button>
               </div>
-
-              {/* Image */}
-              <div className="flex-1 flex items-center justify-center relative">
+              <div className="flex-1 flex items-center justify-center w-full px-2 pb-2">
                 <img
-                  src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${photos[currentPhotoIndex].file_path}`}
-                  alt={photos[currentPhotoIndex].name}
-                  className="max-w-full max-h-full object-contain rounded-lg"
+                  src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents-and-images/${viewPhoto.file_path}`}
+                  alt={viewPhoto.name}
+                  className="max-w-full max-h-[65vh] object-contain rounded-xl border border-border bg-background"
+                  style={{ margin: '0 auto' }}
                 />
-
-                {/* Navigation Buttons */}
-                {photos.length > 1 && (
-                  <>
-                    <button
-                      onClick={prevPhoto}
-                      className="absolute left-4 p-3 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full transition-all"
-                    >
-                      <ChevronLeft className="w-6 h-6 text-white" />
-                    </button>
-                    <button
-                      onClick={nextPhoto}
-                      className="absolute right-4 p-3 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full transition-all"
-                    >
-                      <ChevronRight className="w-6 h-6 text-white" />
-                    </button>
-                  </>
-                )}
               </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-center gap-4 mt-4 text-white/60 text-sm">
-                <span>
-                  {currentPhotoIndex + 1} of {photos.length}
-                </span>
+              <div className="w-full px-4 py-3 bg-muted text-foreground text-center text-base font-medium truncate border-t border-border">
+                {viewPhoto.name}
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {photos.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center py-12"
+        >
+          <Image className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No photos yet</h3>
+          <p className="text-muted-foreground">Upload your first progress photo to get started</p>
+        </motion.div>
+      )}
     </div>
   );
-}
+};
+
+export default PhotosTab;
