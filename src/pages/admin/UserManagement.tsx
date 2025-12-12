@@ -81,7 +81,10 @@ const UserManagement: React.FC = () => {
   const roles = {
     admin: { label: 'Admin', color: 'text-accent', icon: Shield },
     manager: { label: 'Manager', color: 'text-primary', icon: UserCog },
-    client: { label: 'Client', color: 'text-green-400', icon: Users }
+    client: { label: 'Client', color: 'text-green-400', icon: Users },
+    finance: { label: 'Finance', color: 'text-green-400', icon: Users },
+    surveyor: { label: 'Surveyor', color: 'text-blue-400', icon: Building2 },
+    project_manager: { label: 'Project Manager', color: 'text-yellow-400', icon: Briefcase }
   };
 
   // === AUTH GUARD ===

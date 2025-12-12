@@ -223,7 +223,7 @@
     };
 
     const downloadDocument = (doc: Document) => {
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents/${doc.file_path}`;
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/documents-and-images/${doc.file_path}`;
       window.open(url, "_blank");
     };
 
