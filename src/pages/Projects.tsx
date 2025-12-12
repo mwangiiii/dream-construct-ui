@@ -553,12 +553,12 @@ export default function CompletedProjects() {
                     </div>
 
                     <div className="mt-6 pt-6 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-primary flex items-center gap-2">
+                      {/* <div className="flex items-center justify-between"> */}
+                        {/* <span className="text-sm font-medium text-primary flex items-center gap-2">
                           View Details
-                        </span>
-                        <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                      </div>
+                        </span> */}
+                        {/* <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" /> */}
+                      {/* </div> */}
                     </div>
                   </GlassCard>
                 </motion.div>
