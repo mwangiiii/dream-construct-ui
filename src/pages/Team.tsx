@@ -19,76 +19,86 @@ const Team = () => {
 
   useEffect(() => {
     const fetchTeam = async () => {
-      console.log("Team.tsx → Starting fetchTeam()");
+      console.log("=== TEAM FETCH DEBUG START ===");
+      console.log("1. Component mounted, starting fetchTeam()");
 
       try {
-        const { data: rawData, error, count, status } = await supabase
-          .from("profiles")
-          .select(
-            `
-            id,
-            full_name,
-            avatar_url,
-            job_title,
-            user_roles (
-              role_name
-            )
-          `,
-            { count: "exact" }
-          )
-          .in("user_roles.role_name", [
+        console.log("2. Fetching user_roles first...");
+        
+        // Step 1: Get user_roles with team roles
+        const { data: rolesData, error: rolesError } = await supabase
+          .from("user_roles")
+          .select("user_id, role_name")
+          .in("role_name", [
             "admin",
             "manager",
-            "project_manager",   // ← CORRECT: underscore, matches your enum
+            "project_manager",
             "finance",
             "surveyor"
-          ])
-          .order("full_name", { ascending: true });
+          ]);
 
-        console.log("Raw Supabase response:", { rawData, error, count, status });
+        console.log("3. Roles query result:", { rolesData, rolesError });
 
-        if (error) {
-          console.error("Supabase threw an error:", error);
-          throw error;
+        if (rolesError) {
+          console.error("❌ Error fetching roles:", rolesError);
+          throw rolesError;
         }
 
-        if (!rawData || rawData.length === 0) {
-          console.warn("No team members found. Possible reasons:");
-          console.warn("• No users have admin/manager/project_manager/finance/surveyor roles");
-          console.warn("• RLS blocks access to user_roles table");
-          console.warn("• Roles are still saved as 'project manager' (with space)");
+        if (!rolesData || rolesData.length === 0) {
+          console.warn("⚠️ No matching roles found");
           setTeamMembers([]);
           return;
         }
 
-        console.log("Found profiles with roles:", rawData);
+        // Step 2: Get unique user IDs
+        const userIds = [...new Set(rolesData.map(r => r.user_id))];
+        console.log("4. User IDs to fetch profiles for:", userIds);
 
-        const members: TeamMember[] = rawData
-          .map((profile: any) => {
-            const roles = profile.user_roles || [];
-            console.log(`User: ${profile.full_name} (ID: ${profile.id}) → Roles:`, roles);
+        // Step 3: Fetch profiles for those users
+        const { data: profilesData, error: profilesError } = await supabase
+          .from("profiles")
+          .select("id, full_name, avatar_url, job_title")
+          .in("id", userIds);
 
-            return roles
-              .filter((r: any) =>
-                ["admin", "manager", "project_manager", "finance", "surveyor"].includes(r.role_name)
-              )
-              .map((role: any) => ({
-                id: profile.id,
-                full_name: profile.full_name || "Unnamed Team Member",
-                avatar_url: profile.avatar_url,
-                job_title: profile.job_title || "Team Member",
-                role_name: role.role_name,
-              }));
+        console.log("5. Profiles query result:", { profilesData, profilesError });
+
+        if (profilesError) {
+          console.error("❌ Error fetching profiles:", profilesError);
+          throw profilesError;
+        }
+
+        // Step 4: Manually join the data
+        const members: TeamMember[] = rolesData
+          .map((role: any) => {
+            const profile = profilesData?.find(p => p.id === role.user_id);
+            
+            if (!profile) {
+              console.warn(`⚠️ No profile found for user_id: ${role.user_id}`);
+              return null;
+            }
+
+            return {
+              id: profile.id,
+              full_name: profile.full_name || "Unnamed Team Member",
+              avatar_url: profile.avatar_url,
+              job_title: profile.job_title || "Team Member",
+              role_name: role.role_name,
+            };
           })
-          .flat();
+          .filter(Boolean) as TeamMember[];
 
-        console.log("FINAL TEAM MEMBERS ARRAY:", members);
+        console.log("✅ 6. Final team members:", members);
+        console.log("   - Total members:", members.length);
         setTeamMembers(members);
+        
       } catch (err: any) {
-        console.error("fetchTeam() crashed:", err);
-        console.error("Error message:", err.message);
+        console.error("❌ FATAL ERROR in fetchTeam()");
+        console.error("   - Message:", err.message);
+        console.error("   - Full error:", err);
       } finally {
+        console.log("7. Setting loading to false");
         setLoading(false);
+        console.log("=== TEAM FETCH DEBUG END ===");
       }
     };
 
@@ -165,7 +175,9 @@ const Team = () => {
         ) : teamMembers.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-2xl text-muted-foreground mb-4">No team members found.</p>
-            <p className="text-sm text-muted-foreground">Open console (F12) → full debug logs are there!</p>
+            <p className="text-sm text-muted-foreground">
+              Team members will appear here as you add users with admin, manager, project_manager, finance, or surveyor roles.
+            </p>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
