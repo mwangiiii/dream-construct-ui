@@ -27,8 +27,9 @@ const Footer = () => {
       { name: "Residential", type: "Residential Construction" },
       { name: "Commercial", type: "Commercial Projects" },
       { name: "Industrial", type: "Industrial Construction" },
-      { name: "Renovations", type: "Renovations & Remodeling" },
       { name: "Infrastructure", type: "Infrastructure" },
+      { name: "Renovations", type: "Renovations & Remodeling" },
+      
     ],
     legal: [
       // { name: "Terms of Service", path: "#" },
@@ -36,10 +37,10 @@ const Footer = () => {
   };
 
   const socialLinks = [
-    { icon: Facebook, href: "#", label: "Facebook", isReactIcon: false },
+    { icon: Facebook, href: "https://www.facebook.com/share/15UR48sY6LD/", label: "Facebook", isReactIcon: false },
     { icon: Twitter, href: "#", label: "Twitter", isReactIcon: false },
-    { icon: Linkedin, href: "#", label: "LinkedIn", isReactIcon: false },
-    { icon: Instagram, href: "#", label: "Instagram", isReactIcon: false },
+    { icon: Linkedin, href: "https://www.linkedin.com/in/dream-construct-381a82399?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app", label: "LinkedIn", isReactIcon: false },
+    { icon: Instagram, href: "https://www.instagram.com/dream.construct?igsh=ejQxcTZybmc5cDhx", label: "Instagram", isReactIcon: false },
     { icon: FaWhatsapp, href: "https://wa.me/254707063047", label: "WhatsApp", isReactIcon: true },
   ];
 
