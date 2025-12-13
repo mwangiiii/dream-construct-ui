@@ -1,6 +1,6 @@
 // src/components/SubServicePopup.tsx
-// Complete SubServicePopup with dynamic media support (image/video) and elegant flow
-// This is the FINAL, PRODUCTION-READY version
+// Complete SubServicePopup with dynamic media support and elegant fade-in animations
+// This is the FINAL, PRODUCTION-READY version with smooth image animations
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
@@ -45,7 +45,7 @@ interface SubServicePopupProps {
   isOpen: boolean;
   onClose: () => void;
   subService: SubService;
-  phases: Phase[]; // Updated to receive phases instead of flat stages
+  phases: Phase[];
 }
 
 const SubServicePopup: React.FC<SubServicePopupProps> = ({
@@ -154,13 +154,8 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                 </p>
               </motion.div>
 
-              {/* Dynamic Media Section - Adaptive Sizing */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3 }}
-                className="mb-8"
-              >
+              {/* Dynamic Media Section with Professional Fade-In Animation */}
+              <div className="mb-8">
                 {hasMedia && !mediaError ? (
                   <div className="rounded-xl overflow-hidden bg-gradient-to-br from-primary/5 to-accent/5 relative group">
                     {/* Loading Skeleton */}
@@ -175,24 +170,29 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                     )}
 
                     {subService.mediaType === "video" ? (
-                      <div className="relative w-full">
-                        <video
-                        key={subService.mediaSrc} // Forces re-mount when switching videos
-                        src={subService.mediaSrc}
-                        className={`w-full h-auto max-h-[520px] object-cover transition-opacity duration-500 ${
-                          mediaLoaded ? "opacity-100" : "opacity-0"
-                        }`}
-                        autoPlay
-                        loop
-                        muted
-                        playsInline           // ← Critical for iOS/Android
-                        controls
-                        preload="auto"
-                        onLoadedData={handleMediaLoad}
-                        onError={handleMediaError}
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.3, duration: 0.6 }}
+                        className="relative w-full"
                       >
-                        Your browser does not support video playback.
-                      </video>
+                        <video
+                          key={subService.mediaSrc}
+                          src={subService.mediaSrc}
+                          className={`w-full h-auto max-h-[520px] object-cover transition-opacity duration-500 ${
+                            mediaLoaded ? "opacity-100" : "opacity-0"
+                          }`}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          controls
+                          preload="auto"
+                          onLoadedData={handleMediaLoad}
+                          onError={handleMediaError}
+                        >
+                          Your browser does not support video playback.
+                        </video>
                         
                         {/* Video Badge */}
                         <motion.div
@@ -204,24 +204,41 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                           <VideoIcon className="w-4 h-4 text-white" />
                           <span className="text-xs text-white font-semibold">Video Showcase</span>
                         </motion.div>
-                      </div>
+                      </motion.div>
                     ) : (
-                      <div className="relative w-full">
-                        <img
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ 
+                          delay: 0.3,
+                          duration: 0.8,
+                          ease: [0.25, 0.46, 0.45, 0.94]
+                        }}
+                        className="relative w-full overflow-hidden rounded-xl"
+                      >
+                        <motion.img
                           src={subService.mediaSrc}
                           alt={subService.title}
-                          className={`w-full h-auto max-h-[500px] object-cover rounded-xl transition-opacity duration-300 ${
-                            mediaLoaded ? "opacity-100" : "opacity-0"
-                          }`}
+                          className="w-full h-auto max-h-[500px] object-cover rounded-xl"
                           onLoad={handleMediaLoad}
                           onError={handleMediaError}
+                          initial={{ scale: 1 }}
+                          animate={{ 
+                            scale: [1, 1.1, 1],
+                          }}
+                          transition={{
+                            duration: 8,
+                            ease: "easeInOut",
+                            repeat: Infinity,
+                            repeatType: "loop"
+                          }}
                         />
                         
                         {/* Image Badge */}
                         <motion.div
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.5 }}
+                          transition={{ delay: 0.9 }}
                           className="absolute top-4 right-4 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 shadow-lg"
                         >
                           <ImageIcon className="w-4 h-4 text-white" />
@@ -230,18 +247,18 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
 
                         {/* Hover Overlay Effect */}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-xl" />
-                      </div>
+                      </motion.div>
                     )}
                   </div>
                 ) : !hasMedia ? (
-                  // Placeholder for when no media is provided - Adaptive sizing
-                  <div className="p-12 md:p-16 bg-gradient-to-br from-primary/10 to-accent/10 rounded-xl text-center border-2 border-dashed border-primary/20 hover:border-primary/40 transition-colors">
-                    <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ delay: 0.4 }}
-                      className="space-y-4"
-                    >
+                  // Placeholder for when no media is provided
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.6 }}
+                    className="p-12 md:p-16 bg-gradient-to-br from-primary/10 to-accent/10 rounded-xl text-center border-2 border-dashed border-primary/20 hover:border-primary/40 transition-colors"
+                  >
+                    <div className="space-y-4">
                       <div className="flex justify-center gap-4">
                         <motion.div
                           animate={{ y: [0, -10, 0] }}
@@ -264,11 +281,16 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                           Media gallery will be displayed here
                         </p>
                       </div>
-                    </motion.div>
-                  </div>
+                    </div>
+                  </motion.div>
                 ) : (
-                  // Error state - Adaptive sizing
-                  <div className="p-12 bg-gradient-to-br from-red-500/10 to-orange-500/10 rounded-xl text-center border-2 border-dashed border-red-500/20">
+                  // Error state
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3, duration: 0.6 }}
+                    className="p-12 bg-gradient-to-br from-red-500/10 to-orange-500/10 rounded-xl text-center border-2 border-dashed border-red-500/20"
+                  >
                     <div className="space-y-3">
                       <div className="text-4xl">⚠️</div>
                       <p className="text-xs sm:text-sm text-muted-foreground">
@@ -278,9 +300,9 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                         Please check the media URL or try again later
                       </p>
                     </div>
-                  </div>
+                  </motion.div>
                 )}
-              </motion.div>
+              </div>
 
               {/* Phase and Stage Selection */}
               <motion.div
@@ -297,7 +319,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                     <label className="text-sm font-semibold block">
                       Select Your Current Project Phase
                     </label>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground/70">
+                    <p className="text-[10px] sm:text-xs text-muted-foreground/70">
                       Choose the phase your project is currently in
                     </p>
                   </div>
@@ -354,7 +376,7 @@ const SubServicePopup: React.FC<SubServicePopupProps> = ({
                           <SelectValue placeholder="Choose stage" />
                         </SelectTrigger>
                         <SelectContent>
-                          {availableStages.map((stage, index) => (
+                          {availableStages.map((stage) => (
                             <SelectItem 
                               key={stage.step} 
                               value={stage.step}
