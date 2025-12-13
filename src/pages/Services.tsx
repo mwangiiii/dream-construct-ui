@@ -2,6 +2,28 @@
 // Complete Services component with sub-service popup integration
 
 import { useState } from "react";
+// Asset imports
+import manufacturingPlants from "@/assets/1000049242.jpg";
+import apartment from "@/assets/apartment.jpg";
+import heroBuildingConstruction from "@/assets/hero-building-construction.jpg";
+import heroCranesConstruction from "@/assets/hero-cranes-construction.jpg";
+import hotels from "@/assets/hotels.jpg";
+import officeBuildings from "@/assets/office_buildings.jpg";
+import mixedUseOffice from "@/assets/mixed_use_office.jpg";
+import hospitals from "@/assets/hospitals.jpg";
+import heroRoadConstruction from "@/assets/hero-road-construction.jpg";
+import educationalFacilities from "@/assets/educational_facilities.jpg";
+import duplexes from "@/assets/duplexes.jpg";
+import cooperHouse from "@/assets/cooper house.jpg";
+import powerandEnergy from "@/assets/power_and_energy.jpg";
+import waterAndDrainage from "@/assets/water_and_drainage.jpg";
+import warehouse from "@/assets/warehouse.jpg";
+import townHouses from "@/assets/town_houses.jpg";
+import standAlone from "@/assets/stand_alone.mp4";
+import shoppingMalls from "@/assets/shopping_malls.mp4";
+import roadsAndHighways from "@/assets/roads_and_highways.mp4";
+import restaurant from "@/assets/restaurant.jpg";
+import qualityAssurance from "@/assets/quality_assurance.jpg";
 import { motion } from "framer-motion";
 import { Building2, Home, Factory, Wrench, Paintbrush } from "lucide-react";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -34,37 +56,37 @@ const Services = () => {
         {
           name: "Town Houses",
           description: "Modern townhouse developments featuring contemporary design, efficient layouts, and community-focused amenities. Perfect for families seeking urban convenience with suburban comfort.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703565/Town_house_iykd1h.jpg", // Add your CDN URL here
+          mediaSrc: townHouses, // Add your CDN URL here
           mediaType: "image" as const,
         },
         {
           name: "Duplexes",
           description: "Sophisticated duplex constructions offering privacy and space efficiency. Ideal for multi-generational living or investment properties with separate entrances and utilities.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703563/Duplex_nx1iyn.jpg",
+          mediaSrc: duplexes,
           mediaType: "image" as const,
         },
         {
           name: "Stand-Alone Houses",
           description: "Custom-built standalone homes tailored to your unique vision. Complete creative freedom with architectural design, landscaping, and interior customization.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764703561/Stand_Alone_Villa_Design_Proposal_-_Hazem_Gabr_c0fdrf.jpg",
-          mediaType: "image" as const,
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765619795/stand_alone_kxn6r4.mp4",
+          mediaType: "video" as const,
         },
         {
           name: "Cooperative Houses",
           description: "Affordable cooperative housing solutions designed for community living. Shared amenities, sustainable design, and collaborative ownership models.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764703565/corporate-building-video_gtyqje.mp4",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765619992/corporate-building-video_ky6kqr.mp4",
           mediaType: "video" as const,
         },
         {
           name: "Luxury Villas",
           description: "Premium villa construction with high-end finishes, smart home integration, and bespoke architectural elements. Exclusive living spaces designed for sophistication.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764703590/Villa_K_by_gnk_architects_c0blia.mp4",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620117/Villa_K_by_gnk_architects_cpuvgx.mp4",
           mediaType: "video" as const,
         },
         {
           name: "Apartment Buildings",
           description: "Multi-unit residential complexes with modern amenities, energy-efficient systems, and optimized space utilization. From boutique buildings to large-scale developments.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790810/apartment-building-888681_cpd1z1.jpg",
+          mediaSrc: apartment,
           mediaType: "image" as const,
         },
       ],
@@ -77,44 +99,44 @@ const Services = () => {
         {
           name: "Office Buildings",
           description: "State-of-the-art office spaces designed for productivity and collaboration. Features include flexible floor plans, modern infrastructure, and sustainable building practices.",
-          mediaSrc: "",
+          mediaSrc: officeBuildings,
           mediaType: "image" as const,
         },
         {
           name: "Hotels",
           description: "Hospitality construction from boutique hotels to large resorts. Specialized in creating memorable guest experiences through thoughtful design and quality construction.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790800/restaurant-5521372_f8cvcy.jpg",
+          mediaSrc: hotels,
           mediaType: "image" as const,
         },
         {
           name: "Restaurants",
           description: "Custom restaurant builds tailored to your culinary concept. From casual dining to fine establishments, we create spaces that enhance the dining experience.",
-          mediaSrc: "",
+          mediaSrc: restaurant,
           mediaType: "image" as const,
         },
         {
           name: "Schools / Universities",
           description: "Educational facility construction designed for learning excellence. Safe, accessible, and inspiring environments with modern classrooms, labs, and recreational spaces.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790843/a9015597-e852-4cfb-ae6b-9a1ca39768ec_7361308_zvvexj.mp4",
-          mediaType: "video" as const,
+          mediaSrc: educationalFacilities,
+          mediaType: "image" as const,
         },
         {
           name: "Hospitals",
           description: "Healthcare facility construction meeting strict medical standards. Specialized in creating healing environments with advanced infrastructure and patient-centered design.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790877/215239_w9axxj.mp4",
-          mediaType: "video" as const,
+          mediaSrc: hospitals,
+          mediaType: "image" as const,
         },
         {
           name: "Shopping Malls / Centers",
           description: "Retail destination development with optimal traffic flow, diverse tenant spaces, and engaging customer experiences. Complete mall construction and renovation services.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764791021/138501-769724721_a5fh7f.mp4",
+          mediaSrc:  "https://res.cloudinary.com/dema3kxng/video/upload/v1765619794/shopping_malls_n4ffj0.mp4",
           mediaType: "video" as const,
         },
         {
           name: "Mixed-Use Office and Residential Centers",
           description: "Integrated mixed-use developments combining residential, commercial, and retail spaces. Creating vibrant urban communities with live-work-play convenience.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790791/1057-142621433_medium_lkqohi.mp4",
-          mediaType: "video" as const,
+          mediaSrc: mixedUseOffice,
+          mediaType: "image" as const,
         },
       ],
     },
@@ -126,14 +148,14 @@ const Services = () => {
         {
           name: "Manufacturing Plants",
           description: "Heavy-duty manufacturing facilities designed for operational efficiency. Specialized in heavy equipment installation, workflow optimization, and safety compliance.",
-          mediaSrc: "",
+          mediaSrc: manufacturingPlants,
           mediaType: "image" as const,
         },
         {
           name: "Warehouses",
           description: "Modern warehouse construction with efficient storage systems, loading docks, and logistics infrastructure. Temperature-controlled and automated options available.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790808/43658-436719135_omuakt.mp4",
-          mediaType: "video" as const,
+          mediaSrc: warehouse,
+          mediaType: "image" as const,
         },
         {
           name: "Distribution Centers",
@@ -144,7 +166,7 @@ const Services = () => {
         {
           name: "Industrial Parks",
           description: "Complete industrial park development with shared infrastructure, utilities, and amenities. Creating thriving industrial ecosystems for multiple businesses.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790776/249564_medium_u4dhr8.mp4",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765619816/249564_medium_t0ziy7.mp4",
           mediaType: "video" as const,
         },
       ],
@@ -158,19 +180,19 @@ const Services = () => {
             {
               name: "Roads & Highways",
               description: "Design and construction of durable roads, highways, and bridges with a focus on safety, sustainability, and traffic flow.",
-              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792000/road-highway-example.jpg",
-              mediaType: "image" as const,
+              mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620970/roads_and_highways_wamifd.mp4",
+              mediaType: "video" as const,
             },
             {
               name: "Water Supply & Drainage",
               description: "Comprehensive water supply systems, drainage networks, and sewage treatment plants for urban and rural developments.",
-              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792100/water-infrastructure-example.jpg",
+              mediaSrc: waterAndDrainage,
               mediaType: "image" as const,
             },
             {
               name: "Power & Energy Infrastructure",
               description: "Construction of substations, power lines, and renewable energy facilities to support growing energy needs.",
-              mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792200/power-infrastructure-example.jpg",
+              mediaSrc: powerandEnergy,
               mediaType: "image" as const,
             },
             {
@@ -197,19 +219,19 @@ const Services = () => {
         {
           name: "Interior Remodeling",
           description: "Complete interior transformations including layout redesign, finishes upgrade, and modernization. From kitchens and bathrooms to entire floor renovations.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790782/construction-site-682471_ucvrvf.jpg",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/image/upload/v1765621552/construction-site-682471_dpcruo.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Exterior Upgrades",
           description: "Exterior renovation services including facade restoration, roofing, siding, and landscaping. Enhance curb appeal and structural integrity.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764791639/building-7053263_uok2rl.jpg",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/image/upload/v1765621521/building-7053263_phv3ny.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Structural Renovations",
           description: "Major structural modifications including additions, extensions, and load-bearing changes. Expert engineering and construction for complex renovations.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1764790762/31290-385265697_small_aywngv.mp4",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765619794/31290-385265697_small_atg1aa.mp4",
           mediaType: "video" as const,
         },
         {
@@ -228,25 +250,25 @@ const Services = () => {
         {
           name: "Architectural Design",
           description: "Comprehensive architectural design services from concept sketches to detailed construction documents. Creative solutions balancing aesthetics, function, and budget.",
-          mediaSrc: "",
-          mediaType: "image" as const,
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765622123/architectural_design_nkevqh.mp4",
+          mediaType: "video" as const,
         },
         {
           name: "Project Planning",
           description: "Strategic project planning including feasibility studies, budgeting, scheduling, and risk assessment. Setting your project up for success from day one.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790759/engineer-4941174_1920_dhwyql.jpg",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/image/upload/v1765621649/engineer-4941174_1920_hpgzlx.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Construction Management",
           description: "Professional construction management ensuring on-time, on-budget project delivery. Coordinating all trades, quality control, and client communication.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790761/construction-site-4020496_kxmzbq.jpg",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/image/upload/v1765621665/construction-site-4020496_gxdvqp.jpg",
           mediaType: "image" as const,
         },
         {
           name: "Quality Assurance",
           description: "Rigorous quality assurance programs including inspections, testing, and compliance verification. Ensuring the highest standards throughout construction.",
-          mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764790761/woman-2759503_rqmust.jpg",
+          mediaSrc: "https://res.cloudinary.com/dema3kxng/image/upload/v1765622322/quality_assurance_upzbmx.jpg",
           mediaType: "image" as const,
         },
       ],
