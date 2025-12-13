@@ -46,17 +46,17 @@ const Index = () => {
     {
       title: "Residential Excellence",
       description: "From concept to completion, we create living spaces that are Family-Friendly and Reflect your Lifestyle.",
-      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1765045116/WhatsApp_Video_2025-12-06_at_21.16.56_3392bcdc_f1hnsk.mp4",
+      video: "https://res.cloudinary.com/dema3kxng/video/upload/v1765626360/WhatsApp_Video_2025-12-06_at_21.16.56_3392bcdc_azonqw.mp4",
     },
     {
       title: "Commercial Mastery",
       description: "Commercial complexes, designed for functionality that help thrive to success.",
-      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448357/commercial-excellence_lr3ciu.mp4",
+      video: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620161/residential-houses_m0pp5h.mp4",
     },
     {
       title: "Industrial Innovation",
       description: "Large-scale industrial facilities, warehouses, and manufacturing plants engineered for efficiency and built to industry standards.",
-      video: "https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763448281/industrial-renovation_hwh7jf.mp4",
+      video: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620111/industrial-renovation_irywjq.mp4",
     },
   ];
 

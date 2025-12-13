@@ -185,7 +185,7 @@ const Login = () => {
     <section className="relative h-screen flex items-center justify-center overflow-hidden">
       {/* Video Background */}
       <video
-        src="https://res.cloudinary.com/dvjm4wcfr/video/upload/v1763642187/Residential-mastery_jwxj8z.mp4"
+        src="https://res.cloudinary.com/dema3kxng/video/upload/v1765620073/Residential-mastery_sqgdkv.mp4"
         className="absolute inset-0 w-full h-full object-cover brightness-75 contrast-110 blur-[1px]"
         autoPlay
         loop
