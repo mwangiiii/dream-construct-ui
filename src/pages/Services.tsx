@@ -91,7 +91,7 @@ const Services = () => {
         {
           name: "Apartment Buildings",
           description: "Multi-unit residential complexes with modern amenities, energy-efficient systems, and optimized space utilization. From boutique buildings to large-scale developments.",
-          mediaSrc: apartment,
+          mediaSrc: officeBuildings,
           mediaType: "image" as const,
           customPhases: "default",
         },
@@ -105,7 +105,7 @@ const Services = () => {
         {
           name: "Office Buildings",
           description: "State-of-the-art office spaces designed for productivity and collaboration. Features include flexible floor plans, modern infrastructure, and sustainable building practices.",
-          mediaSrc: officeBuildings,
+          mediaSrc: apartment,
           mediaType: "image" as const,
           customPhases: "default",
         },
