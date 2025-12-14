@@ -418,7 +418,7 @@ export default function CompletedProjects() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { value: projects.length, label: "Delivered", icon: CheckCircle },
-                { value: `${totalValue >= 1000000 ? (totalValue / 1000000).toFixed(1) + "M" : (totalValue / 1000).toFixed(0) + "K"}`, label: "Total Value", icon: DollarSign },
+                { value: `${totalValue >= 1000000 ? (totalValue / 1000000).toFixed(1) + "M" : (totalValue / 1000).toFixed(0) + "M"}`, label: "Total Value", icon: DollarSign },
                 { value: thisMonthCount, label: "This year", icon: Calendar },
                 { value: "100%", label: "Success Rate", icon: TrendingUp },
               ].map((stat, idx) => {

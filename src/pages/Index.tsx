@@ -30,7 +30,7 @@ const Index = () => {
     {
       title: "Engineering the",
       highlight: "Future",
-      description: "Industrial-grade construction backed by decades of expertise and innovation.",
+      description: "Industrial-grade construction backed by of expertise and innovation.",
       image: heroCranesImage,
     },
   ];
