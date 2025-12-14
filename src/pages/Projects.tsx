@@ -419,7 +419,7 @@ export default function CompletedProjects() {
               {[
                 { value: projects.length, label: "Delivered", icon: CheckCircle },
                 { value: `${totalValue >= 1000000 ? (totalValue / 1000000).toFixed(1) + "M" : (totalValue / 1000).toFixed(0) + "K"}`, label: "Total Value", icon: DollarSign },
-                { value: thisMonthCount, label: "This Month", icon: Calendar },
+                { value: thisMonthCount, label: "This year", icon: Calendar },
                 { value: "100%", label: "Success Rate", icon: TrendingUp },
               ].map((stat, idx) => {
                 const Icon = stat.icon;

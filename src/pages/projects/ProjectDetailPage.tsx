@@ -457,10 +457,10 @@ export default function ProjectDetailPage() {
     { id: "updates", label: "Updates", icon: MessageSquare },
     { id: "photos", label: "Site Photos", icon: Camera },
     { id: "documents", label: "Documents", icon: FileText },
-    { id: "approvals", label: "Approvals", icon: Gavel },
+    // { id: "approvals", label: "Approvals", icon: Gavel },
     { id: "team", label: "Team", icon: Users },
-    { id: "financials", label: "Financials", icon: DollarSign },
-    { id: "daily-logs", label: "Daily Logs", icon: Wrench },
+    // { id: "financials", label: "Financials", icon: DollarSign },
+    // { id: "daily-logs", label: "Daily Logs", icon: Wrench },
   ];
 
   const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];

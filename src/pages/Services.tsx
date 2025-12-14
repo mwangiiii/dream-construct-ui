@@ -112,14 +112,14 @@ const Services = () => {
         {
           name: "Hotels",
           description: "Hospitality construction from boutique hotels to large resorts. Specialized in creating memorable guest experiences through thoughtful design and quality construction.",
-          mediaSrc: hotels,
+          mediaSrc: restaurant,
           mediaType: "image" as const,
           customPhases: "default",
         },
         {
           name: "Restaurants",
           description: "Custom restaurant builds tailored to your culinary concept. From casual dining to fine establishments, we create spaces that enhance the dining experience.",
-          mediaSrc: restaurant,
+          mediaSrc: hotels,
           mediaType: "image" as const,
           customPhases: "default",
         },

@@ -13,6 +13,8 @@ interface TeamMember {
   role_name: string;
 }
 
+const EXCLUDED_USER_ID = "ca0d3ca5-10db-4e24-a166-e98167e72631";
+
 const Team = () => {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +37,8 @@ const Team = () => {
             "project_manager",
             "finance",
             "surveyor"
-          ]);
+          ])
+          .neq("user_id", EXCLUDED_USER_ID); // Exclude specific user
 
         console.log("3. Roles query result:", { rolesData, rolesError });
 
