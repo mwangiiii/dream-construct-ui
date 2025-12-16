@@ -27,7 +27,7 @@ const Footer = () => {
       { name: "Residential", type: "Residential Construction" },
       { name: "Commercial", type: "Commercial Projects" },
       { name: "Industrial", type: "Industrial Construction" },
-      { name: "Infrastructure", type: "Infrastructure" },
+      // { name: "Infrastructure", type: "Infrastructure" },
       { name: "Renovations", type: "Renovations & Remodeling" },
       
     ],
