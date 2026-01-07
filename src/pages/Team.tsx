@@ -137,10 +137,10 @@ const Team = () => {
         {/* Company Overview */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto text-center mb-32">
           <h1 className="text-5xl md:text-7xl font-bold mb-6">
-            About <span className="text-primary">Dream Construct</span>
+            About <span className="text-primary"> Reve Construct Limited</span>
           </h1>
           <p className="text-xl text-muted-foreground leading-relaxed mb-8">
-            Dream Construct Limited is at the Forefront of Creative, Eco-friendly and Human-friendly Construction
+            Reve Construct Limited is at the Forefront of Creative, Eco-friendly and Human-friendly Construction
             Excellence, Transforming Visions into Reality Through Innovation, expertise, and
             Unwavering Commitment to Quality and Time.
           </p>

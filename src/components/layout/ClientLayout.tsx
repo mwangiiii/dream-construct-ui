@@ -82,7 +82,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
             {isSidebarOpen && (
               <div className="flex flex-col">
                 <span className="font-bold leading-tight text-sm sm:text-base"> Client Panel</span>
-                <span className="text-[10px] sm:text-xs text-muted-foreground">Dream Construct</span>
+                <span className="text-[10px] sm:text-xs text-muted-foreground">Reve Construct</span>
               </div>
             )}
           </Link>
@@ -135,7 +135,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
                 View Site
               </Link>
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center">
-              <span className="text-background font-bold text-base sm:text-xl">DC</span>
+              <span className="text-background font-bold text-base sm:text-xl">RC</span>
             </div>
             </div>
           </div>

@@ -155,8 +155,10 @@ const Login = () => {
         redirectPath = "/manager";
       } else if (role === "admin") {
         redirectPath = "/admin";
+      } else if (role === "project_manager") {
+        redirectPath = "/pm/dashboard";
       } else {
-        redirectPath = "/client"; // fallback
+        redirectPath = "/client/dashboard"; // fallback
       }
       navigate(redirectPath, { replace: true });
 

@@ -197,11 +197,11 @@ const Navbar = () => {
             onClick={handleNavLinkClick}
           >
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform duration-300 shadow-md">
-              <span className="text-background font-bold text-base sm:text-xl">DC</span>
+              <span className="text-background font-bold text-base sm:text-xl">RC</span>
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-base sm:text-lg leading-tight text-foreground">
-                Dream Construct Limited
+                Reve Construct Limited
               </span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Build Your Dreams</span>
             </div>
