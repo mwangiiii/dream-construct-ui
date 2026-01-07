@@ -393,7 +393,7 @@ export default function CompletedProjects() {
       </section>
 
       {/* Stats Section */}
-      <section className="py-20 relative">
+      {/* <section className="py-20 relative">
         <div className="container mx-auto px-6">
           {loading ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
@@ -442,7 +442,7 @@ export default function CompletedProjects() {
             </div>
           )}
         </div>
-      </section>
+      </section> */}
 
       {/* Projects Grid */}
       <section className="py-20 relative">
