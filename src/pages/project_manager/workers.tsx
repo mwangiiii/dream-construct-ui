@@ -471,31 +471,29 @@ function PMWorkers() {
                     onAction={() => setShowMarkAttendance(true)}
                   />
                 ) : (
-                  <div className="overflow-x-auto rounded-2xl border-2 border-white/10">
-                    <table className="min-w-full text-left">
+                  <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
+                    <table className="min-w-full bg-transparent border-none rounded-2xl overflow-hidden">
                       <thead>
-                        <tr className="bg-gradient-to-r from-white/10 to-white/5 border-b-2 border-white/10">
-                          <th className="px-4 py-2">Worker</th>
-                          <th className="px-4 py-2">Status</th>
-                          <th className="px-4 py-2">Check In</th>
-                          <th className="px-4 py-2">Check Out</th>
-                          <th className="px-4 py-2">Notes</th>
+                        <tr className="bg-background/60">
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Worker</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Check In</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Check Out</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Notes</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredAttendance.map((rec, idx) => {
                           const worker = workers.find(w => w.id === rec.worker_id);
                           return (
-                            <tr key={idx} className="border-b hover:bg-white/5">
-                              <td className="px-4 py-2">{worker ? worker.full_name : rec.worker_id}</td>
-                              <td className="px-4 py-2">
-                                <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border ${getStatusColor(rec.status)}`}>
-                                  {rec.status}
-                                </span>
+                            <tr key={idx} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
+                              <td className="py-4 px-6 text-foreground font-medium">{worker ? worker.full_name : rec.worker_id}</td>
+                              <td className="py-4 px-6">
+                                <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(rec.status)}`}>{rec.status}</span>
                               </td>
-                              <td className="px-4 py-2">{rec.check_in || '-'}</td>
-                              <td className="px-4 py-2">{rec.check_out || '-'}</td>
-                              <td className="px-4 py-2">{rec.notes || '-'}</td>
+                              <td className="py-4 px-6 text-foreground">{rec.check_in || '-'}</td>
+                              <td className="py-4 px-6 text-foreground">{rec.check_out || '-'}</td>
+                              <td className="py-4 px-6 text-sm text-muted-foreground">{rec.notes || '-'}</td>
                             </tr>
                           );
                         })}
@@ -540,40 +538,32 @@ function PMWorkers() {
                         Add Worker
                       </button>
                     </div>
-                    <div className="overflow-x-auto rounded-2xl border-2 border-white/10">
-                      <table className="w-full">
+                    <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
+                      <table className="min-w-full bg-transparent border-none rounded-2xl overflow-hidden">
                         <thead>
-                          <tr className="bg-gradient-to-r from-white/10 to-white/5 border-b-2 border-white/10">
-                        <th className="px-6 py-4 text-left text-xs font-bold text-foreground uppercase tracking-wider">Name</th>
-                        <th className="px-6 py-4 text-left text-xs font-bold text-foreground uppercase tracking-wider">Role</th>
-                        <th className="px-6 py-4 text-left text-xs font-bold text-foreground uppercase tracking-wider">Phone</th>
-                        <th className="px-6 py-4 text-left text-xs font-bold text-foreground uppercase tracking-wider">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/10">
-                      {workers
-                        .filter(w => w.full_name.toLowerCase().includes(searchQuery.toLowerCase()))
-                        .map((worker) => (
-                          <tr key={worker.id} className="hover:bg-white/5 transition-colors">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="font-semibold text-foreground">{worker.full_name}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground capitalize">
-                              {worker.role}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                              {worker.phone || '-'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border ${getStatusColor(worker.status || 'active')}`}>
-                                {worker.status || 'active'}
-                              </span>
-                            </td>
+                          <tr className="bg-background/60">
+                            <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Name</th>
+                            <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Role</th>
+                            <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Phone</th>
+                            <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
                           </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody>
+                          {workers
+                            .filter(w => w.full_name.toLowerCase().includes(searchQuery.toLowerCase()))
+                            .map((worker) => (
+                              <tr key={worker.id} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
+                                <td className="py-4 px-6 text-foreground font-medium">{worker.full_name}</td>
+                                <td className="py-4 px-6 text-foreground capitalize">{worker.role}</td>
+                                <td className="py-4 px-6 text-foreground">{worker.phone || '-'}</td>
+                                <td className="py-4 px-6">
+                                  <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(worker.status || 'active')}`}>{worker.status || 'active'}</span>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
               </>
             )}
           </motion.div>
@@ -617,31 +607,29 @@ function PMWorkers() {
                 onAction={() => setShowAssignTask(true)}
               />
             ) : (
-              <div className="overflow-x-auto rounded-2xl border-2 border-white/10">
-                <table className="min-w-full text-left">
+              <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
+                <table className="min-w-full bg-transparent border-none rounded-2xl overflow-hidden">
                   <thead>
-                    <tr className="bg-gradient-to-r from-white/10 to-white/5 border-b-2 border-white/10">
-                      <th className="px-4 py-2">Worker</th>
-                      <th className="px-4 py-2">Task</th>
-                      <th className="px-4 py-2">Due Date</th>
-                      <th className="px-4 py-2">Status</th>
-                      <th className="px-4 py-2">Notes</th>
+                    <tr className="bg-background/60">
+                      <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Worker</th>
+                      <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Task</th>
+                      <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Due Date</th>
+                      <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
+                      <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredAssignments.map((a, idx) => {
                       const worker = workers.find(w => w.id === a.worker_id);
                       return (
-                        <tr key={idx} className="border-b hover:bg-white/5">
-                          <td className="px-4 py-2">{worker ? worker.full_name : a.worker_id}</td>
-                          <td className="px-4 py-2">{a.task}</td>
-                          <td className="px-4 py-2">{a.due_date || '-'}</td>
-                          <td className="px-4 py-2">
-                            <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border ${getStatusColor(a.status)}`}>
-                              {a.status}
-                            </span>
+                        <tr key={idx} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
+                          <td className="py-4 px-6 text-foreground font-medium">{worker ? worker.full_name : a.worker_id}</td>
+                          <td className="py-4 px-6 text-foreground">{a.task}</td>
+                          <td className="py-4 px-6 text-foreground">{a.due_date || '-'}</td>
+                          <td className="py-4 px-6">
+                            <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(a.status)}`}>{a.status}</span>
                           </td>
-                          <td className="px-4 py-2">{a.notes || '-'}</td>
+                          <td className="py-4 px-6 text-sm text-muted-foreground">{a.notes || '-'}</td>
                         </tr>
                       );
                     })}
