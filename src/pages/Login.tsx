@@ -221,7 +221,7 @@ const Login = () => {
           <div className="text-center mb-10">
             <Link to="/" className="inline-flex items-center space-x-3 mb-6">
               <div className="w-14 h-14 bg-gradient-to-br from-primary to-accent rounded-2xl flex items-center justify-center shadow-xl">
-                <span className="text-background font-black text-2xl">DC</span>
+                <span className="text-background font-black text-2xl">RC</span>
               </div>
             </Link>
             <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3">

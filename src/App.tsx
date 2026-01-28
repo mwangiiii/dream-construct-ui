@@ -15,6 +15,7 @@ import { getCurrentUser } from "@/lib/auth";
 import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
 import ClientLayout from "./components/layout/ClientLayout";
+import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
 import AdminSettingsPage from "./pages/admin/settings";
 import ClientSettingsPage from "./pages/client/settings";
 import MediaManagement from "./pages/admin/mediaManagement";
@@ -51,6 +52,18 @@ import MediaCreate from "./pages/admin/multimedia/mediaCreate";
 
 // 404
 import NotFound from "./pages/NotFound";
+
+// Project Manager Pages
+import ProjectManagerDashboard from "./pages/project_manager/dashboard";
+import PMStages from "./pages/project_manager/stages";
+import PMWorkers from "./pages/project_manager/workers";
+import PMDailyProgress from "./pages/project_manager/daily-progress";
+import PMInspections from "./pages/project_manager/inspections";
+import PMMaterials from "./pages/project_manager/materials";
+import PMFinancials from "./pages/project_manager/financials";
+import PMIssues from "./pages/project_manager/issues";
+import PMReports from "./pages/project_manager/reports";
+import PMSettings from "./pages/project_manager/settings";
 
 const queryClient = new QueryClient();
 
@@ -543,6 +556,108 @@ const App = () => {
                   <ClientLayout>
                     <ClientSettingsPage />
                   </ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* === PROJECT MANAGER ROUTES === */}
+            <Route
+              path="/pm/dashboard"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <ProjectManagerDashboard />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/stages"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMStages />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/workers"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMWorkers />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/daily-progress"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMDailyProgress />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/inspections"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMInspections />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/materials"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMMaterials />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/financials"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMFinancials />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/issues"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMIssues />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/reports"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMReports />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/pm/settings"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMSettings />
+                  </ProjectManagerLayout>
                 </ProtectedRoute>
               }
             />
