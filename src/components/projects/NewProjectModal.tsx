@@ -37,14 +37,6 @@ interface NewProjectModalProps {
   onSuccess: () => void;
 }
 
-/**
- * Reusable themed dropdown component (glass-style).
- * - items: array of { value, label }
- * - value: selected value
- * - onChange: called with new value
- * - placeholder: text when nothing selected
- * - label: label shown above control
- */
 function GlassDropdown<T extends { value: string; label: string }>({
   label,
   items,
@@ -53,7 +45,7 @@ function GlassDropdown<T extends { value: string; label: string }>({
   onChange,
   className = "",
 }: {
-  label?: string;
+  label?: React.ReactNode;
   items: T[];
   value: string;
   placeholder?: string;
@@ -83,7 +75,11 @@ function GlassDropdown<T extends { value: string; label: string }>({
 
   return (
     <div className={`relative ${className}`} ref={ref}>
-      {label && <label className="block text-sm font-semibold text-muted-foreground mb-3">{label}</label>}
+      {label && (
+        <label className="block text-sm font-semibold text-muted-foreground mb-3">
+          {label}
+        </label>
+      )}
       <div
         role="button"
         tabIndex={0}
@@ -96,9 +92,10 @@ function GlassDropdown<T extends { value: string; label: string }>({
         <div className={`truncate ${selected ? "" : "text-muted-foreground"}`}>
           {selected ? selected.label : placeholder || "Select..."}
         </div>
-        <ChevronDown className={`w-5 h-5 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown
+          className={`w-5 h-5 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </div>
-
       <AnimatePresence>
         {open && (
           <motion.div
@@ -133,13 +130,16 @@ function GlassDropdown<T extends { value: string; label: string }>({
   );
 }
 
-export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProjectModalProps) {
+export default function NewProjectModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: NewProjectModalProps) {
   const [loading, setLoading] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [managers, setManagers] = useState<Manager[]>([]);
   const [nextProjectNumber, setNextProjectNumber] = useState("");
   const [dateError, setDateError] = useState("");
-
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -156,7 +156,6 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     site_country: "Kenya",
   });
 
-  // keep a ref for resetting when closed
   useEffect(() => {
     if (isOpen) {
       fetchClientsAndManagers();
@@ -165,15 +164,12 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     }
   }, [isOpen]);
 
-  // enforce end date > start date
   useEffect(() => {
     if (formData.start_date && formData.expected_completion_date) {
       const start = new Date(formData.start_date);
       const end = new Date(formData.expected_completion_date);
-      // normalize
       start.setHours(0, 0, 0, 0);
       end.setHours(0, 0, 0, 0);
-
       if (end <= start) {
         setDateError("Expected completion date must be at least one day after the start date.");
       } else {
@@ -186,39 +182,83 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
 
   const fetchClientsAndManagers = async () => {
     try {
+      console.log("[NewProjectModal] Fetching clients and managers...");
+
+      // Fetch clients - start from user_roles and join to profiles
       const { data: clientData, error: clientError } = await supabase
-        .from("profiles")
+        .from("user_roles")
         .select(`
-          id, 
-          full_name, 
-          company_id,
-          companies(name),
-          user_roles!inner(role_name),
-          user_statuses!inner(status_name, is_active)
+          user_id,
+          profiles!inner(
+            id,
+            full_name,
+            company_id,
+            status_id,
+            companies(name)
+          )
         `)
-        .eq("user_roles.role_name", "client")
-        .eq("user_statuses.is_active", true)
-        .order("full_name");
+        .eq("role_name", "client")
+        .eq("profiles.status_id", 1);
 
-      if (clientError) throw clientError;
-      setClients(clientData || []);
+      if (clientError) {
+        console.error("[NewProjectModal] Error fetching clients:", clientError);
+      } else {
+        const transformedClients = clientData?.map((item: any) => ({
+          id: item.profiles.id,
+          full_name: item.profiles.full_name,
+          company_id: item.profiles.company_id,
+          companies: item.profiles.companies,
+        })) || [];
+        
+        // Sort by full_name
+        transformedClients.sort((a, b) => 
+          (a.full_name || "").localeCompare(b.full_name || "")
+        );
+        
+        console.log("[NewProjectModal] Found clients:", transformedClients);
+        setClients(transformedClients);
+      }
 
+      // Fetch project managers
       const { data: managerData, error: managerError } = await supabase
-        .from("profiles")
+        .from("user_roles")
         .select(`
-          id, 
-          full_name,
-          user_roles!inner(role_name),
-          user_statuses!inner(status_name, is_active)
+          user_id,
+          profiles!inner(
+            id,
+            full_name,
+            status_id
+          )
         `)
-        .in("user_roles.role_name", ["manager", "project_manager"])
-        .eq("user_statuses.is_active", true)
-        .order("full_name");
+        .eq("role_name", "project_manager")
+        .eq("profiles.status_id", 1);
 
-      if (managerError) throw managerError;
-      setManagers(managerData || []);
+      if (managerError) {
+        console.error("[NewProjectModal] Error fetching managers:", managerError);
+      } else {
+        const transformedManagers = managerData?.map((item: any) => ({
+          id: item.profiles.id,
+          full_name: item.profiles.full_name,
+        })) || [];
+
+        // Remove duplicates and sort
+        const uniqueManagers = transformedManagers.reduce((acc: Manager[], current) => {
+          const exists = acc.find((item) => item.id === current.id);
+          if (!exists) {
+            acc.push(current);
+          }
+          return acc;
+        }, []);
+
+        uniqueManagers.sort((a, b) => 
+          (a.full_name || "").localeCompare(b.full_name || "")
+        );
+
+        console.log("[NewProjectModal] Found managers:", uniqueManagers);
+        setManagers(uniqueManagers);
+      }
     } catch (error) {
-      console.error("[NewProjectModal] Error fetching data:", error);
+      console.error("[NewProjectModal] Unexpected error:", error);
     }
   };
 
@@ -248,7 +288,7 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
       setNextProjectNumber(`PRJ-${currentYear}-${padded}`);
     } catch (error) {
       console.error("[NewProjectModal] Error generating project number:", error);
-      setNextProjectNumber("PRJ-2025-001");
+      setNextProjectNumber("PRJ-2026-001");
     }
   };
 
@@ -258,7 +298,6 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     if (dateError) return alert(dateError);
 
     setLoading(true);
-
     try {
       const { error } = await supabase.from("projects").insert({
         project_number: nextProjectNumber,
@@ -268,7 +307,9 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
         manager_id: formData.manager_id || null,
         start_date: formData.start_date || null,
         expected_completion_date: formData.expected_completion_date || null,
-        budget_numeric: formData.budget_numeric ? parseFloat(formData.budget_numeric) : null,
+        budget_numeric: formData.budget_numeric
+          ? parseFloat(formData.budget_numeric)
+          : null,
         currency: formData.currency,
         site_address: formData.site_address || null,
         site_city: formData.site_city || null,
@@ -313,7 +354,6 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     }
   };
 
-  // helper: give min date for expected completion (start_date + 1)
   const getMinExpectedDate = () => {
     if (!formData.start_date) return undefined;
     const next = new Date(formData.start_date);
@@ -321,10 +361,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     return next.toISOString().split("T")[0];
   };
 
-  // build dropdown items
   const clientItems = clients.map((c) => ({
     value: c.id,
-    label: c.companies?.name ? `${c.full_name} — ${c.companies.name}` : c.full_name,
+    label: c.companies?.name
+      ? `${c.full_name} — ${c.companies.name}`
+      : c.full_name,
   }));
 
   const managerItems = managers.map((m) => ({
@@ -345,7 +386,6 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6">
-          {/* overlay */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -389,7 +429,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
             {/* Body */}
             <div className="p-4 sm:p-8 space-y-6 sm:space-y-8 overflow-y-auto max-h-[calc(90vh-180px)]">
               {/* Project Number */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   <Hash className="w-4 h-4 inline mr-2" />
                   Project Number
@@ -402,7 +446,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
               </motion.div>
 
               {/* Title */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+              >
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   Project Title <span className="text-red-400">*</span>
                 </label>
@@ -416,7 +464,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
               </motion.div>
 
               {/* Description */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.18 }}
+              >
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   <FileText className="w-4 h-4 inline mr-2" />
                   Project Description (Optional)
@@ -426,12 +478,18 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   className="w-full px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 resize-none"
                   placeholder="Brief overview of the project scope, objectives, and key deliverables..."
                   value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
                 />
               </motion.div>
 
-              {/* Client (custom dropdown) */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+              {/* Client */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
                 <GlassDropdown
                   label={
                     <>
@@ -444,11 +502,19 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   placeholder="Select a client"
                   onChange={(v) => setFormData({ ...formData, client_id: v })}
                 />
-                {clients.length === 0 && <p className="text-sm text-muted-foreground mt-3">No active clients found.</p>}
+                {clients.length === 0 && (
+                  <p className="text-sm text-muted-foreground mt-3">
+                    No active clients found.
+                  </p>
+                )}
               </motion.div>
 
-              {/* Manager (custom dropdown) */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+              {/* Manager */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+              >
                 <GlassDropdown
                   label={
                     <>
@@ -461,10 +527,20 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   placeholder="No manager assigned"
                   onChange={(v) => setFormData({ ...formData, manager_id: v })}
                 />
+                {managers.length === 0 && (
+                  <p className="text-sm text-muted-foreground mt-3">
+                    No active project managers found.
+                  </p>
+                )}
               </motion.div>
 
               {/* Dates */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="space-y-6">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="space-y-6"
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                   <div>
                     <label className="block text-sm font-semibold text-muted-foreground mb-3">
@@ -478,7 +554,6 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                       onChange={(e) => {
                         const newStart = e.target.value;
                         setFormData((prev) => {
-                          // if end is empty or end <= newStart then auto bump end to newStart + 1
                           let expected = prev.expected_completion_date;
                           if (!newStart) {
                             expected = "";
@@ -488,7 +563,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                             const min = next.toISOString().split("T")[0];
                             if (!expected || expected <= newStart) expected = min;
                           }
-                          return { ...prev, start_date: newStart, expected_completion_date: expected };
+                          return {
+                            ...prev,
+                            start_date: newStart,
+                            expected_completion_date: expected,
+                          };
                         });
                       }}
                     />
@@ -501,23 +580,28 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                     <input
                       type="date"
                       min={getMinExpectedDate()}
-                      className={`w-full px-6 py-4 backdrop-blur-xl bg-white/5 border rounded-xl text-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all ${dateError ? "border-red-500" : "border-white/10"}`}
+                      className={`w-full px-6 py-4 backdrop-blur-xl bg-white/5 border rounded-xl text-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all ${
+                        dateError ? "border-red-500" : "border-white/10"
+                      }`}
                       value={formData.expected_completion_date}
                       onChange={(e) => {
                         const newEnd = e.target.value;
-                        // prevent setting end same as or before start
                         if (formData.start_date) {
                           const s = new Date(formData.start_date);
                           s.setHours(0, 0, 0, 0);
                           const eDate = new Date(newEnd);
                           eDate.setHours(0, 0, 0, 0);
                           if (eDate <= s) {
-                            // ignore or set to min
                             const next = new Date(formData.start_date);
                             next.setDate(next.getDate() + 1);
                             const min = next.toISOString().split("T")[0];
-                            setFormData({ ...formData, expected_completion_date: min });
-                            setDateError("Expected completion date must be at least one day after the start date.");
+                            setFormData({
+                              ...formData,
+                              expected_completion_date: min,
+                            });
+                            setDateError(
+                              "Expected completion date must be at least one day after the start date."
+                            );
                             return;
                           }
                         }
@@ -526,9 +610,12 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                     />
                   </div>
                 </div>
-
                 {dateError && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3 px-6 py-4 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400 font-medium">
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center gap-3 px-6 py-4 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400 font-medium"
+                  >
                     <AlertCircle className="w-5 h-5 flex-shrink-0" />
                     <span>{dateError}</span>
                   </motion.div>
@@ -536,7 +623,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
               </motion.div>
 
               {/* Budget */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35 }}
+              >
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   <DollarSign className="w-4 h-4 inline mr-2" />
                   Budget
@@ -549,9 +640,10 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                     placeholder="0.00"
                     className="flex-1 px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
                     value={formData.budget_numeric}
-                    onChange={(e) => setFormData({ ...formData, budget_numeric: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, budget_numeric: e.target.value })
+                    }
                   />
-
                   <div className="w-full sm:w-40">
                     <GlassDropdown
                       label={undefined}
@@ -565,7 +657,11 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
               </motion.div>
 
               {/* Site Address */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+              >
                 <label className="block text-sm font-semibold text-muted-foreground mb-3">
                   <MapPin className="w-4 h-4 inline mr-2" />
                   Site Address (Optional)
@@ -575,7 +671,9 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   placeholder="Street address"
                   className="w-full px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 mb-3 sm:mb-4"
                   value={formData.site_address}
-                  onChange={(e) => setFormData({ ...formData, site_address: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, site_address: e.target.value })
+                  }
                 />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {["City", "State/County", "ZIP/Postal Code", "Country"].map((label, i) => (
@@ -594,7 +692,14 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                           : formData.site_country
                       }
                       onChange={(e) => {
-                        const key = i === 0 ? "site_city" : i === 1 ? "site_state" : i === 2 ? "site_zip" : "site_country";
+                        const key =
+                          i === 0
+                            ? "site_city"
+                            : i === 1
+                            ? "site_state"
+                            : i === 2
+                            ? "site_zip"
+                            : "site_country";
                         setFormData({ ...formData, [key]: e.target.value });
                       }}
                     />
@@ -619,7 +724,12 @@ export default function NewProjectModal({ isOpen, onClose, onSuccess }: NewProje
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleSubmit}
-                  disabled={loading || !formData.client_id || !formData.title.trim() || !!dateError}
+                  disabled={
+                    loading ||
+                    !formData.client_id ||
+                    !formData.title.trim() ||
+                    !!dateError
+                  }
                   className="flex-1 px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-primary to-accent text-background rounded-xl hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 sm:gap-3 transition-all font-semibold text-base"
                 >
                   {loading ? (

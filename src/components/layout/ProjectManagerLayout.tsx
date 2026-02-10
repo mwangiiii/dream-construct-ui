@@ -60,16 +60,17 @@ const ProjectManagerLayout = ({ children }: ProjectManagerLayoutProps) => {
   // Navigation items for Project Manager
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/pm/dashboard" },
-    { icon: Briefcase, label: "Projects", path: "/pm/projects" },
-    { icon: ClipboardList, label: "Stages & Tasks", path: "/pm/stages" },
-    { icon: Users, label: "Workers & Attendance", path: "/pm/workers" },
-    { icon: CalendarCheck2, label: "Daily Progress", path: "/pm/daily-progress" },
-    { icon: CheckCircle2, label: "Quality Inspections", path: "/pm/inspections" },
-    { icon: PackageSearch, label: "Material Tracking", path: "/pm/materials" },
-    { icon: DollarSign, label: "Financials", path: "/pm/financials" },
-    { icon: AlertCircle, label: "Problems & Issues", path: "/pm/issues" },
-    { icon: BarChart2, label: "Reports", path: "/pm/reports" },
-    { icon: Settings, label: "Settings", path: "/pm/settings" },
+    { icon: Briefcase, label: "Projects", path: "/project_manager/projects" },
+    // { icon: FileText, label: "Project Details", path: "/project_manager/projects/:id" },
+    // { icon: ClipboardList, label: "Stages & Tasks", path: "/project_manager/stages" },
+    // { icon: Users, label: "Workers & Attendance", path: "/project_manager/workers" },
+    // { icon: CalendarCheck2, label: "Daily Progress", path: "/project_manager/daily-progress" },
+    // { icon: CheckCircle2, label: "Quality Inspections", path: "/project_manager/inspections" },
+    // { icon: PackageSearch, label: "Material Tracking", path: "/project_manager/materials" },
+    { icon: DollarSign, label: "Financials", path: "/project_manager/financials" },
+    // { icon: AlertCircle, label: "Problems & Issues", path: "/project_manager/issues" },
+    // { icon: BarChart2, label: "Reports", path: "/project_manager/reports" },
+    { icon: Settings, label: "Settings", path: "/project_manager/settings" },
   ];
 
   // Determine sidebar width and margin classes
@@ -90,7 +91,7 @@ const ProjectManagerLayout = ({ children }: ProjectManagerLayoutProps) => {
       >
         {/* Logo Section */}
         <div className="p-3 sm:p-6 flex-shrink-0">  
-          <Link to="/pm/dashboard" className="flex items-center gap-1 sm:gap-2">
+          <Link to="/project_manager/dashboard" className="flex items-center gap-1 sm:gap-2">
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center">
               <span className="text-background font-bold text-base sm:text-xl">RC</span>
             </div>

@@ -446,7 +446,7 @@ export default function ProjectDetailPage() {
   const isAdmin = currentUser?.roles.some((r: any) => r.role_name === "admin");
 
   const canEdit =
-    currentUser?.roles.some((r: any) => ["admin", "manager"].includes(r.role_name)) ||
+    currentUser?.roles.some((r: any) => ["admin", "manager", "project_manager"].includes(r.role_name)) ||
     (currentUser?.roles.some((r: any) => r.role_name === "project_manager") &&
       project?.manager_id === currentUser?.profile?.id);
 

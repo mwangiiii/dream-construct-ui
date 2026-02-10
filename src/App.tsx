@@ -19,6 +19,7 @@ import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
 import AdminSettingsPage from "./pages/admin/settings";
 import ClientSettingsPage from "./pages/client/settings";
 import MediaManagement from "./pages/admin/mediaManagement";
+import ProjectManagerProjectManagement from "./pages/project_manager/Projects/ProjectDetailPage.tsx";
 
 
 import ForgotPassword from "./pages/ForgotPassword";
@@ -43,6 +44,7 @@ import ReviewsManagement from "./pages/admin/ReviewsManagement";
 // Project Management Pages
 import ProjectManagementDashboard from "./components/dashboard/ProjectManagementDashboard";
 import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
+import PMsProjectDetailPage from "./pages/project_manager/projects.tsx";
 import ClientDashboard from "./pages/client/Dashboard";
 import ClientProjects from "./pages/client/projects";
 import ClientNotifications from "./pages/client/clientNotifications";
@@ -572,7 +574,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/stages"
+              path="/project_manager/stages"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -582,7 +584,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/workers"
+              path="/project_manager/workers"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -592,7 +594,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/daily-progress"
+              path="/project_manager/daily-progress"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -602,7 +604,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/inspections"
+              path="/project_manager/inspections"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -612,7 +614,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/materials"
+              path="/project_manager/materials"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -622,7 +624,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/financials"
+              path="/project_manager/financials"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -632,7 +634,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/issues"
+              path="/project_manager/issues"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -642,7 +644,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/reports"
+              path="/project_manager/reports"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -652,7 +654,7 @@ const App = () => {
               }
             />
             <Route
-              path="/pm/settings"
+              path="/project_manager/settings"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
                   <ProjectManagerLayout>
@@ -661,6 +663,30 @@ const App = () => {
                 </ProtectedRoute>
               }
             />
+
+
+            <Route
+              path="/project_manager/projects"
+              element={
+                // <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <PMsProjectDetailPage />
+                  </ProjectManagerLayout>
+                // </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/project_manager/projects/:id"
+              element={
+                <ProtectedRoute requiredRoles={["project_manager"]}>
+                  <ProjectManagerLayout>
+                    <ProjectManagerProjectManagement />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
 
             {/* === 404 === */}
             <Route path="*" element={<NotFound />} />
