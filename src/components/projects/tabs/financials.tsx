@@ -122,6 +122,21 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState<string>("");
   const [companyPrices, setCompanyPrices] = useState<CompanyPrice[]>([]);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  
+  // Tender Company CRUD states
+  const [showCompanyModal, setShowCompanyModal] = useState(false);
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+  const [companyForm, setCompanyForm] = useState({
+    id: "",
+    name: "",
+    contact_email: "",
+    contact_phone: "",
+    address: ""
+  });
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [confirmDeleteCompany, setConfirmDeleteCompany] = useState<string | null>(null);
 
   useEffect(() => {
     initializeData();
@@ -241,6 +256,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const isClient = currentUser?.roles?.some((r: any) => r.role_name === "client");
 
   const canEdit = !isClient && (isQuantitySurveyor || isFinanceTeam || isAdmin);
+  
+  const canDelete = currentUser?.roles?.some((r: any) => 
+    ["admin", "project_manager", "manager"].includes(r.role_name)
+  );
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,7 +312,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         [form.milestone_id]: [...(prev[form.milestone_id] || []), data[0]]
       }));
       resetForm();
-      alert("Material added successfully!");
+      setSuccessMessage("Material added successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
     } else {
       alert("Error adding material: " + error?.message);
     }
@@ -362,7 +383,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       }));
       
       resetForm();
-      alert("Material updated successfully!");
+      setSuccessMessage("Material updated successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
     } else {
       alert("Error updating material: " + error?.message);
     }
@@ -380,34 +403,12 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     
     try {
-      // First, verify the record exists
-      const { data: existingData, error: checkError } = await supabase
-        .from("project_financials")
-        .select("*")
-        .eq("id", id)
-        .single();
-      
-      if (checkError || !existingData) {
-        console.error("Record not found in database:", checkError);
-        alert("Material record not found in database. It may have been deleted already.");
-        // Remove from local state anyway
-        setFinancials(prev => ({
-          ...prev,
-          [milestoneId]: items.filter((_, i) => i !== idx)
-        }));
-        setLoading(false);
-        setConfirmDelete(null);
-        return;
-      }
-      
-      console.log("Found existing record:", existingData);
-      
-      // Now delete it
-      const { error, data } = await supabase
+      // Execute the delete operation without .select()
+      // This avoids RLS policy issues with reading deleted rows
+      const { error } = await supabase
         .from("project_financials")
         .delete()
-        .eq("id", id)
-        .select();
+        .eq("id", id);
       
       if (error) {
         console.error("Delete error:", error);
@@ -417,17 +418,25 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         return;
       }
       
-      console.log("Delete response data:", data);
+      console.log("Delete executed successfully");
       
-      // Check if something was actually deleted
-      if (!data || data.length === 0) {
-        console.warn("No rows returned from delete operation");
-        alert("Delete operation completed but no confirmation received. Refreshing data...");
-        await fetchFinancials(); // Refresh from database
+      // Verify deletion by checking if record still exists
+      const { data: checkData, error: checkError } = await supabase
+        .from("project_financials")
+        .select("id")
+        .eq("id", id)
+        .maybeSingle();
+      
+      if (checkData) {
+        // Record still exists - deletion failed
+        console.error("Record still exists after delete attempt");
+        alert("Failed to delete material. Please check your permissions or contact support.");
         setLoading(false);
         setConfirmDelete(null);
         return;
       }
+      
+      console.log("Deletion confirmed - record no longer exists");
       
       // Successfully deleted - update local state
       setFinancials(prev => ({
@@ -440,7 +449,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         resetForm();
       }
       
-      alert("Material deleted successfully!");
+      // Show success toast
+      setSuccessMessage("Material deleted successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
       
     } catch (err: any) {
       console.error("Unexpected error during deletion:", err);
@@ -713,6 +725,146 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(false);
   };
 
+  // Tender Company CRUD Functions
+  const openCompanyForm = (company?: TenderCompany) => {
+    if (company) {
+      setCompanyForm({
+        id: company.id,
+        name: company.name,
+        contact_email: company.contact_email,
+        contact_phone: company.contact_phone,
+        address: company.address
+      });
+      setEditingCompany(true);
+    } else {
+      setCompanyForm({
+        id: "",
+        name: "",
+        contact_email: "",
+        contact_phone: "",
+        address: ""
+      });
+      setEditingCompany(false);
+    }
+    setShowCompanyForm(true);
+  };
+
+  const closeCompanyForm = () => {
+    setShowCompanyForm(false);
+    setCompanyForm({
+      id: "",
+      name: "",
+      contact_email: "",
+      contact_phone: "",
+      address: ""
+    });
+    setEditingCompany(false);
+  };
+
+  const handleCompanyChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setCompanyForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAddCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!companyForm.name.trim()) {
+      alert("Please enter company name");
+      return;
+    }
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("tender_companies")
+      .insert([
+        {
+          name: companyForm.name,
+          contact_email: companyForm.contact_email,
+          contact_phone: companyForm.contact_phone,
+          address: companyForm.address,
+          is_active: true
+        }
+      ])
+      .select();
+
+    if (!error && data) {
+      setTenderCompanies(prev => [...prev, data[0]]);
+      closeCompanyForm();
+      setSuccessMessage("Company added successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
+    } else {
+      alert("Error adding company: " + error?.message);
+    }
+    setLoading(false);
+  };
+
+  const handleUpdateCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!companyForm.name.trim()) {
+      alert("Please enter company name");
+      return;
+    }
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("tender_companies")
+      .update({
+        name: companyForm.name,
+        contact_email: companyForm.contact_email,
+        contact_phone: companyForm.contact_phone,
+        address: companyForm.address
+      })
+      .eq("id", companyForm.id)
+      .select();
+
+    if (!error && data) {
+      setTenderCompanies(prev =>
+        prev.map(c => (c.id === companyForm.id ? data[0] : c))
+      );
+      closeCompanyForm();
+      setSuccessMessage("Company updated successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
+    } else {
+      alert("Error updating company: " + error?.message);
+    }
+    setLoading(false);
+  };
+
+  const deleteCompany = async (companyId: string) => {
+    setLoading(true);
+    
+    try {
+      // Use soft delete by setting is_active to false instead of hard delete
+      const { error, data } = await supabase
+        .from("tender_companies")
+        .update({ is_active: false })
+        .eq("id", companyId)
+        .select();
+
+      if (error) {
+        console.error("Error deactivating company:", error);
+        alert("Error deleting company: " + error.message);
+        setLoading(false);
+        setConfirmDeleteCompany(null);
+        return;
+      }
+
+      // Remove from local state
+      setTenderCompanies(prev => prev.filter(c => c.id !== companyId));
+      setSuccessMessage("Company deleted successfully!");
+      setShowSuccessToast(true);
+      setTimeout(() => setShowSuccessToast(false), 3000);
+    } catch (err: any) {
+      console.error("Unexpected error:", err);
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+      setConfirmDeleteCompany(null);
+    }
+  };
+
   const calculateMilestoneTotals = (milestoneId: string) => {
     const items = financials[milestoneId] || [];
     const materialsCost = items.reduce((sum, f) => sum + f.total_price, 0);
@@ -762,6 +914,23 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         className="min-h-screen bg-background/90 py-8 sm:py-12 md:py-16 flex flex-col"
       >
         <div className="container mx-auto px-2 sm:px-6 flex-1 flex flex-col">
+          {/* Tender Companies Button */}
+          {(isAdmin || canEdit) && (
+            <div className="mb-6 flex justify-end">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setShowCompanyModal(true)}
+                className="bg-primary text-background font-semibold px-6 py-3 rounded-xl hover:bg-primary/90 transition flex items-center gap-2 shadow-lg"
+                disabled={loading}
+              >
+                <Building2 className="w-5 h-5" />
+                Manage Companies
+              </motion.button>
+            </div>
+          )}
+
+          {/* Milestones and Financials Section */}
           {milestones.map((milestone) => {
             const milestoneFinancials = financials[milestone.id] || [];
             const showingForm = showFormForMilestone === milestone.id;
@@ -1261,14 +1430,16 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                           >
                                             <Edit2 className="w-4 h-4" />
                                           </button>
-                                          <button
-                                            onClick={() => handleDelete(milestone.id, idx)}
-                                            className="bg-red-500 text-background p-2 rounded-lg hover:bg-red-600 transition"
-                                            disabled={loading}
-                                            title="Delete"
-                                          >
-                                            <Trash2 className="w-4 h-4" />
-                                          </button>
+                                          {canDelete && (
+                                            <button
+                                              onClick={() => handleDelete(milestone.id, idx)}
+                                              className="bg-red-500 text-background p-2 rounded-lg hover:bg-red-600 transition"
+                                              disabled={loading}
+                                              title="Delete"
+                                            >
+                                              <Trash2 className="w-4 h-4" />
+                                            </button>
+                                          )}
                                         </div>
                                       </td>
                                     )}
@@ -1333,26 +1504,403 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
           </AnimatePresence>
 
           {/* Confirmation Modal for Delete */}
-          {confirmDelete && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-              <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-                <h2 className="text-xl font-bold mb-2 text-primary">Delete Material Entry</h2>
-                <p className="mb-4 text-muted-foreground">Are you sure you want to delete this material entry? This action cannot be undone.</p>
-                <div className="flex justify-end gap-3">
-                  <button
-                    className="px-4 py-2 rounded bg-muted-foreground text-white hover:bg-muted transition"
-                    onClick={() => setConfirmDelete(null)}
-                    disabled={loading}
-                  >Cancel</button>
-                  <button
-                    className="px-4 py-2 rounded bg-destructive text-white hover:bg-destructive/80 transition"
-                    onClick={() => deleteMaterial(confirmDelete.milestoneId, confirmDelete.idx)}
-                    disabled={loading}
-                  >Delete</button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AnimatePresence>
+            {confirmDelete && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                onClick={() => setConfirmDelete(null)}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                      <AlertCircle className="w-6 h-6 text-red-500" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-foreground">Delete Material Entry</h2>
+                      <p className="text-sm text-muted-foreground">This action cannot be undone</p>
+                    </div>
+                  </div>
+                  
+                  <p className="mb-6 text-muted-foreground">
+                    Are you sure you want to delete <span className="font-semibold text-foreground">
+                      {financials[confirmDelete.milestoneId]?.[confirmDelete.idx]?.material_name}
+                    </span>? This will permanently remove this material entry from the project.
+                  </p>
+                  
+                  <div className="flex justify-end gap-3">
+                    <button
+                      className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition"
+                      onClick={() => setConfirmDelete(null)}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={() => deleteMaterial(confirmDelete.milestoneId, confirmDelete.idx)}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Success Toast */}
+          <AnimatePresence>
+            {showSuccessToast && (
+              <motion.div
+                initial={{ opacity: 0, y: 50 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 50 }}
+                className="fixed bottom-8 right-8 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3"
+              >
+                <CheckCircle className="w-5 h-5" />
+                <span className="font-semibold">{successMessage}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Company Management Modal - Full Screen */}
+          <AnimatePresence>
+            {showCompanyModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setShowCompanyModal(false)}
+              >
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header */}
+                  <div className="flex justify-between items-center p-6 border-b border-white/10">
+                    <div>
+                      <h2 className="text-2xl font-bold flex items-center gap-3">
+                        <Building2 className="w-6 h-6 text-primary" />
+                        Tender Companies
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1">Manage companies for procurement</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => openCompanyForm()}
+                        className="bg-primary text-background font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition flex items-center gap-2"
+                        disabled={loading}
+                      >
+                        <Plus className="w-5 h-5" />
+                        Add Company
+                      </motion.button>
+                      <button
+                        onClick={() => setShowCompanyModal(false)}
+                        className="p-2 hover:bg-white/10 rounded-lg transition"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Companies List */}
+                  <div className="flex-1 overflow-y-auto p-6">
+                    {tenderCompanies.length === 0 ? (
+                      <div className="text-center py-16 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl">
+                        <Building2 className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+                        <p className="text-lg text-muted-foreground mb-2">No tender companies added yet</p>
+                        <p className="text-sm text-muted-foreground">Click "Add Company" to get started</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-white/10">
+                              <th className="text-left py-3 px-4 font-semibold text-muted-foreground">#</th>
+                              <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Company Name</th>
+                              <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Email</th>
+                              <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Phone</th>
+                              <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Address</th>
+                              <th className="text-center py-3 px-4 font-semibold text-muted-foreground">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tenderCompanies.map((company, idx) => (
+                              <motion.tr
+                                key={company.id}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: idx * 0.05 }}
+                                className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                              >
+                                <td className="py-4 px-4 text-muted-foreground">{idx + 1}</td>
+                                <td className="py-4 px-4">
+                                  <div className="font-semibold text-foreground">{company.name}</div>
+                                </td>
+                                <td className="py-4 px-4 text-sm text-muted-foreground">
+                                  {company.contact_email || "-"}
+                                </td>
+                                <td className="py-4 px-4 text-sm text-muted-foreground">
+                                  {company.contact_phone || "-"}
+                                </td>
+                                <td className="py-4 px-4 text-sm text-muted-foreground max-w-xs truncate">
+                                  {company.address || "-"}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <div className="flex gap-2 justify-center">
+                                    <button
+                                      onClick={() => openCompanyForm(company)}
+                                      className="bg-accent text-background p-2 rounded-lg hover:bg-accent/90 transition"
+                                      disabled={loading}
+                                      title="Edit"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmDeleteCompany(company.id)}
+                                      className="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition"
+                                      disabled={loading}
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </motion.tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="p-4 border-t border-white/10 bg-background/60">
+                    <p className="text-sm text-muted-foreground text-center">
+                      Total: <span className="font-semibold text-foreground">{tenderCompanies.length}</span> {tenderCompanies.length === 1 ? 'company' : 'companies'}
+                    </p>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Company Add/Edit Form Modal */}
+          <AnimatePresence>
+            {showCompanyForm && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+                onClick={closeCompanyForm}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-2xl font-bold flex items-center gap-3">
+                      <Building2 className="w-6 h-6 text-primary" />
+                      {editingCompany ? "Edit Company" : "Add New Company"}
+                    </h3>
+                    <button
+                      onClick={closeCompanyForm}
+                      className="p-2 hover:bg-white/10 rounded-lg transition"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={editingCompany ? handleUpdateCompany : handleAddCompany} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Company Name *
+                      </label>
+                      <input
+                        name="name"
+                        type="text"
+                        value={companyForm.name}
+                        onChange={handleCompanyChange}
+                        placeholder="e.g., ABC Supplies Ltd"
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Contact Email
+                      </label>
+                      <input
+                        name="contact_email"
+                        type="email"
+                        value={companyForm.contact_email}
+                        onChange={handleCompanyChange}
+                        placeholder="contact@company.com"
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Contact Phone
+                      </label>
+                      <input
+                        name="contact_phone"
+                        type="tel"
+                        value={companyForm.contact_phone}
+                        onChange={handleCompanyChange}
+                        placeholder="+254 123 456 789"
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Address
+                      </label>
+                      <textarea
+                        name="address"
+                        value={companyForm.address}
+                        onChange={handleCompanyChange}
+                        placeholder="Company address"
+                        rows={3}
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 resize-none"
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin"></div>
+                            {editingCompany ? "Updating..." : "Adding..."}
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-5 h-5" />
+                            {editingCompany ? "Update Company" : "Add Company"}
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={closeCompanyForm}
+                        className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2"
+                        disabled={loading}
+                      >
+                        <X className="w-5 h-5" />
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Company Delete Confirmation Modal */}
+          <AnimatePresence>
+            {confirmDeleteCompany && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                onClick={() => setConfirmDeleteCompany(null)}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                      <AlertCircle className="w-6 h-6 text-red-500" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-foreground">Delete Company</h2>
+                      <p className="text-sm text-muted-foreground">This action cannot be undone</p>
+                    </div>
+                  </div>
+
+                  <p className="mb-6 text-muted-foreground">
+                    Are you sure you want to delete{" "}
+                    <span className="font-semibold text-foreground">
+                      {tenderCompanies.find(c => c.id === confirmDeleteCompany)?.name}
+                    </span>
+                    ? This company may be referenced in existing materials.
+                  </p>
+
+                  <div className="flex justify-end gap-3">
+                    <button
+                      className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition"
+                      onClick={() => setConfirmDeleteCompany(null)}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={() => deleteCompany(confirmDeleteCompany)}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     </AnimatePresence>

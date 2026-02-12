@@ -21,6 +21,13 @@ import {
   AlertTriangle,
   Eye,
   User,
+  CreditCard,
+  Smartphone,
+  Building2,
+  Wallet,
+  FileText,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import {
@@ -40,7 +47,21 @@ interface Worker {
   id_number: string | null;
   address: string | null;
   status: string;
+  milestone_id: string | null;
+  payment_method: 'cash' | 'bank_transfer' | 'mobile_money' | 'cheque' | 'card';
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_account_name: string | null;
+  mobile_money_provider: 'mpesa' | 'airtel_money' | 'tkash' | 'equitel' | 'other' | null;
+  mobile_money_number: string | null;
+  card_type: 'visa' | 'mastercard' | 'amex' | 'discover' | 'other' | null;
+  card_number_last4: string | null;
+  card_holder_name: string | null;
+  cheque_payable_to: string | null;
+  payment_notes: string | null;
   created_at: string;
+  updated_at: string | null;
+  milestone?: { id: string; title: string } | null;
 }
 
 interface AttendanceRecord {
@@ -203,12 +224,25 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddWorker, setShowAddWorker] = useState(false);
+  const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [workerForm, setWorkerForm] = useState({
     name: '',
     role: '',
     phone: '',
     id_number: '',
-    address: ''
+    address: '',
+    milestone_id: '',
+    payment_method: 'cash' as 'cash' | 'bank_transfer' | 'mobile_money' | 'cheque' | 'card',
+    bank_name: '',
+    bank_account_number: '',
+    bank_account_name: '',
+    mobile_money_provider: '' as '' | 'mpesa' | 'airtel_money' | 'tkash' | 'equitel' | 'other',
+    mobile_money_number: '',
+    card_type: '' as '' | 'visa' | 'mastercard' | 'amex' | 'discover' | 'other',
+    card_number_last4: '',
+    card_holder_name: '',
+    cheque_payable_to: '',
+    payment_notes: '',
   });
 
   // Attendance state
@@ -252,24 +286,27 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   });
 
   // Milestones state
-  const [milestones, setMilestones] = useState<{ id: string; name: string }[]>([]);
+  const [milestones, setMilestones] = useState<{ id: string; title: string }[]>([]);
+
+  // View worker details modal
+  const [viewingWorker, setViewingWorker] = useState<Worker | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Worker | null>(null);
 
   // Fetch milestones for the project
   const fetchMilestones = async () => {
     try {
-      // Use the correct column name for milestone name (likely 'milestone_name')
       const { data, error } = await supabase
         .from('project_milestones')
         .select('id, title')
         .eq('project_id', projectId)
-        .order('created_at', { ascending: true });
+        .order('sort_order', { ascending: true });
+      
       if (error) {
         console.error('Milestones fetch error:', error);
         setMilestones([]);
         return;
       }
-      // Map to expected structure: { id, name }
-      setMilestones((data || []).map((m: any) => ({ id: m.id, name: m.title })));
+      setMilestones(data || []);
     } catch (err) {
       console.error('[WorkersTab] Milestones fetch error:', err);
       setMilestones([]);
@@ -309,18 +346,22 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   const fetchWorkers = async () => {
     setError(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('get-workers', {
-        method: 'GET',
-      });
+      const { data, error } = await supabase
+        .from('workers')
+        .select(`
+          *,
+          milestone:project_milestones(id, title)
+        `)
+        .order('created_at', { ascending: false });
 
-      if (invokeError) {
-        console.error('Workers function error:', invokeError);
+      if (error) {
+        console.error('Workers fetch error:', error);
         setWorkers([]);
-        setError('Failed to fetch workers: ' + invokeError.message);
+        setError('Failed to fetch workers: ' + error.message);
         return;
       }
 
-      setWorkers(data?.workers || []);
+      setWorkers(data || []);
     } catch (err: any) {
       console.error('[WorkersTab] Workers fetch error:', err);
       setWorkers([]);
@@ -402,36 +443,178 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     }
   }, [selectedDate, activeTab]);
 
-  // Add Worker
-  const handleAddWorker = async () => {
+  // Reset form
+  const resetWorkerForm = () => {
+    setWorkerForm({
+      name: '',
+      role: '',
+      phone: '',
+      id_number: '',
+      address: '',
+      milestone_id: '',
+      payment_method: 'cash',
+      bank_name: '',
+      bank_account_number: '',
+      bank_account_name: '',
+      mobile_money_provider: '',
+      mobile_money_number: '',
+      card_type: '',
+      card_number_last4: '',
+      card_holder_name: '',
+      cheque_payable_to: '',
+      payment_notes: '',
+    });
+    setEditingWorker(null);
+  };
+
+  // Open edit worker
+  const handleEditWorker = (worker: Worker) => {
+    setEditingWorker(worker);
+    setWorkerForm({
+      name: worker.full_name,
+      role: worker.role,
+      phone: worker.phone || '',
+      id_number: worker.id_number || '',
+      address: worker.address || '',
+      milestone_id: worker.milestone_id || '',
+      payment_method: worker.payment_method || 'cash',
+      bank_name: worker.bank_name || '',
+      bank_account_number: worker.bank_account_number || '',
+      bank_account_name: worker.bank_account_name || '',
+      mobile_money_provider: worker.mobile_money_provider || '',
+      mobile_money_number: worker.mobile_money_number || '',
+      card_type: worker.card_type || '',
+      card_number_last4: worker.card_number_last4 || '',
+      card_holder_name: worker.card_holder_name || '',
+      cheque_payable_to: worker.cheque_payable_to || '',
+      payment_notes: worker.payment_notes || '',
+    });
+    setShowAddWorker(true);
+  };
+
+  // Add or Update Worker
+  const handleSaveWorker = async () => {
     if (!workerForm.name.trim() || !workerForm.role) {
       showToast('Full name and role are required', 'warning');
       return;
     }
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke('add-worker', {
-        method: 'POST',
-        body: {
-          name: workerForm.name.trim(),
-          role: workerForm.role,
-          phone: workerForm.phone || null,
-          id_number: workerForm.id_number || null,
-          address: workerForm.address || null
-        }
-      });
-      
-      if (invokeError) {
-        showToast(invokeError.message || 'Failed to add worker', 'error');
+
+    if (!workerForm.id_number?.trim()) {
+      showToast('ID Number is required', 'warning');
+      return;
+    }
+
+    // Validate payment method specific fields
+    if (workerForm.payment_method === 'bank_transfer') {
+      if (!workerForm.bank_name || !workerForm.bank_account_number || !workerForm.bank_account_name) {
+        showToast('Bank details are required for bank transfer', 'warning');
         return;
       }
-      
-      showToast('Worker added successfully!', 'success');
+    }
+
+    if (workerForm.payment_method === 'mobile_money') {
+      if (!workerForm.mobile_money_provider || !workerForm.mobile_money_number) {
+        showToast('Mobile money details are required', 'warning');
+        return;
+      }
+    }
+
+    if (workerForm.payment_method === 'card') {
+      if (!workerForm.card_type || !workerForm.card_number_last4 || !workerForm.card_holder_name) {
+        showToast('Card details are required for card payment', 'warning');
+        return;
+      }
+      // Validate last 4 digits
+      if (workerForm.card_number_last4.length !== 4 || !/^\d{4}$/.test(workerForm.card_number_last4)) {
+        showToast('Card number must be exactly 4 digits', 'warning');
+        return;
+      }
+    }
+
+    if (workerForm.payment_method === 'cheque') {
+      if (!workerForm.cheque_payable_to) {
+        showToast('Payable to name is required for cheque payment', 'warning');
+        return;
+      }
+    }
+
+    try {
+      const workerData = {
+        full_name: workerForm.name.trim(),
+        role: workerForm.role,
+        phone: workerForm.phone || null,
+        id_number: workerForm.id_number || null,
+        address: workerForm.address || null,
+        milestone_id: workerForm.milestone_id || null,
+        payment_method: workerForm.payment_method,
+        bank_name: workerForm.payment_method === 'bank_transfer' ? workerForm.bank_name : null,
+        bank_account_number: workerForm.payment_method === 'bank_transfer' ? workerForm.bank_account_number : null,
+        bank_account_name: workerForm.payment_method === 'bank_transfer' ? workerForm.bank_account_name : null,
+        mobile_money_provider: workerForm.payment_method === 'mobile_money' ? workerForm.mobile_money_provider : null,
+        mobile_money_number: workerForm.payment_method === 'mobile_money' ? workerForm.mobile_money_number : null,
+        card_type: workerForm.payment_method === 'card' ? workerForm.card_type : null,
+        card_number_last4: workerForm.payment_method === 'card' ? workerForm.card_number_last4 : null,
+        card_holder_name: workerForm.payment_method === 'card' ? workerForm.card_holder_name : null,
+        cheque_payable_to: workerForm.payment_method === 'cheque' ? workerForm.cheque_payable_to : null,
+        payment_notes: workerForm.payment_notes || null,
+        status: 'active',
+      };
+
+      if (editingWorker) {
+        // Update existing worker
+        const { error } = await supabase
+          .from('workers')
+          .update(workerData)
+          .eq('id', editingWorker.id);
+
+        if (error) {
+          showToast(error.message || 'Failed to update worker', 'error');
+          return;
+        }
+
+        showToast('Worker updated successfully!', 'success');
+      } else {
+        // Add new worker
+        const { error } = await supabase
+          .from('workers')
+          .insert([workerData]);
+
+        if (error) {
+          showToast(error.message || 'Failed to add worker', 'error');
+          return;
+        }
+
+        showToast('Worker added successfully!', 'success');
+      }
+
       setShowAddWorker(false);
-      setWorkerForm({ name: '', role: '', phone: '', id_number: '', address: '' });
+      resetWorkerForm();
       await Promise.all([fetchWorkers(), fetchStats()]);
       if (onUpdate) onUpdate();
     } catch (err: any) {
-      showToast('Failed to add worker: ' + (err.message || 'Unknown error'), 'error');
+      showToast('Failed to save worker: ' + (err.message || 'Unknown error'), 'error');
+    }
+  };
+
+  // Delete worker
+  const handleDeleteWorker = async (worker: Worker) => {
+    try {
+      const { error } = await supabase
+        .from('workers')
+        .delete()
+        .eq('id', worker.id);
+
+      if (error) {
+        showToast(error.message || 'Failed to delete worker', 'error');
+        return;
+      }
+
+      showToast('Worker deleted successfully!', 'success');
+      setConfirmDelete(null);
+      await Promise.all([fetchWorkers(), fetchStats()]);
+      if (onUpdate) onUpdate();
+    } catch (err: any) {
+      showToast('Failed to delete worker: ' + (err.message || 'Unknown error'), 'error');
     }
   };
 
@@ -488,7 +671,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       return;
     }
     try {
-      // Prepare payload matching worker_assignments schema
       const payload: any = {
         worker_id: assignmentForm.worker_id,
         project_id: projectId,
@@ -497,14 +679,15 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         start_date: assignmentForm.start_date ? assignmentForm.start_date : null,
         end_date: assignmentForm.due_date ? assignmentForm.due_date : null,
         status: assignmentForm.status,
-        // assigned_role, tasks_assigned, tasks_completed, quality_score can be added if needed
         updated_at: new Date().toISOString(),
       };
+      
       if (editingAssignment) {
         const { error } = await supabase
           .from('worker_assignments')
           .update(payload)
           .eq('id', editingAssignment.id);
+        
         if (error) {
           showToast(error.message || 'Failed to update task', 'error');
           return;
@@ -515,12 +698,14 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         const { error } = await supabase
           .from('worker_assignments')
           .insert([payload]);
+        
         if (error) {
           showToast(error.message || 'Failed to assign task', 'error');
           return;
         }
         showToast('Task assigned successfully!', 'success');
       }
+      
       setShowAssignTask(false);
       setEditingAssignment(null);
       setAssignmentForm({ worker_id: '', task: '', start_date: '', due_date: '', status: 'assigned', notes: '', milestone_id: '' });
@@ -538,6 +723,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         .from('worker_assignments')
         .delete()
         .eq('id', id);
+      
       if (error) {
         showToast(error.message || 'Failed to delete task', 'error');
         return;
@@ -553,7 +739,9 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   // Filtered data
   const filteredWorkers = useMemo(() => {
     return workers.filter(w => 
-      w.full_name.toLowerCase().includes(searchQuery.toLowerCase())
+      w.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      w.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      w.id_number?.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [workers, searchQuery]);
 
@@ -571,8 +759,9 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       let match = true;
       if (assignmentFilter.worker_id) match = match && a.worker_id === assignmentFilter.worker_id;
       if (assignmentFilter.status) match = match && a.status === assignmentFilter.status;
+      if (assignmentFilter.milestone_id) match = match && a.milestone_id === assignmentFilter.milestone_id;
       if (assignmentFilter.date) {
-        const aDate = a.due_date || a.end_date;
+        const aDate = a.end_date;
         match = match && aDate === assignmentFilter.date;
       }
       return match;
@@ -595,7 +784,41 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const units = ['mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'laborer'];
+  const getPaymentIcon = (method: string) => {
+    switch (method) {
+      case 'cash': return Wallet;
+      case 'bank_transfer': return Building2;
+      case 'mobile_money': return Smartphone;
+      case 'card': return CreditCard;
+      case 'cheque': return FileText;
+      default: return Wallet;
+    }
+  };
+
+  const units = ['mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'laborer', 'supervisor', 'foreman', 'driver', 'general_worker'];
+  const paymentMethods = [
+    { value: 'cash', label: 'Cash', icon: Wallet },
+    { value: 'bank_transfer', label: 'Bank Transfer', icon: Building2 },
+    { value: 'mobile_money', label: 'Mobile Money', icon: Smartphone },
+    { value: 'card', label: 'Card Payment', icon: CreditCard },
+    { value: 'cheque', label: 'Cheque', icon: FileText },
+  ];
+
+  const mobileMoneyProviders = [
+    { value: 'mpesa', label: 'M-Pesa' },
+    { value: 'airtel_money', label: 'Airtel Money' },
+    { value: 'tkash', label: 'T-Kash' },
+    { value: 'equitel', label: 'Equitel' },
+    { value: 'other', label: 'Other' },
+  ];
+
+  const cardTypes = [
+    { value: 'visa', label: 'Visa' },
+    { value: 'mastercard', label: 'Mastercard' },
+    { value: 'amex', label: 'American Express' },
+    { value: 'discover', label: 'Discover' },
+    { value: 'other', label: 'Other' },
+  ];
 
   if (loading) {
     return (
@@ -686,7 +909,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                         <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
                         <input
                           type="text"
-                          placeholder="Search workers..."
+                          placeholder="Search workers by name, role, or ID..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           className="w-full pl-12 pr-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 backdrop-blur-xl focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-300 font-medium"
@@ -695,7 +918,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     </div>
                     {canEdit && (
                       <button
-                        onClick={() => setShowAddWorker(true)}
+                        onClick={() => { resetWorkerForm(); setShowAddWorker(true); }}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
                       >
                         <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
@@ -710,23 +933,67 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                         <tr className="bg-background/60">
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Name</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Role</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">ID Number</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Phone</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Milestone</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Payment</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
+                          {canEdit && <th className="py-4 px-6 text-center font-semibold text-muted-foreground">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredWorkers.map((worker) => (
-                          <tr key={worker.id} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
-                            <td className="py-4 px-6 text-foreground font-medium">{worker.full_name}</td>
-                            <td className="py-4 px-6 text-foreground capitalize">{worker.role}</td>
-                            <td className="py-4 px-6 text-foreground">{worker.phone || '-'}</td>
-                            <td className="py-4 px-6">
-                              <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(worker.status || 'active')}`}>
-                                {worker.status || 'active'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                        {filteredWorkers.map((worker) => {
+                          const PaymentIcon = getPaymentIcon(worker.payment_method);
+                          return (
+                            <tr key={worker.id} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
+                              <td className="py-4 px-6 text-foreground font-medium">{worker.full_name}</td>
+                              <td className="py-4 px-6 text-foreground capitalize">{worker.role.replace('_', ' ')}</td>
+                              <td className="py-4 px-6 text-foreground font-mono text-sm">{worker.id_number || '-'}</td>
+                              <td className="py-4 px-6 text-foreground">{worker.phone || '-'}</td>
+                              <td className="py-4 px-6 text-foreground text-sm">
+                                {worker.milestone?.title || '-'}
+                              </td>
+                              <td className="py-4 px-6">
+                                <div className="flex items-center gap-2">
+                                  <PaymentIcon className="w-4 h-4 text-primary" />
+                                  <span className="text-sm capitalize">{worker.payment_method.replace('_', ' ')}</span>
+                                </div>
+                              </td>
+                              <td className="py-4 px-6">
+                                <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(worker.status || 'active')}`}>
+                                  {worker.status || 'active'}
+                                </span>
+                              </td>
+                              {canEdit && (
+                                <td className="py-4 px-6">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() => setViewingWorker(worker)}
+                                      className="p-2 hover:bg-blue-500/20 rounded-lg transition-all text-blue-500"
+                                      title="View Details"
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleEditWorker(worker)}
+                                      className="p-2 hover:bg-primary/20 rounded-lg transition-all text-primary"
+                                      title="Edit Worker"
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmDelete(worker)}
+                                      className="p-2 hover:bg-red-500/20 rounded-lg transition-all text-red-500"
+                                      title="Delete Worker"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -752,11 +1019,11 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                   <div className="flex gap-2 items-center">
                     <label className="text-sm">Status:</label>
                     <select 
-                      value={attendanceFilter.status} 
-                      onChange={e => setAttendanceFilter(f => ({ ...f, status: e.target.value }))} 
+                      value={attendanceFilter.status || 'all'}
+                      onChange={e => setAttendanceFilter(f => ({ ...f, status: e.target.value === 'all' ? '' : e.target.value }))}
                       className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-sm"
                     >
-                      <option value="">All</option>
+                      <option value="all">All</option>
                       <option value="present">Present</option>
                       <option value="absent">Absent</option>
                       <option value="late">Late</option>
@@ -840,38 +1107,42 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     </button>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-4 mb-4">
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                   <select
-                    value={assignmentFilter.worker_id}
-                    onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value }))}
+                    value={assignmentFilter.worker_id || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value === 'all' ? '' : e.target.value }))}
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
                   >
-                    <option value="" className="bg-background text-muted-foreground">All Workers</option>
+                    <option value="all" className="bg-background text-muted-foreground">All Workers</option>
                     {workers.map(w => (
                       <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>
                     ))}
                   </select>
+                  
                   <select
-                    value={assignmentFilter.status}
-                    onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value }))}
+                    value={assignmentFilter.status || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value === 'all' ? '' : e.target.value }))}
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
                   >
-                    <option value="" className="bg-background text-muted-foreground">All Statuses</option>
+                    <option value="all" className="bg-background text-muted-foreground">All Statuses</option>
                     <option value="assigned" className="bg-background text-foreground">Assigned</option>
                     <option value="in_progress" className="bg-background text-foreground">In Progress</option>
                     <option value="completed" className="bg-background text-foreground">Completed</option>
                     <option value="on_hold" className="bg-background text-foreground">On Hold</option>
                   </select>
+                  
                   <select
-                    value={assignmentFilter.milestone_id}
-                    onChange={e => setAssignmentFilter(f => ({ ...f, milestone_id: e.target.value }))}
+                    value={assignmentFilter.milestone_id || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, milestone_id: e.target.value === 'all' ? '' : e.target.value }))}
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
                   >
-                    <option value="" className="bg-background text-muted-foreground">All Milestones</option>
+                    <option value="all" className="bg-background text-muted-foreground">All Milestones</option>
                     {milestones && milestones.map(m => (
-                      <option key={m.id} value={m.id} className="bg-background text-foreground">{m.name}</option>
+                      <option key={m.id} value={m.id} className="bg-background text-foreground">{m.title}</option>
                     ))}
                   </select>
+                  
                   <input
                     type="date"
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
@@ -879,6 +1150,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     onChange={e => setAssignmentFilter(f => ({ ...f, date: e.target.value }))}
                   />
                 </div>
+                
                 {filteredAssignments.length === 0 ? (
                   <EmptyState
                     icon={CheckCircle}
@@ -900,6 +1172,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Quality</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Notes</th>
+                          {canEdit && <th className="px-4 py-3 text-center font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -912,45 +1185,55 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                               {a.task_description}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                              {a.milestone?.name || milestones.find(m => m.id === a.milestone_id)?.name || '—'}
+                              {a.milestone?.name || milestones.find(m => m.id === a.milestone_id)?.title || '—'}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                               {a.start_date ? new Date(a.start_date).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                              {a.due_date ? new Date(a.due_date).toLocaleDateString() : (a.end_date ? new Date(a.end_date).toLocaleDateString() : '—')}
+                              {a.end_date ? new Date(a.end_date).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>{a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                              <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>
+                                {a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                              </span>
                             </td>
                             <td className="px-4 py-3 text-blue-600 font-bold whitespace-nowrap">
                               {a.quality_score != null ? `${a.quality_score}/100` : '—'}
                             </td>
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap max-w-xs truncate">
                               {a.notes || '—'}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap flex gap-2">
-                              <button
-                                onClick={() => {
-                                  setEditingAssignment(a);
-                                  setAssignmentForm({
-                                    worker_id: a.worker_id,
-                                    task: a.task_description || '',
-                                    start_date: a.start_date || '',
-                                    due_date: a.end_date || '',
-                                    status: a.status,
-                                    notes: a.notes || '',
-                                    milestone_id: a.milestone_id || '',
-                                  });
-                                  setShowAssignTask(true);
-                                }}
-                                className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
-                              >Edit</button>
-                              <button
-                                onClick={() => handleDeleteAssignment(a.id)}
-                                className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
-                              >Delete</button>
-                            </td>
+                            {canEdit && (
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <div className="flex gap-2 justify-center">
+                                  <button
+                                    onClick={() => {
+                                      setEditingAssignment(a);
+                                      setAssignmentForm({
+                                        worker_id: a.worker_id,
+                                        task: a.task_description || '',
+                                        start_date: a.start_date || '',
+                                        due_date: a.end_date || '',
+                                        status: a.status,
+                                        notes: a.notes || '',
+                                        milestone_id: a.milestone_id || '',
+                                      });
+                                      setShowAssignTask(true);
+                                    }}
+                                    className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAssignment(a.id)}
+                                    className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -970,37 +1253,28 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     <h2 className="text-xl sm:text-2xl font-bold text-primary tracking-tight">Performance Analytics</h2>
                     <p className="text-muted-foreground text-sm">Assess and manage worker performance based on tasks assigned and completed.</p>
                   </div>
-                  {canEdit && (
-                    <button
-                      onClick={() => setShowAssignTask(true)}
-                      className="px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
-                        Add Performance
-                      </span>
-                    </button>
-                  )}
                 </div>
+                
                 <div className="flex flex-wrap gap-4 mb-4">
                   <select
-                    value={assignmentFilter.worker_id}
-                    onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                    value={assignmentFilter.worker_id || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value === 'all' ? '' : e.target.value }))}
+                    className="flex-1 min-w-[200px] px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
                   >
-                    <option value="" className="bg-background text-muted-foreground">Select Worker</option>
+                    <option value="all" className="bg-background text-muted-foreground">Select Worker</option>
                     {workers.map(w => (
                       <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>
                     ))}
                   </select>
                 </div>
+                
                 {filteredAssignments.filter(a => assignmentFilter.worker_id ? a.worker_id === assignmentFilter.worker_id : true).length === 0 ? (
                   <EmptyState
                     icon={TrendingUp}
                     title="No Performance Data"
                     description="Select a worker to view and manage performance analytics based on assigned tasks."
-                    action={canEdit ? "Add Performance" : null}
-                    onAction={() => setShowAssignTask(true)}
+                    action={null}
+                    onAction={null}
                   />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
@@ -1020,9 +1294,11 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           .filter(a => assignmentFilter.worker_id ? a.worker_id === assignmentFilter.worker_id : true)
                           .map(a => (
                             <tr key={a.id} className="border-b border-white/10 hover:bg-primary/5 transition-all">
-                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.task}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.task_description}</td>
                               <td className="px-4 py-3 whitespace-nowrap">
-                                <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>{a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                                <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>
+                                  {a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                </span>
                               </td>
                               <td className="px-4 py-3 text-blue-600 font-bold whitespace-nowrap">
                                 {canEdit ? (
@@ -1034,7 +1310,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                     onChange={async e => {
                                       const val = e.target.value === '' ? null : Number(e.target.value);
                                       setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, quality_score: val } : ass));
-                                      // Persist to DB
                                       try {
                                         const { error } = await supabase
                                           .from('worker_assignments')
@@ -1061,6 +1336,17 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                     onChange={e => {
                                       setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, notes: e.target.value } : ass));
                                     }}
+                                    onBlur={async () => {
+                                      try {
+                                        const { error } = await supabase
+                                          .from('worker_assignments')
+                                          .update({ notes: a.notes, updated_at: new Date().toISOString() })
+                                          .eq('id', a.id);
+                                        if (error) showToast('Failed to update notes', 'error');
+                                      } catch (err) {
+                                        showToast('Failed to update notes', 'error');
+                                      }
+                                    }}
                                     className="w-full px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
                                   />
                                 ) : (
@@ -1070,13 +1356,26 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                               {canEdit && (
                                 <td className="px-4 py-3 whitespace-nowrap flex gap-2">
                                   <button
-                                    onClick={() => {/* Save logic here, e.g. call API */ showToast('Performance updated!', 'success'); }}
+                                    onClick={async () => {
+                                      try {
+                                        const { error } = await supabase
+                                          .from('worker_assignments')
+                                          .update({ 
+                                            quality_score: a.quality_score,
+                                            notes: a.notes,
+                                            updated_at: new Date().toISOString() 
+                                          })
+                                          .eq('id', a.id);
+                                        if (error) showToast('Failed to save', 'error');
+                                        else showToast('Performance saved!', 'success');
+                                      } catch (err) {
+                                        showToast('Failed to save', 'error');
+                                      }
+                                    }}
                                     className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
-                                  >Save</button>
-                                  <button
-                                    onClick={() => setAssignments(prev => prev.filter(ass => ass.id !== a.id))}
-                                    className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
-                                  >Delete</button>
+                                  >
+                                    Save
+                                  </button>
                                 </td>
                               )}
                             </tr>
@@ -1090,96 +1389,362 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           )}
         </AnimatePresence>
 
-        {/* Add Worker Modal */}
+        {/* Add/Edit Worker Modal */}
         <AnimatePresence>
           {showAddWorker && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowAddWorker(false); resetWorkerForm(); }}>
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+                className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold">Add New Worker</h3>
-                  <button onClick={() => setShowAddWorker(false)} className="p-2 hover:bg-white/10 rounded-lg transition-all">
+                  <h3 className="text-2xl font-bold">{editingWorker ? 'Edit Worker' : 'Add New Worker'}</h3>
+                  <button onClick={() => { setShowAddWorker(false); resetWorkerForm(); }} className="p-2 hover:bg-white/10 rounded-lg transition-all">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-6">
+                  {/* Basic Information Section */}
                   <div>
-                    <Label className="mb-2">Full Name *</Label>
-                    <input
-                      type="text"
-                      value={workerForm.name}
-                      onChange={(e) => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
-                      placeholder="Enter full name"
-                      className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 backdrop-blur-xl focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-300 font-medium"
-                    />
+                    <h4 className="text-lg font-semibold mb-4 flex items-center gap-2 text-primary">
+                      <User className="w-5 h-5" />
+                      Basic Information
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="mb-2">Full Name *</Label>
+                        <input
+                          type="text"
+                          value={workerForm.name}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder="Enter full name"
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 backdrop-blur-xl focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-300 font-medium"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="mb-2">Role/Trade *</Label>
+                        <Select
+                          value={workerForm.role}
+                          onValueChange={(value) => setWorkerForm(prev => ({ ...prev, role: value }))}
+                        >
+                          <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                            <SelectValue placeholder="Select role..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {units.map(unit => (
+                              <SelectItem key={unit} value={unit}>
+                                {unit.charAt(0).toUpperCase() + unit.slice(1).replace('_', ' ')}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div>
+                        <Label className="mb-2">ID Number *</Label>
+                        <input
+                          type="text"
+                          value={workerForm.id_number}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, id_number: e.target.value }))}
+                          placeholder="National ID or Passport"
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="mb-2">Phone Number</Label>
+                        <input
+                          type="tel"
+                          value={workerForm.phone}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, phone: e.target.value }))}
+                          placeholder="+254 XXX XXX XXX"
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                        />
+                      </div>
+                      
+                      <div className="sm:col-span-2">
+                        <Label className="mb-2">Milestone Assignment</Label>
+                        <Select
+                          value={workerForm.milestone_id}
+                          onValueChange={(value) => setWorkerForm(prev => ({ ...prev, milestone_id: value }))}
+                        >
+                          <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                            <SelectValue placeholder="Select milestone (optional)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {milestones.map(milestone => (
+                              <SelectItem key={milestone.id} value={milestone.id}>
+                                {milestone.title}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="sm:col-span-2">
+                        <Label className="mb-2">Address</Label>
+                        <textarea
+                          rows={2}
+                          value={workerForm.address}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, address: e.target.value }))}
+                          placeholder="Residential address"
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 resize-none"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="mb-2">Role/Trade *</Label>
-                    <Select
-                      value={workerForm.role}
-                      onValueChange={(value) => setWorkerForm(prev => ({ ...prev, role: value }))}
-                    >
-                      <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
-                        <SelectValue placeholder="Select role..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {units.map(unit => (
-                          <SelectItem key={unit} value={unit}>{unit.charAt(0).toUpperCase() + unit.slice(1)}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="mb-2">Phone Number</Label>
-                    <input
-                      type="tel"
-                      value={workerForm.phone}
-                      onChange={(e) => setWorkerForm(prev => ({ ...prev, phone: e.target.value }))}
-                      placeholder="+254 XXX XXX XXX"
-                      className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-2">ID Number</Label>
-                    <input
-                      type="text"
-                      value={workerForm.id_number}
-                      onChange={(e) => setWorkerForm(prev => ({ ...prev, id_number: e.target.value }))}
-                      placeholder="National ID"
-                      className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Label className="mb-2">Address</Label>
-                    <textarea
-                      rows={3}
-                      value={workerForm.address}
-                      onChange={(e) => setWorkerForm(prev => ({ ...prev, address: e.target.value }))}
-                      placeholder="Residential address"
-                      className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 resize-none"
-                    />
+
+                  {/* Payment Information Section */}
+                  <div className="border-t border-white/10 pt-6">
+                    <h4 className="text-lg font-semibold mb-4 flex items-center gap-2 text-primary">
+                      <Wallet className="w-5 h-5" />
+                      Payment Information
+                    </h4>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="mb-2">Payment Method *</Label>
+                        <Select
+                          value={workerForm.payment_method}
+                          onValueChange={(value: any) => setWorkerForm(prev => ({ 
+                            ...prev, 
+                            payment_method: value,
+                            // Clear other payment fields when changing method
+                            bank_name: '',
+                            bank_account_number: '',
+                            bank_account_name: '',
+                            mobile_money_provider: '',
+                            mobile_money_number: '',
+                            card_type: '',
+                            card_number_last4: '',
+                            card_holder_name: '',
+                            cheque_payable_to: '',
+                          }))}
+                        >
+                          <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                            <SelectValue placeholder="Select payment method..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {paymentMethods.map(method => {
+                              const Icon = method.icon;
+                              return (
+                                <SelectItem key={method.value} value={method.value}>
+                                  <div className="flex items-center gap-2">
+                                    <Icon className="w-4 h-4" />
+                                    {method.label}
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Bank Transfer Fields */}
+                      {workerForm.payment_method === 'bank_transfer' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl"
+                        >
+                          <div className="sm:col-span-2">
+                            <Label className="mb-2 flex items-center gap-2">
+                              <Building2 className="w-4 h-4" />
+                              Bank Name *
+                            </Label>
+                            <input
+                              type="text"
+                              value={workerForm.bank_name}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, bank_name: e.target.value }))}
+                              placeholder="e.g., Equity Bank, KCB, etc."
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="mb-2">Account Number *</Label>
+                            <input
+                              type="text"
+                              value={workerForm.bank_account_number}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, bank_account_number: e.target.value }))}
+                              placeholder="Account number"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                          
+                          <div>
+                            <Label className="mb-2">Account Name *</Label>
+                            <input
+                              type="text"
+                              value={workerForm.bank_account_name}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, bank_account_name: e.target.value }))}
+                              placeholder="Name on account"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Mobile Money Fields */}
+                      {workerForm.payment_method === 'mobile_money' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-green-500/5 border border-green-500/20 rounded-xl"
+                        >
+                          <div>
+                            <Label className="mb-2 flex items-center gap-2">
+                              <Smartphone className="w-4 h-4" />
+                              Provider *
+                            </Label>
+                            <Select
+                              value={workerForm.mobile_money_provider}
+                              onValueChange={(value: any) => setWorkerForm(prev => ({ ...prev, mobile_money_provider: value }))}
+                            >
+                              <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                                <SelectValue placeholder="Select provider..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {mobileMoneyProviders.map(provider => (
+                                  <SelectItem key={provider.value} value={provider.value}>
+                                    {provider.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div>
+                            <Label className="mb-2">Phone Number *</Label>
+                            <input
+                              type="tel"
+                              value={workerForm.mobile_money_number}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, mobile_money_number: e.target.value }))}
+                              placeholder="+254 XXX XXX XXX"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Card Payment Fields */}
+                      {workerForm.payment_method === 'card' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-purple-500/5 border border-purple-500/20 rounded-xl"
+                        >
+                          <div>
+                            <Label className="mb-2 flex items-center gap-2">
+                              <CreditCard className="w-4 h-4" />
+                              Card Type *
+                            </Label>
+                            <Select
+                              value={workerForm.card_type}
+                              onValueChange={(value: any) => setWorkerForm(prev => ({ ...prev, card_type: value }))}
+                            >
+                              <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                                <SelectValue placeholder="Select card type..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {cardTypes.map(type => (
+                                  <SelectItem key={type.value} value={type.value}>
+                                    {type.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div>
+                            <Label className="mb-2">Last 4 Digits *</Label>
+                            <input
+                              type="text"
+                              maxLength={4}
+                              value={workerForm.card_number_last4}
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '');
+                                setWorkerForm(prev => ({ ...prev, card_number_last4: value }));
+                              }}
+                              placeholder="XXXX"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 font-mono"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">For security, only last 4 digits</p>
+                          </div>
+                          
+                          <div className="sm:col-span-2">
+                            <Label className="mb-2">Cardholder Name *</Label>
+                            <input
+                              type="text"
+                              value={workerForm.card_holder_name}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, card_holder_name: e.target.value }))}
+                              placeholder="Name on card"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Cheque Fields */}
+                      {workerForm.payment_method === 'cheque' && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl"
+                        >
+                          <div>
+                            <Label className="mb-2 flex items-center gap-2">
+                              <FileText className="w-4 h-4" />
+                              Payable To *
+                            </Label>
+                            <input
+                              type="text"
+                              value={workerForm.cheque_payable_to}
+                              onChange={(e) => setWorkerForm(prev => ({ ...prev, cheque_payable_to: e.target.value }))}
+                              placeholder="Name for cheque payment"
+                              className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {/* Payment Notes */}
+                      <div>
+                        <Label className="mb-2">Payment Notes (Optional)</Label>
+                        <textarea
+                          rows={2}
+                          value={workerForm.payment_notes}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, payment_notes: e.target.value }))}
+                          placeholder="Any additional payment information..."
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 resize-none"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex gap-3 mt-6">
+                <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={handleAddWorker}
+                    onClick={handleSaveWorker}
                     className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
                   >
-                    Add Worker
+                    {editingWorker ? 'Update Worker' : 'Add Worker'}
                   </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setShowAddWorker(false)}
+                    onClick={() => { setShowAddWorker(false); resetWorkerForm(); }}
                     className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
                   >
                     Cancel
@@ -1190,247 +1755,464 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           )}
         </AnimatePresence>
 
-        {/* Mark Attendance Modal */}
+        {/* View Worker Details Modal */}
         <AnimatePresence>
-          {showMarkAttendance && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          {viewingWorker && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setViewingWorker(null)}>
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+                className="w-full max-w-3xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-2xl font-bold">Mark Attendance</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Date: {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                    </p>
-                  </div>
-                  <button onClick={() => setShowMarkAttendance(false)} className="p-2 hover:bg-white/10 rounded-lg">
+                  <h3 className="text-2xl font-bold">Worker Details</h3>
+                  <button onClick={() => setViewingWorker(null)} className="p-2 hover:bg-white/10 rounded-lg transition-all">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                {workers.length === 0 ? (
-                  <EmptyState
-                    icon={Users}
-                    title="No workers available"
-                    description="Add workers first before marking attendance."
-                    action="Add Worker"
-                    onAction={() => {
-                      setShowMarkAttendance(false);
-                      setShowAddWorker(true);
-                    }}
-                  />
-                ) : (
-                  <div className="space-y-4">
-                    {workers.map((worker) => (
-                      <div key={worker.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 border-2 border-white/10 rounded-2xl hover:bg-white/5">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center font-bold text-lg">
-                            {worker.full_name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="font-bold text-lg">{worker.full_name}</p>
-                            <p className="text-sm text-muted-foreground capitalize">{worker.role}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                          <div className="flex items-center gap-2">
-                            <label className="text-sm font-semibold">Check In:</label>
-                            <input
-                              type="time"
-                              value={attendanceRecords[worker.id]?.check_in || ''}
-                              onChange={(e) => handleAttendanceChange(worker.id, 'check_in', e.target.value)}
-                              className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <label className="text-sm font-semibold">Check Out:</label>
-                            <input
-                              type="time"
-                              value={attendanceRecords[worker.id]?.check_out || ''}
-                              onChange={(e) => handleAttendanceChange(worker.id, 'check_out', e.target.value)}
-                              className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                            />
-                          </div>
-                          <Select
-                            value={attendanceRecords[worker.id]?.status || 'present'}
-                            onValueChange={(value) => handleAttendanceChange(worker.id, 'status', value)}
-                          >
-                            <SelectTrigger className="w-40 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
-                              <SelectValue placeholder="Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="present">Present</SelectItem>
-                              <SelectItem value="absent">Absent</SelectItem>
-                              <SelectItem value="late">Late</SelectItem>
-                              <SelectItem value="on_leave">On Leave</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                <div className="space-y-6">
+                  {/* Basic Info */}
+                  <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary">
+                      <User className="w-5 h-5" />
+                      Basic Information
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Full Name</p>
+                        <p className="font-semibold">{viewingWorker.full_name}</p>
                       </div>
-                    ))}
+                      <div>
+                        <p className="text-muted-foreground">Role</p>
+                        <p className="font-semibold capitalize">{viewingWorker.role.replace('_', ' ')}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">ID Number</p>
+                        <p className="font-semibold font-mono">{viewingWorker.id_number || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Phone</p>
+                        <p className="font-semibold">{viewingWorker.phone || '-'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Address</p>
+                        <p className="font-semibold">{viewingWorker.address || '-'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Milestone</p>
+                        <p className="font-semibold">{viewingWorker.milestone?.title || 'Not assigned'}</p>
+                      </div>
+                    </div>
                   </div>
-                )}
+                  {/* Payment Info */}
+              <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary">
+                  {(() => {
+                    const Icon = getPaymentIcon(viewingWorker.payment_method);
+                    return <Icon className="w-5 h-5" />;
+                  })()}
+                  Payment Information
+                </h4>
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Payment Method</p>
+                    <p className="font-semibold capitalize">{viewingWorker.payment_method.replace('_', ' ')}</p>
+                  </div>
 
-                {workers.length > 0 && (
-                  <div className="flex gap-3 mt-6">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={handleSaveAttendance}
-                      className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
-                    >
-                      Save Attendance
-                    </motion.button>
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setShowMarkAttendance(false)}
-                      className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
-                    >
-                      Cancel
-                    </motion.button>
-                  </div>
-                )}
-              </motion.div>
+                  {viewingWorker.payment_method === 'bank_transfer' && (
+                    <>
+                      <div>
+                        <p className="text-muted-foreground">Bank Name</p>
+                        <p className="font-semibold">{viewingWorker.bank_name || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Account Number</p>
+                        <p className="font-semibold font-mono">{viewingWorker.bank_account_number || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Account Name</p>
+                        <p className="font-semibold">{viewingWorker.bank_account_name || '-'}</p>
+                      </div>
+                    </>
+                  )}
+
+                  {viewingWorker.payment_method === 'mobile_money' && (
+                    <>
+                      <div>
+                        <p className="text-muted-foreground">Provider</p>
+                        <p className="font-semibold capitalize">{viewingWorker.mobile_money_provider?.replace('_', ' ') || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Phone Number</p>
+                        <p className="font-semibold">{viewingWorker.mobile_money_number || '-'}</p>
+                      </div>
+                    </>
+                  )}
+
+                  {viewingWorker.payment_method === 'card' && (
+                    <>
+                      <div>
+                        <p className="text-muted-foreground">Card Type</p>
+                        <p className="font-semibold capitalize">{viewingWorker.card_type || '-'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Last 4 Digits</p>
+                        <p className="font-semibold font-mono">**** {viewingWorker.card_number_last4 || '****'}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Cardholder Name</p>
+                        <p className="font-semibold">{viewingWorker.card_holder_name || '-'}</p>
+                      </div>
+                    </>
+                  )}
+
+                  {viewingWorker.payment_method === 'cheque' && (
+                    <div>
+                      <p className="text-muted-foreground">Payable To</p>
+                      <p className="font-semibold">{viewingWorker.cheque_payable_to || '-'}</p>
+                    </div>
+                  )}
+
+                  {viewingWorker.payment_notes && (
+                    <div>
+                      <p className="text-muted-foreground">Notes</p>
+                      <p className="font-semibold">{viewingWorker.payment_notes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-        </AnimatePresence>
 
-        {/* Assign Task Modal */}
-        <AnimatePresence>
-          {showAssignTask && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold">{editingAssignment ? 'Edit Task' : 'Assign Task'}</h3>
-                  <button onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="p-2 hover:bg-white/10 rounded-lg">
-                    <X className="w-5 h-5" />
+            <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
+              {canEdit && (
+                <>
+                  <button
+                    onClick={() => {
+                      setViewingWorker(null);
+                      handleEditWorker(viewingWorker);
+                    }}
+                    className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
+                  >
+                    Edit Worker
                   </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Worker</Label>
-                    <select
-                      value={assignmentForm.worker_id}
-                      onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                    >
-                      <option value="" className="bg-background text-muted-foreground">Select worker</option>
-                      {workers.map(w => <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Task Description</Label>
-                    <input
-                      type="text"
-                      value={assignmentForm.task}
-                      onChange={e => setAssignmentForm(f => ({ ...f, task: e.target.value }))}
-                      placeholder="Task description"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                    />
-                  </div>
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Milestone</Label>
-                    <select
-                      value={assignmentForm.milestone_id || ''}
-                      onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                    >
-                      <option value="" className="bg-background text-muted-foreground">No milestone</option>
-                      {milestones.map(m => <option key={m.id} value={m.id} className="bg-background text-foreground">{m.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="mb-2 text-primary font-semibold">Start Date</Label>
-                      <input
-                        type="date"
-                        value={assignmentForm.start_date}
-                        onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                      />
-                    </div>
-                    <div>
-                      <Label className="mb-2 text-primary font-semibold">Due Date</Label>
-                      <input
-                        type="date"
-                        value={assignmentForm.due_date}
-                        onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))}
-                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Status</Label>
-                    <select
-                      value={assignmentForm.status}
-                      onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))}
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                    >
-                      <option value="assigned" className="bg-background text-foreground">Assigned</option>
-                      <option value="in_progress" className="bg-background text-foreground">In Progress</option>
-                      <option value="completed" className="bg-background text-foreground">Completed</option>
-                      <option value="on_hold" className="bg-background text-foreground">On Hold</option>
-                    </select>
-                  </div>
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Notes</Label>
-                    <textarea
-                      rows={2}
-                      value={assignmentForm.notes}
-                      onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))}
-                      placeholder="Additional notes"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl resize-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 mt-6">
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleSaveAssignment}
-                    className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                  <button
+                    onClick={() => {
+                      setConfirmDelete(viewingWorker);
+                      setViewingWorker(null);
+                    }}
+                    className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl transition-all"
                   >
-                    {editingAssignment ? 'Update Task' : 'Assign Task'}
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }}
-                    className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
-                  >
-                    Cancel
-                  </motion.button>
-                </div>
-              </motion.div>
+                    Delete
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setViewingWorker(null)}
+                className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
+              >
+                Close
+              </button>
             </div>
-          )}
-        </AnimatePresence>
-      </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
 
-      {/* Floating Toasts */}
-      <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((toast) => (
-            <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
-          ))}
-        </AnimatePresence>
-      </div>
-    </>
-  );
+    {/* Delete Confirmation Modal */}
+    <AnimatePresence>
+      {confirmDelete && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setConfirmDelete(null)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-foreground">Delete Worker</h2>
+                <p className="text-sm text-muted-foreground">This action cannot be undone</p>
+              </div>
+            </div>
+
+            <p className="mb-6 text-muted-foreground">
+              Are you sure you want to delete <span className="font-semibold text-foreground">{confirmDelete.full_name}</span>? 
+              This will permanently remove them from the system along with all associated records.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition"
+                onClick={() => setConfirmDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition flex items-center gap-2"
+                onClick={() => handleDeleteWorker(confirmDelete)}
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Worker
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Mark Attendance Modal */}
+    <AnimatePresence>
+      {showMarkAttendance && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-bold">Mark Attendance</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Date: {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                </p>
+              </div>
+              <button onClick={() => setShowMarkAttendance(false)} className="p-2 hover:bg-white/10 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {workers.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="No workers available"
+                description="Add workers first before marking attendance."
+                action="Add Worker"
+                onAction={() => {
+                  setShowMarkAttendance(false);
+                  setShowAddWorker(true);
+                }}
+              />
+            ) : (
+              <div className="space-y-4">
+                {workers.map((worker) => (
+                  <div key={worker.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 border-2 border-white/10 rounded-2xl hover:bg-white/5">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center font-bold text-lg">
+                        {worker.full_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-bold text-lg">{worker.full_name}</p>
+                        <p className="text-sm text-muted-foreground capitalize">{worker.role.replace('_', ' ')}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm font-semibold">Check In:</label>
+                        <input
+                          type="time"
+                          value={attendanceRecords[worker.id]?.check_in || ''}
+                          onChange={(e) => handleAttendanceChange(worker.id, 'check_in', e.target.value)}
+                          className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm font-semibold">Check Out:</label>
+                        <input
+                          type="time"
+                          value={attendanceRecords[worker.id]?.check_out || ''}
+                          onChange={(e) => handleAttendanceChange(worker.id, 'check_out', e.target.value)}
+                          className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                        />
+                      </div>
+                      <Select
+                        value={attendanceRecords[worker.id]?.status || 'present'}
+                        onValueChange={(value) => handleAttendanceChange(worker.id, 'status', value)}
+                      >
+                        <SelectTrigger className="w-40 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="present">Present</SelectItem>
+                          <SelectItem value="absent">Absent</SelectItem>
+                          <SelectItem value="late">Late</SelectItem>
+                          <SelectItem value="on_leave">On Leave</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {workers.length > 0 && (
+              <div className="flex gap-3 mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSaveAttendance}
+                  className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                >
+                  Save Attendance
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowMarkAttendance(false)}
+                  className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+
+    {/* Assign Task Modal */}
+    <AnimatePresence>
+      {showAssignTask && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold">{editingAssignment ? 'Edit Task' : 'Assign Task'}</h3>
+              <button onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="p-2 hover:bg-white/10 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <Label className="mb-2 text-primary font-semibold">Worker</Label>
+                <select
+                  value={assignmentForm.worker_id}
+                  onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                >
+                  <option value="none" className="bg-background text-muted-foreground">Select worker</option>
+                  {workers.map(w => <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="mb-2 text-primary font-semibold">Task Description</Label>
+                <input
+                  type="text"
+                  value={assignmentForm.task}
+                  onChange={e => setAssignmentForm(f => ({ ...f, task: e.target.value }))}
+                  placeholder="Task description"
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                />
+              </div>
+              <div>
+                <Label className="mb-2 text-primary font-semibold">Milestone</Label>
+                <select
+                  value={assignmentForm.milestone_id || 'none'}
+                  onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value === 'none' ? '' : e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                >
+                  <option value="none" className="bg-background text-muted-foreground">No milestone</option>
+                  {milestones.map(m => <option key={m.id} value={m.id} className="bg-background text-foreground">{m.title}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="mb-2 text-primary font-semibold">Start Date</Label>
+                  <input
+                    type="date"
+                    value={assignmentForm.start_date}
+                    onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 text-primary font-semibold">Due Date</Label>
+                  <input
+                    type="date"
+                    value={assignmentForm.due_date}
+                    onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="mb-2 text-primary font-semibold">Status</Label>
+                <select
+                  value={assignmentForm.status}
+                  onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                >
+                  <option value="assigned" className="bg-background text-foreground">Assigned</option>
+                  <option value="in_progress" className="bg-background text-foreground">In Progress</option>
+                  <option value="completed" className="bg-background text-foreground">Completed</option>
+                  <option value="on_hold" className="bg-background text-foreground">On Hold</option>
+                </select>
+              </div>
+              <div>
+                <Label className="mb-2 text-primary font-semibold">Notes</Label>
+                <textarea
+                  rows={2}
+                  value={assignmentForm.notes}
+                  onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Additional notes"
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSaveAssignment}
+                className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+              >
+                {editingAssignment ? 'Update Task' : 'Assign Task'}
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }}
+                className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
+              >
+                Cancel
+              </motion.button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  </div>
+
+  {/* Floating Toasts */}
+  <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
+    <AnimatePresence>
+      {toasts.map((toast) => (
+        <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
+      ))}
+    </AnimatePresence>
+  </div>
+</>
+);
 };
-
 export default WorkersTab;

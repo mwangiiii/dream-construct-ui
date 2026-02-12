@@ -592,10 +592,11 @@ export default function ProjectDetailPage() {
     { id: "overview", label: "Overview", icon: Home },
     { id: "milestones", label: "Milestones", icon: Calendar },
     { id: "tasks", label: "Tasks", icon: CheckCircle2 },
+    { id: "workers", label: "Workers", icon: Users },
     { id: "updates", label: "Updates", icon: MessageSquare },
     { id: "photos", label: "Site Photos", icon: Camera },
     { id: "documents", label: "Documents", icon: FileText },
-    { id: "workers", label: "Workers", icon: Users },
+    
     { id: "financials", label: "Financials", icon: DollarSign },
     { id: "daily-logs", label: "Daily Progress", icon: BarChart3 },
     { id: "stages", label: "Stages", icon: Layers },
@@ -748,6 +749,14 @@ export default function ProjectDetailPage() {
               />
             )}
 
+             {activeTab === "workers" && (
+              <WorkersTab
+                projectId={id!}
+                canEdit={canEdit}
+                onUpdate={fetchProjectAndData}
+              />
+            )}
+
             {activeTab === "updates" && (
               <UpdatesTab 
                 projectId={id!} 
@@ -774,13 +783,13 @@ export default function ProjectDetailPage() {
               <DocumentsTab projectId={id!} documents={documents} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {activeTab === "workers" && (
+            {/* {activeTab === "workers" && (
               <WorkersTab
                 projectId={id!}
                 canEdit={canEdit}
                 onUpdate={fetchProjectAndData}
               />
-            )}
+            )} */}
 
             {activeTab === "daily-logs" && (
               <DailyProgress projectId={id!} />
