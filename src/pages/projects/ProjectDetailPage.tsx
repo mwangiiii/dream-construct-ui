@@ -41,7 +41,7 @@ import TasksTab from "@/components/projects/tabs/TasksTab";
 import UpdatesTab from "@/components/projects/tabs/UpdatesTab";
 import PhotosTab from "@/components/projects/tabs/PhotosTab";
 import DocumentsTab from "@/components/projects/tabs/DocumentsTab";
-import Financials from "@/components/projects/tabs/Financials";
+import Financials from "@/components/projects/tabs/financials";
 
 type Tab =
   | "overview"
