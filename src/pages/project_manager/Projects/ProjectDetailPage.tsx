@@ -44,7 +44,7 @@ import DailyProgress from "@/components/projects/tabs/DailyProgress";
 import Inspections from "@/components/projects/tabs/inpections";
 import MaterialTracking from "@/components/projects/tabs/MaterialTracking";
 import ProblemsAndIssues from "@/components/projects/tabs/ProblemsandIssues";
-import Financials from "@/components/projects/tabs/Financials";
+import Financials from "@/components/projects/tabs/financials";
 import Stages from "@/components/projects/tabs/Stages";
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
 import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
