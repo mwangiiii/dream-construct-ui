@@ -41,6 +41,7 @@ import TasksTab from "@/components/projects/tabs/TasksTab";
 import UpdatesTab from "@/components/projects/tabs/UpdatesTab";
 import PhotosTab from "@/components/projects/tabs/PhotosTab";
 import DocumentsTab from "@/components/projects/tabs/DocumentsTab";
+import Financials from "@/components/projects/tabs/Financials";
 
 type Tab =
   | "overview"
@@ -459,7 +460,8 @@ export default function ProjectDetailPage() {
     { id: "documents", label: "Documents", icon: FileText },
     // { id: "approvals", label: "Approvals", icon: Gavel },
     { id: "team", label: "Team", icon: Users },
-    // { id: "financials", label: "Financials", icon: DollarSign },
+    { id: "financials", label: "Financials", icon: DollarSign },
+
     // { id: "daily-logs", label: "Daily Logs", icon: Wrench },
   ];
 
@@ -638,6 +640,10 @@ export default function ProjectDetailPage() {
 
             {activeTab === "documents" && (
               <DocumentsTab projectId={id!} documents={documents} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+            )}
+
+            {activeTab === "financials" && (
+              <Financials projectId={id!} />
             )}
 
             {activeTab === "approvals" && !isClient && (

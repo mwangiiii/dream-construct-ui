@@ -38,14 +38,14 @@ import {
   Layers,
   ClipboardList,
   Package,
+  Award,
 } from "lucide-react";
 import DailyProgress from "@/components/projects/tabs/DailyProgress";
 import Inspections from "@/components/projects/tabs/inpections";
 import MaterialTracking from "@/components/projects/tabs/MaterialTracking";
 import ProblemsAndIssues from "@/components/projects/tabs/ProblemsandIssues";
-
+import Financials from "@/components/projects/tabs/Financials";
 import Stages from "@/components/projects/tabs/Stages";
-
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
 import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
 import TasksTab from "@/components/projects/tabs/TasksTab";
@@ -596,6 +596,7 @@ export default function ProjectDetailPage() {
     { id: "photos", label: "Site Photos", icon: Camera },
     { id: "documents", label: "Documents", icon: FileText },
     { id: "workers", label: "Workers", icon: Users },
+    { id: "financials", label: "Financials", icon: DollarSign },
     { id: "daily-logs", label: "Daily Progress", icon: BarChart3 },
     { id: "stages", label: "Stages", icon: Layers },
     { id: "inspections", label: "Inspections", icon: ClipboardList },
@@ -629,12 +630,6 @@ export default function ProjectDetailPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center">
           <AlertCircle className="w-16 h-16 sm:w-20 sm:h-20 text-red-500 mx-auto mb-4 sm:mb-6" />
           <div className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4">Project Not Found</div>
-          <button
-            onClick={() => navigate(isClient ? "/client/projects" : "/projects")}
-            className="px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base"
-          >
-            Return to Projects
-          </button>
         </motion.div>
       </div>
     );
@@ -644,30 +639,23 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-accent/10 to-primary/5" />
-        <div className="absolute inset-0 opacity-5">
-          <div className="absolute inset-0" style={{
-            backgroundImage: 'url("data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%23ffffff" fill-opacity="1"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-          }} />
-        </div>
-        
-        <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12 relative z-10">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+      {/* Header */}
+      <div className="bg-gradient-to-r from-primary/20 via-accent/20 to-primary/20 border-b border-white/10">
+        <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12">
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 mb-6 sm:mb-8">
               <div className="flex items-start gap-3 sm:gap-4 w-full sm:w-auto">
-                <button onClick={() => navigate(-1)} className="p-2 sm:p-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all flex-shrink-0">
+                <motion.button
+                  whileHover={{ scale: 1.05, x: -5 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => navigate("/projects")}
+                  className="backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 p-2 sm:p-3 rounded-xl transition-all flex-shrink-0"
+                >
                   <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
-                </button>
+                </motion.button>
                 <div className="flex-1 min-w-0">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 mb-2 sm:mb-3">
-                    <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold truncate">{project.title}</h1>
-                    <span className="px-3 py-1 sm:px-4 sm:py-2 backdrop-blur-xl bg-primary/20 border border-primary/30 text-primary text-xs sm:text-sm font-semibold rounded-xl whitespace-nowrap flex-shrink-0">
-                      {project.project_number}
-                    </span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-3 sm:gap-6 text-muted-foreground">
+                  <h1 className="text-2xl sm:text-4xl font-bold mb-2 sm:mb-3 truncate">{project.name}</h1>
+                  <div className="flex flex-col gap-2 text-sm sm:text-base text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
                       <span className="text-xs sm:text-base truncate">{project.site_address || "Site address not set"}</span>
@@ -798,14 +786,13 @@ export default function ProjectDetailPage() {
               <DailyProgress projectId={id!} />
             )}
 
-             {activeTab === "stages" && (
-                <Stages projectId={project?.id} />
-             )}
+            {activeTab === "stages" && (
+              <Stages projectId={project?.id} />
+            )}
 
             {activeTab === "inspections" && (
               <Inspections projectId={id!} />
             )}
-
 
             {activeTab === "material-tracking" && (
               <MaterialTracking projectId={id!} />
@@ -815,7 +802,11 @@ export default function ProjectDetailPage() {
               <ProblemsAndIssues projectId={id!} />
             )}
 
-            {!isClient && ["team", "financials"].includes(activeTab) && (
+            {activeTab === "financials" && (
+              <Financials projectId={id!} />
+            )}
+
+            {!isClient && ["team"].includes(activeTab) && (
               <GlassCard className="text-center py-16 sm:py-20">
                 <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
                   <div className="w-16 h-16 sm:w-20 sm:h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
