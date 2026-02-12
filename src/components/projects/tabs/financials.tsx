@@ -293,27 +293,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         [form.milestone_id]: [...(prev[form.milestone_id] || []), data[0]]
       }));
       resetForm();
-      // Show themed toast notification
-      if (typeof window !== "undefined") {
-        // Use the project's toast hook
-        if (typeof useToast === "function") {
-          useToast().toast({
-            title: "Material added successfully!",
-            description: "Your material has been added to the milestone.",
-            variant: "success"
-          });
-        }
-      }
+      alert("Material added successfully!");
     } else {
-      if (typeof window !== "undefined") {
-        if (typeof useToast === "function") {
-          useToast().toast({
-            title: "Error adding material",
-            description: error?.message || "An error occurred.",
-            variant: "destructive"
-          });
-        }
-      }
+      alert("Error adding material: " + error?.message);
     }
     setLoading(false);
   };
@@ -389,44 +371,84 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
 
   const deleteMaterial = async (milestoneId: string, idx: number) => {
     const items = financials[milestoneId] || [];
-    const id = items[idx].id;
+    const itemToDelete = items[idx];
+    const id = itemToDelete.id;
+    
+    console.log("Attempting to delete material with ID:", id);
+    console.log("Material details:", itemToDelete);
+    
     setLoading(true);
-    const { error, count } = await supabase
-      .from("project_financials")
-      .delete({ count: 'exact' })
-      .eq("id", id);
-    if (error) {
-      if (typeof window !== "undefined" && typeof useToast === "function") {
-        useToast().toast({
-          title: "Error deleting material",
-          description: error?.message || "An error occurred.",
-          variant: "destructive"
-        });
+    
+    try {
+      // First, verify the record exists
+      const { data: existingData, error: checkError } = await supabase
+        .from("project_financials")
+        .select("*")
+        .eq("id", id)
+        .single();
+      
+      if (checkError || !existingData) {
+        console.error("Record not found in database:", checkError);
+        alert("Material record not found in database. It may have been deleted already.");
+        // Remove from local state anyway
+        setFinancials(prev => ({
+          ...prev,
+          [milestoneId]: items.filter((_, i) => i !== idx)
+        }));
+        setLoading(false);
+        setConfirmDelete(null);
+        return;
       }
-    } else if (count === 0) {
-      if (typeof window !== "undefined" && typeof useToast === "function") {
-        useToast().toast({
-          title: "No material deleted",
-          description: "No matching material found to delete.",
-          variant: "destructive"
-        });
+      
+      console.log("Found existing record:", existingData);
+      
+      // Now delete it
+      const { error, data } = await supabase
+        .from("project_financials")
+        .delete()
+        .eq("id", id)
+        .select();
+      
+      if (error) {
+        console.error("Delete error:", error);
+        alert("Error deleting material: " + error.message);
+        setLoading(false);
+        setConfirmDelete(null);
+        return;
       }
-    } else {
+      
+      console.log("Delete response data:", data);
+      
+      // Check if something was actually deleted
+      if (!data || data.length === 0) {
+        console.warn("No rows returned from delete operation");
+        alert("Delete operation completed but no confirmation received. Refreshing data...");
+        await fetchFinancials(); // Refresh from database
+        setLoading(false);
+        setConfirmDelete(null);
+        return;
+      }
+      
+      // Successfully deleted - update local state
       setFinancials(prev => ({
         ...prev,
         [milestoneId]: items.filter((_, i) => i !== idx)
       }));
-      if (editId === id) resetForm();
-      if (typeof window !== "undefined" && typeof useToast === "function") {
-        useToast().toast({
-          title: "Material deleted successfully!",
-          description: "The material entry has been removed.",
-          variant: "success"
-        });
+      
+      // Clear edit form if we're editing the deleted item
+      if (editId === id) {
+        resetForm();
       }
+      
+      alert("Material deleted successfully!");
+      
+    } catch (err: any) {
+      console.error("Unexpected error during deletion:", err);
+      alert("Unexpected error: " + err.message);
+    } finally {
+      setLoading(false);
+      setConfirmDelete(null);
     }
-    setLoading(false);
-    setConfirmDelete(null);
   };
 
   const handleDelete = (milestoneId: string, idx: number) => {

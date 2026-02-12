@@ -67,7 +67,7 @@ const ProjectManagerLayout = ({ children }: ProjectManagerLayoutProps) => {
     // { icon: CalendarCheck2, label: "Daily Progress", path: "/project_manager/daily-progress" },
     // { icon: CheckCircle2, label: "Quality Inspections", path: "/project_manager/inspections" },
     // { icon: PackageSearch, label: "Material Tracking", path: "/project_manager/materials" },
-    { icon: DollarSign, label: "Financials", path: "/project_manager/financials" },
+    // { icon: DollarSign, label: "Financials", path: "/project_manager/financials" },
     // { icon: AlertCircle, label: "Problems & Issues", path: "/project_manager/issues" },
     // { icon: BarChart2, label: "Reports", path: "/project_manager/reports" },
     { icon: Settings, label: "Settings", path: "/project_manager/settings" },
