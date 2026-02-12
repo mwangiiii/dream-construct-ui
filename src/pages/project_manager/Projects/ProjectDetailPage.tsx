@@ -237,6 +237,7 @@ export default function ProjectDetailPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
 
   console.log('[ProjectDetailPage] STATE INITIALIZED');
 
@@ -358,20 +359,19 @@ export default function ProjectDetailPage() {
       const documentsEnriched = await enrichWithUsers(docsRaw || [], "uploaded_by", "uploaded_by_user");
       setDocuments(documentsEnriched);
 
-      // Format team for prop compatibility
-      const formattedTeam = (teamData || []).map((item: any) => ({
-        id: item.id,
-        full_name: item.full_name,
-        status_name: item.user_statuses?.status_name || "",
-        is_active: item.user_statuses?.is_active ?? true,
-        role_name: item.user_roles?.[0]?.role_name || "member",
-        user: {
-          id: item.id,
-          full_name: item.full_name,
-          user_statuses: item.user_statuses || null,
-        },
-      }));
-      setTeam(formattedTeam);
+
+      // Fetch all workers for this project
+      let workersList: Worker[] = [];
+      try {
+        const { data: workersRaw } = await supabase
+          .from('workers')
+          .select('id, full_name, role, status')
+          .eq('project_id', id);
+        workersList = (workersRaw || []) as Worker[];
+      } catch (err) {
+        workersList = [];
+      }
+      setWorkers(workersList);
 
       console.log('[ProjectDetailPage] fetchProjectAndData: set state', {
         proj,
@@ -379,7 +379,7 @@ export default function ProjectDetailPage() {
         tasks: tasksEnriched,
         approvals: approvalsEnriched,
         documents: documentsEnriched,
-        team: formattedTeam,
+        // team: formattedTeam, // removed, not needed
       });
 
       // Photos: Try edge function, fallback to direct
@@ -738,12 +738,13 @@ export default function ProjectDetailPage() {
               <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
+
             {activeTab === "tasks" && (
               <TasksTab
                 projectId={id!}
                 tasks={tasks}
                 milestones={milestones}
-                teamMembers={team}
+                workers={workers}
                 canEdit={canEdit}
                 onUpdate={fetchProjectAndData}
               />

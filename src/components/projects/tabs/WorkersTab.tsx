@@ -352,6 +352,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           *,
           milestone:project_milestones(id, title)
         `)
+        .eq('project_id', projectId)  // ← Added filter to only get workers for this project
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -504,6 +505,12 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       return;
     }
 
+    // Safety check: ensure projectId exists
+    if (!projectId) {
+      showToast('No project selected – cannot save worker', 'error');
+      return;
+    }
+
     // Validate payment method specific fields
     if (workerForm.payment_method === 'bank_transfer') {
       if (!workerForm.bank_name || !workerForm.bank_account_number || !workerForm.bank_account_name) {
@@ -558,6 +565,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         cheque_payable_to: workerForm.payment_method === 'cheque' ? workerForm.cheque_payable_to : null,
         payment_notes: workerForm.payment_notes || null,
         status: 'active',
+        project_id: projectId,  // ← CRITICAL FIX: link worker to current project
       };
 
       if (editingWorker) {
@@ -755,31 +763,41 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   }, [attendance, attendanceFilter]);
 
   const filteredAssignments = useMemo(() => {
-    return assignments.filter((a) => {
-      let match = true;
-      if (assignmentFilter.worker_id) match = match && a.worker_id === assignmentFilter.worker_id;
-      if (assignmentFilter.status) match = match && a.status === assignmentFilter.status;
-      if (assignmentFilter.milestone_id) match = match && a.milestone_id === assignmentFilter.milestone_id;
-      if (assignmentFilter.date) {
-        const aDate = a.end_date;
-        match = match && aDate === assignmentFilter.date;
-      }
-      return match;
-    });
+    let result = assignments;
+
+    if (assignmentFilter.worker_id) {
+      result = result.filter(a => a.worker_id === assignmentFilter.worker_id);
+    }
+    if (assignmentFilter.status) {
+      result = result.filter(a => a.status === assignmentFilter.status);
+    }
+    if (assignmentFilter.milestone_id) {
+      result = result.filter(a => a.milestone_id === assignmentFilter.milestone_id);
+    }
+    if (assignmentFilter.date) {
+      result = result.filter(a => {
+        if (!a.start_date && !a.end_date) return false;
+        const start = a.start_date ? new Date(a.start_date).toISOString().split('T')[0] : null;
+        const end = a.end_date ? new Date(a.end_date).toISOString().split('T')[0] : null;
+        return start === assignmentFilter.date || end === assignmentFilter.date;
+      });
+    }
+
+    return result;
   }, [assignments, assignmentFilter]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      active: 'bg-green-100 text-green-800 border-green-300',
-      inactive: 'bg-gray-100 text-gray-800 border-gray-300',
-      present: 'bg-green-100 text-green-800 border-green-300',
-      absent: 'bg-red-100 text-red-800 border-red-300',
-      late: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      on_leave: 'bg-blue-100 text-blue-800 border-blue-300',
-      assigned: 'bg-blue-100 text-blue-800 border-blue-300',
-      in_progress: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      completed: 'bg-green-100 text-green-800 border-green-300',
-      on_hold: 'bg-gray-100 text-gray-800 border-gray-300',
+      active: 'bg-green-500/20 border-green-500/50 text-green-300',
+      inactive: 'bg-gray-500/20 border-gray-500/50 text-gray-300',
+      present: 'bg-green-500/20 border-green-500/50 text-green-300',
+      absent: 'bg-red-500/20 border-red-500/50 text-red-300',
+      late: 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300',
+      on_leave: 'bg-blue-500/20 border-blue-500/50 text-blue-300',
+      assigned: 'bg-blue-500/20 border-blue-500/50 text-blue-300',
+      'in_progress': 'bg-purple-500/20 border-purple-500/50 text-purple-300',
+      completed: 'bg-green-500/20 border-green-500/50 text-green-300',
+      'on_hold': 'bg-orange-500/20 border-orange-500/50 text-orange-300',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
@@ -1807,412 +1825,414 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                       </div>
                     </div>
                   </div>
+
                   {/* Payment Info */}
-              <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-                <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary">
-                  {(() => {
-                    const Icon = getPaymentIcon(viewingWorker.payment_method);
-                    return <Icon className="w-5 h-5" />;
-                  })()}
-                  Payment Information
-                </h4>
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Payment Method</p>
-                    <p className="font-semibold capitalize">{viewingWorker.payment_method.replace('_', ' ')}</p>
+                  <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary">
+                      {(() => {
+                        const Icon = getPaymentIcon(viewingWorker.payment_method);
+                        return <Icon className="w-5 h-5" />;
+                      })()}
+                      Payment Information
+                    </h4>
+                    <div className="space-y-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Payment Method</p>
+                        <p className="font-semibold capitalize">{viewingWorker.payment_method.replace('_', ' ')}</p>
+                      </div>
+
+                      {viewingWorker.payment_method === 'bank_transfer' && (
+                        <>
+                          <div>
+                            <p className="text-muted-foreground">Bank Name</p>
+                            <p className="font-semibold">{viewingWorker.bank_name || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Account Number</p>
+                            <p className="font-semibold font-mono">{viewingWorker.bank_account_number || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Account Name</p>
+                            <p className="font-semibold">{viewingWorker.bank_account_name || '-'}</p>
+                          </div>
+                        </>
+                      )}
+
+                      {viewingWorker.payment_method === 'mobile_money' && (
+                        <>
+                          <div>
+                            <p className="text-muted-foreground">Provider</p>
+                            <p className="font-semibold capitalize">{viewingWorker.mobile_money_provider?.replace('_', ' ') || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Phone Number</p>
+                            <p className="font-semibold">{viewingWorker.mobile_money_number || '-'}</p>
+                          </div>
+                        </>
+                      )}
+
+                      {viewingWorker.payment_method === 'card' && (
+                        <>
+                          <div>
+                            <p className="text-muted-foreground">Card Type</p>
+                            <p className="font-semibold capitalize">{viewingWorker.card_type || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Last 4 Digits</p>
+                            <p className="font-semibold font-mono">**** {viewingWorker.card_number_last4 || '****'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Cardholder Name</p>
+                            <p className="font-semibold">{viewingWorker.card_holder_name || '-'}</p>
+                          </div>
+                        </>
+                      )}
+
+                      {viewingWorker.payment_method === 'cheque' && (
+                        <div>
+                          <p className="text-muted-foreground">Payable To</p>
+                          <p className="font-semibold">{viewingWorker.cheque_payable_to || '-'}</p>
+                        </div>
+                      )}
+
+                      {viewingWorker.payment_notes && (
+                        <div>
+                          <p className="text-muted-foreground">Notes</p>
+                          <p className="font-semibold">{viewingWorker.payment_notes}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-
-                  {viewingWorker.payment_method === 'bank_transfer' && (
-                    <>
-                      <div>
-                        <p className="text-muted-foreground">Bank Name</p>
-                        <p className="font-semibold">{viewingWorker.bank_name || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Account Number</p>
-                        <p className="font-semibold font-mono">{viewingWorker.bank_account_number || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Account Name</p>
-                        <p className="font-semibold">{viewingWorker.bank_account_name || '-'}</p>
-                      </div>
-                    </>
-                  )}
-
-                  {viewingWorker.payment_method === 'mobile_money' && (
-                    <>
-                      <div>
-                        <p className="text-muted-foreground">Provider</p>
-                        <p className="font-semibold capitalize">{viewingWorker.mobile_money_provider?.replace('_', ' ') || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Phone Number</p>
-                        <p className="font-semibold">{viewingWorker.mobile_money_number || '-'}</p>
-                      </div>
-                    </>
-                  )}
-
-                  {viewingWorker.payment_method === 'card' && (
-                    <>
-                      <div>
-                        <p className="text-muted-foreground">Card Type</p>
-                        <p className="font-semibold capitalize">{viewingWorker.card_type || '-'}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Last 4 Digits</p>
-                        <p className="font-semibold font-mono">**** {viewingWorker.card_number_last4 || '****'}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Cardholder Name</p>
-                        <p className="font-semibold">{viewingWorker.card_holder_name || '-'}</p>
-                      </div>
-                    </>
-                  )}
-
-                  {viewingWorker.payment_method === 'cheque' && (
-                    <div>
-                      <p className="text-muted-foreground">Payable To</p>
-                      <p className="font-semibold">{viewingWorker.cheque_payable_to || '-'}</p>
-                    </div>
-                  )}
-
-                  {viewingWorker.payment_notes && (
-                    <div>
-                      <p className="text-muted-foreground">Notes</p>
-                      <p className="font-semibold">{viewingWorker.payment_notes}</p>
-                    </div>
-                  )}
                 </div>
-              </div>
-            </div>
 
-            <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
-              {canEdit && (
-                <>
-                  <button
-                    onClick={() => {
-                      setViewingWorker(null);
-                      handleEditWorker(viewingWorker);
-                    }}
-                    className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
-                  >
-                    Edit Worker
-                  </button>
-                  <button
-                    onClick={() => {
-                      setConfirmDelete(viewingWorker);
-                      setViewingWorker(null);
-                    }}
-                    className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl transition-all"
-                  >
-                    Delete
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => setViewingWorker(null)}
-                className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
-              >
-                Close
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-
-    {/* Delete Confirmation Modal */}
-    <AnimatePresence>
-      {confirmDelete && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          onClick={() => setConfirmDelete(null)}
-        >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
-                <AlertTriangle className="w-6 h-6 text-red-500" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-foreground">Delete Worker</h2>
-                <p className="text-sm text-muted-foreground">This action cannot be undone</p>
-              </div>
-            </div>
-
-            <p className="mb-6 text-muted-foreground">
-              Are you sure you want to delete <span className="font-semibold text-foreground">{confirmDelete.full_name}</span>? 
-              This will permanently remove them from the system along with all associated records.
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <button
-                className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition"
-                onClick={() => setConfirmDelete(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition flex items-center gap-2"
-                onClick={() => handleDeleteWorker(confirmDelete)}
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete Worker
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-
-    {/* Mark Attendance Modal */}
-    <AnimatePresence>
-      {showMarkAttendance && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-2xl font-bold">Mark Attendance</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Date: {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                </p>
-              </div>
-              <button onClick={() => setShowMarkAttendance(false)} className="p-2 hover:bg-white/10 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {workers.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title="No workers available"
-                description="Add workers first before marking attendance."
-                action="Add Worker"
-                onAction={() => {
-                  setShowMarkAttendance(false);
-                  setShowAddWorker(true);
-                }}
-              />
-            ) : (
-              <div className="space-y-4">
-                {workers.map((worker) => (
-                  <div key={worker.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 border-2 border-white/10 rounded-2xl hover:bg-white/5">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center font-bold text-lg">
-                        {worker.full_name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-bold text-lg">{worker.full_name}</p>
-                        <p className="text-sm text-muted-foreground capitalize">{worker.role.replace('_', ' ')}</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm font-semibold">Check In:</label>
-                        <input
-                          type="time"
-                          value={attendanceRecords[worker.id]?.check_in || ''}
-                          onChange={(e) => handleAttendanceChange(worker.id, 'check_in', e.target.value)}
-                          className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm font-semibold">Check Out:</label>
-                        <input
-                          type="time"
-                          value={attendanceRecords[worker.id]?.check_out || ''}
-                          onChange={(e) => handleAttendanceChange(worker.id, 'check_out', e.target.value)}
-                          className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
-                        />
-                      </div>
-                      <Select
-                        value={attendanceRecords[worker.id]?.status || 'present'}
-                        onValueChange={(value) => handleAttendanceChange(worker.id, 'status', value)}
+                <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setViewingWorker(null);
+                          handleEditWorker(viewingWorker);
+                        }}
+                        className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
                       >
-                        <SelectTrigger className="w-40 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="present">Present</SelectItem>
-                          <SelectItem value="absent">Absent</SelectItem>
-                          <SelectItem value="late">Late</SelectItem>
-                          <SelectItem value="on_leave">On Leave</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        Edit Worker
+                      </button>
+                      <button
+                        onClick={() => {
+                          setConfirmDelete(viewingWorker);
+                          setViewingWorker(null);
+                        }}
+                        className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl transition-all"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setViewingWorker(null)}
+                    className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Delete Confirmation Modal */}
+        <AnimatePresence>
+          {confirmDelete && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+              onClick={() => setConfirmDelete(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                    <AlertTriangle className="w-6 h-6 text-red-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground">Delete Worker</h2>
+                    <p className="text-sm text-muted-foreground">This action cannot be undone</p>
+                  </div>
+                </div>
+
+                <p className="mb-6 text-muted-foreground">
+                  Are you sure you want to delete <span className="font-semibold text-foreground">{confirmDelete.full_name}</span>? 
+                  This will permanently remove them from the system along with all associated records.
+                </p>
+
+                <div className="flex justify-end gap-3">
+                  <button
+                    className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition"
+                    onClick={() => setConfirmDelete(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition flex items-center gap-2"
+                    onClick={() => handleDeleteWorker(confirmDelete)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Worker
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Mark Attendance Modal */}
+        <AnimatePresence>
+          {showMarkAttendance && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="w-full max-w-4xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-2xl font-bold">Mark Attendance</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Date: {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
+                  <button onClick={() => setShowMarkAttendance(false)} className="p-2 hover:bg-white/10 rounded-lg">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {workers.length === 0 ? (
+                  <EmptyState
+                    icon={Users}
+                    title="No workers available"
+                    description="Add workers first before marking attendance."
+                    action="Add Worker"
+                    onAction={() => {
+                      setShowMarkAttendance(false);
+                      setShowAddWorker(true);
+                    }}
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    {workers.map((worker) => (
+                      <div key={worker.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 border-2 border-white/10 rounded-2xl hover:bg-white/5">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center font-bold text-lg">
+                            {worker.full_name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-lg">{worker.full_name}</p>
+                            <p className="text-sm text-muted-foreground capitalize">{worker.role.replace('_', ' ')}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm font-semibold">Check In:</label>
+                            <input
+                              type="time"
+                              value={attendanceRecords[worker.id]?.check_in || ''}
+                              onChange={(e) => handleAttendanceChange(worker.id, 'check_in', e.target.value)}
+                              className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm font-semibold">Check Out:</label>
+                            <input
+                              type="time"
+                              value={attendanceRecords[worker.id]?.check_out || ''}
+                              onChange={(e) => handleAttendanceChange(worker.id, 'check_out', e.target.value)}
+                              className="w-32 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5"
+                            />
+                          </div>
+                          <Select
+                            value={attendanceRecords[worker.id]?.status || 'present'}
+                            onValueChange={(value) => handleAttendanceChange(worker.id, 'status', value)}
+                          >
+                            <SelectTrigger className="w-40 px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="present">Present</SelectItem>
+                              <SelectItem value="absent">Absent</SelectItem>
+                              <SelectItem value="late">Late</SelectItem>
+                              <SelectItem value="on_leave">On Leave</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {workers.length > 0 && (
+                  <div className="flex gap-3 mt-6">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={handleSaveAttendance}
+                      className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                    >
+                      Save Attendance
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setShowMarkAttendance(false)}
+                      className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
+                    >
+                      Cancel
+                    </motion.button>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Assign Task Modal */}
+        <AnimatePresence>
+          {showAssignTask && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-2xl font-bold">{editingAssignment ? 'Edit Task' : 'Assign Task'}</h3>
+                  <button onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="p-2 hover:bg-white/10 rounded-lg">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">Worker</Label>
+                    <select
+                      value={assignmentForm.worker_id}
+                      onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                    >
+                      <option value="none" className="bg-background text-muted-foreground">Select worker</option>
+                      {workers.map(w => <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">Task Description</Label>
+                    <input
+                      type="text"
+                      value={assignmentForm.task}
+                      onChange={e => setAssignmentForm(f => ({ ...f, task: e.target.value }))}
+                      placeholder="Task description"
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">Milestone</Label>
+                    <select
+                      value={assignmentForm.milestone_id || 'none'}
+                      onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value === 'none' ? '' : e.target.value }))}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                    >
+                      <option value="none" className="bg-background text-muted-foreground">No milestone</option>
+                      {milestones.map(m => <option key={m.id} value={m.id} className="bg-background text-foreground">{m.title}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="mb-2 text-primary font-semibold">Start Date</Label>
+                      <input
+                        type="date"
+                        value={assignmentForm.start_date}
+                        onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))}
+                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-2 text-primary font-semibold">Due Date</Label>
+                      <input
+                        type="date"
+                        value={assignmentForm.due_date}
+                        onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))}
+                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                      />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {workers.length > 0 && (
-              <div className="flex gap-3 mt-6">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleSaveAttendance}
-                  className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
-                >
-                  Save Attendance
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setShowMarkAttendance(false)}
-                  className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
-                >
-                  Cancel
-                </motion.button>
-              </div>
-            )}
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-
-    {/* Assign Task Modal */}
-    <AnimatePresence>
-      {showAssignTask && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold">{editingAssignment ? 'Edit Task' : 'Assign Task'}</h3>
-              <button onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="p-2 hover:bg-white/10 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <Label className="mb-2 text-primary font-semibold">Worker</Label>
-                <select
-                  value={assignmentForm.worker_id}
-                  onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))}
-                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                >
-                  <option value="none" className="bg-background text-muted-foreground">Select worker</option>
-                  {workers.map(w => <option key={w.id} value={w.id} className="bg-background text-foreground">{w.full_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label className="mb-2 text-primary font-semibold">Task Description</Label>
-                <input
-                  type="text"
-                  value={assignmentForm.task}
-                  onChange={e => setAssignmentForm(f => ({ ...f, task: e.target.value }))}
-                  placeholder="Task description"
-                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                />
-              </div>
-              <div>
-                <Label className="mb-2 text-primary font-semibold">Milestone</Label>
-                <select
-                  value={assignmentForm.milestone_id || 'none'}
-                  onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value === 'none' ? '' : e.target.value }))}
-                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                >
-                  <option value="none" className="bg-background text-muted-foreground">No milestone</option>
-                  {milestones.map(m => <option key={m.id} value={m.id} className="bg-background text-foreground">{m.title}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="mb-2 text-primary font-semibold">Start Date</Label>
-                  <input
-                    type="date"
-                    value={assignmentForm.start_date}
-                    onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                  />
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">Status</Label>
+                    <select
+                      value={assignmentForm.status}
+                      onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))}
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                    >
+                      <option value="assigned" className="bg-background text-foreground">Assigned</option>
+                      <option value="in_progress" className="bg-background text-foreground">In Progress</option>
+                      <option value="completed" className="bg-background text-foreground">Completed</option>
+                      <option value="on_hold" className="bg-background text-foreground">On Hold</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">Notes</Label>
+                    <textarea
+                      rows={2}
+                      value={assignmentForm.notes}
+                      onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="Additional notes"
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl resize-none"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label className="mb-2 text-primary font-semibold">Due Date</Label>
-                  <input
-                    type="date"
-                    value={assignmentForm.due_date}
-                    onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                  />
+
+                <div className="flex gap-3 mt-6">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSaveAssignment}
+                    className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
+                  >
+                    {editingAssignment ? 'Update Task' : 'Assign Task'}
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }}
+                    className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
+                  >
+                    Cancel
+                  </motion.button>
                 </div>
-              </div>
-              <div>
-                <Label className="mb-2 text-primary font-semibold">Status</Label>
-                <select
-                  value={assignmentForm.status}
-                  onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))}
-                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                >
-                  <option value="assigned" className="bg-background text-foreground">Assigned</option>
-                  <option value="in_progress" className="bg-background text-foreground">In Progress</option>
-                  <option value="completed" className="bg-background text-foreground">Completed</option>
-                  <option value="on_hold" className="bg-background text-foreground">On Hold</option>
-                </select>
-              </div>
-              <div>
-                <Label className="mb-2 text-primary font-semibold">Notes</Label>
-                <textarea
-                  rows={2}
-                  value={assignmentForm.notes}
-                  onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Additional notes"
-                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl resize-none"
-                />
-              </div>
+              </motion.div>
             </div>
+          )}
+        </AnimatePresence>
+      </div>
 
-            <div className="flex gap-3 mt-6">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSaveAssignment}
-                className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl"
-              >
-                {editingAssignment ? 'Update Task' : 'Assign Task'}
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }}
-                className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl"
-              >
-                Cancel
-              </motion.button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  </div>
-
-  {/* Floating Toasts */}
-  <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
-    <AnimatePresence>
-      {toasts.map((toast) => (
-        <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
-      ))}
-    </AnimatePresence>
-  </div>
-</>
-);
+      {/* Floating Toasts */}
+      <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <ToastNotification key={toast.id} toast={toast} onDismiss={dismissToast} />
+          ))}
+        </AnimatePresence>
+      </div>
+    </>
+  );
 };
+
 export default WorkersTab;

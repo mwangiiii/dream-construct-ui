@@ -23,19 +23,20 @@ import {
 import { projectApi } from "@/lib/api/projectApi";
 import { Task, Milestone } from "@/types/project";
 
-interface TeamMember {
+interface Worker {
   id: string;
   full_name: string;
-  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "surveyor";
-  status_name: string;
-  is_active: boolean;
+  role: string;
+  status: string;
 }
 
 interface TasksTabProps {
   projectId: string;
-  tasks: Task[];
+  tasks: (Task & {
+    assigned_worker?: { id: string; full_name: string; role: string } | null;
+  })[];  // ← Updated to reflect enriched worker data
   milestones: Milestone[];
-  teamMembers: TeamMember[];
+  workers: Worker[];
   canEdit: boolean;
   onUpdate: () => void;
 }
@@ -46,7 +47,6 @@ interface Toast {
   type: "success" | "error" | "warning";
 }
 
-// Windows 11-style Floating Toast
 const ToastNotification: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = ({ toast, onDismiss }) => {
   useEffect(() => {
     const timer = setTimeout(() => onDismiss(toast.id), 4000);
@@ -105,8 +105,6 @@ const statusConfig = {
   done: { label: "Done", color: "text-green-400" },
 };
 
-const roleDisplayOrder = ["manager", "project_manager", "finance", "surveyor"] as const;
-
 const calculateDaysRemaining = (startDate: string | null, dueDate: string | null): number | null => {
   if (!dueDate) return null;
   const now = new Date();
@@ -122,89 +120,12 @@ const getDaysRemainingColor = (days: number | null): string => {
   return "text-green-400";
 };
 
-export default function TasksTab({ projectId, tasks, milestones, teamMembers, canEdit, onUpdate }: TasksTabProps) {
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+export default function TasksTab({ projectId, tasks, milestones, workers, canEdit, onUpdate }: TasksTabProps) {
   const [loading, setLoading] = useState(false);
-  const [loadingTeamMembers, setLoadingTeamMembers] = useState(true);
-  const [teamMembersError, setTeamMembersError] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [expandedMilestones, setExpandedMilestones] = useState<Set<string>>(new Set());
   const [showFormForMilestone, setShowFormForMilestone] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ milestoneId: string; taskId: string } | null>(null);
-
-  const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
-    const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, message, type }]);
-  };
-
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const todayISO = useMemo(() => new Date().toISOString().split("T")[0], []);
-
-  useEffect(() => {
-    console.log('[TasksTab] Tasks received:', tasks);
-    console.log('[TasksTab] Number of tasks:', tasks.length);
-    console.log('[TasksTab] Project ID:', projectId);
-    console.log('[TasksTab] Can Edit:', canEdit);
-    
-    if (tasks.length === 0) {
-      console.warn('[TasksTab] No tasks found. This could mean:');
-      console.warn('1. No tasks exist in the database');
-      console.warn('2. The fetch query is failing');
-      console.warn('3. The tasks are being filtered out');
-      console.warn('Check the Network tab for the tasks API call');
-    }
-  }, [tasks, projectId, canEdit]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoadingTeamMembers(true);
-        setTeamMembersError(false);
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } catch (err) {
-        console.error("Failed to load team members:", err);
-        setTeamMembersError(true);
-      } finally {
-        setLoadingTeamMembers(false);
-      }
-    };
-    load();
-  }, [projectId]);
-
-  // Auto-expand first 3 milestones
-  useEffect(() => {
-    if (milestones.length > 0) {
-      const firstThree = new Set(milestones.slice(0, 3).map(m => m.id));
-      setExpandedMilestones(firstThree);
-    }
-  }, [milestones]);
-
-  const assignableUsers = useMemo(() => {
-    return teamMembers
-      .filter(m => m.is_active && !["client", "admin"].includes(m.role_name))
-      .sort((a, b) => {
-        const orderA = roleDisplayOrder.indexOf(a.role_name as any);
-        const orderB = roleDisplayOrder.indexOf(b.role_name as any);
-        return orderA - orderB !== 0 ? orderA - orderB : a.full_name.localeCompare(b.full_name);
-      });
-  }, [teamMembers]);
-
-  // Group tasks by milestone
-  const tasksByMilestone = useMemo(() => {
-    const grouped: Record<string, Task[]> = {};
-    tasks.forEach(task => {
-      const milestoneId = task.milestone_id || "unassigned";
-      if (!grouped[milestoneId]) {
-        grouped[milestoneId] = [];
-      }
-      grouped[milestoneId].push(task);
-    });
-    return grouped;
-  }, [tasks]);
 
   const [createForm, setCreateForm] = useState({
     title: "",
@@ -219,26 +140,52 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
 
   const [editForm, setEditForm] = useState<Partial<Task & { start_date: string; due_date: string }>>({});
 
+  const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, message, type }]);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const todayISO = useMemo(() => new Date().toISOString().split("T")[0], []);
+
+  // Filter only active workers for assignment
+  const assignableWorkers = useMemo(() => {
+    return workers
+      .filter((w) => w.status === "active")
+      .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [workers]);
+
+  // Group tasks by milestone
+  const tasksByMilestone = useMemo(() => {
+    const grouped: Record<string, Task[]> = {};
+    tasks.forEach((task) => {
+      const milestoneId = task.milestone_id || "unassigned";
+      if (!grouped[milestoneId]) grouped[milestoneId] = [];
+      grouped[milestoneId].push(task);
+    });
+    return grouped;
+  }, [tasks]);
+
   const validateDates = (startDate: string, dueDate: string) => {
     const today = startOfDay(new Date());
-    
-    // If start date is provided, it must be today or in the future
+
     if (startDate) {
       const start = new Date(startDate);
       if (!isToday(start) && !isAfter(start, today)) {
         return { valid: false, message: "Start date cannot be in the past" };
       }
     }
-    
-    // If due date is provided, it must be today or in the future
+
     if (dueDate) {
       const due = new Date(dueDate);
       if (!isToday(due) && !isAfter(due, today)) {
         return { valid: false, message: "Due date cannot be in the past" };
       }
     }
-    
-    // If both dates are provided, due date must be >= start date
+
     if (startDate && dueDate) {
       const start = new Date(startDate);
       const due = new Date(dueDate);
@@ -246,12 +193,12 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
         return { valid: false, message: "Due date must be on or after start date" };
       }
     }
-    
+
     return { valid: true, message: "" };
   };
 
   const toggleMilestone = (milestoneId: string) => {
-    setExpandedMilestones(prev => {
+    setExpandedMilestones((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(milestoneId)) {
         newSet.delete(milestoneId);
@@ -274,37 +221,24 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
       status: "todo",
     });
     setShowFormForMilestone(milestoneId);
-    setExpandedMilestones(prev => new Set([...prev, milestoneId]));
+    setExpandedMilestones((prev) => new Set([...prev, milestoneId]));
   };
 
   const resetForm = () => {
     setShowFormForMilestone(null);
-    setEditingTaskId(null);
-    setCreateForm({
-      title: "",
-      description: "",
-      assigned_to: "",
-      milestone_id: "",
-      start_date: "",
-      due_date: "",
-      priority: "medium",
-      status: "todo",
-    });
     setEditForm({});
   };
 
   const handleCreateTask = async () => {
     if (!createForm.title.trim()) return showToast("Task title is required", "warning");
     if (!createForm.milestone_id) return showToast("Please select a milestone", "warning");
-    
+
     const validation = validateDates(createForm.start_date, createForm.due_date);
-    if (!validation.valid) {
-      return showToast(validation.message, "warning");
-    }
+    if (!validation.valid) return showToast(validation.message, "warning");
 
     setLoading(true);
     try {
-      const result = await projectApi.createTask({
+      await projectApi.createTask({
         project_id: projectId,
         title: createForm.title.trim(),
         description: createForm.description || null,
@@ -315,10 +249,10 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
         priority: createForm.priority,
         status: createForm.status,
       });
-      
+
       showToast("Task created successfully!", "success");
       resetForm();
-      await onUpdate();
+      onUpdate();
     } catch (err: any) {
       showToast(err.message || "Failed to create task", "error");
     } finally {
@@ -328,16 +262,12 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
 
   const handleUpdateTask = async (taskId: string) => {
     const validation = validateDates(editForm.start_date || "", editForm.due_date || "");
-    if (!validation.valid) {
-      return showToast(validation.message, "warning");
-    }
+    if (!validation.valid) return showToast(validation.message, "warning");
 
     setLoading(true);
     try {
-      // Extract only database fields, excluding computed fields like assigned_user
-      const { assigned_user, ...dbFields } = editForm as any;
-      
-      // Clean up the data - convert empty strings to null for date fields
+      const { assigned_worker, ...dbFields } = editForm as any; // ← updated from assigned_user
+
       const cleanedData = {
         ...dbFields,
         start_date: dbFields.start_date || null,
@@ -347,11 +277,10 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
         description: dbFields.description || null,
         completed_at: editForm.status === "done" ? new Date().toISOString() : null,
       };
-      
+
       await projectApi.updateTask(taskId, cleanedData);
       showToast("Task updated successfully!", "success");
-      setEditingTaskId(null);
-      setEditForm({});
+      setShowFormForMilestone(null);
       onUpdate();
     } catch (err: any) {
       showToast(err.message || "Failed to update task", "error");
@@ -374,8 +303,14 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
     }
   };
 
-  const handleDelete = (milestoneId: string, taskId: string) => {
-    setConfirmDelete({ milestoneId, taskId });
+  const startEdit = (task: Task, milestoneId: string) => {
+    setShowFormForMilestone(milestoneId);
+    setEditForm({
+      ...task,
+      start_date: task.start_date ? task.start_date.split("T")[0] : "",
+      due_date: task.due_date ? task.due_date.split("T")[0] : "",
+    });
+    setExpandedMilestones((prev) => new Set([...prev, milestoneId]));
   };
 
   const handleQuickStatusToggle = async (task: Task) => {
@@ -391,17 +326,6 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
     }
   };
 
-  const startEdit = (task: Task, milestoneId: string) => {
-    setEditingTaskId(task.id);
-    setEditForm({
-      ...task,
-      start_date: task.start_date ? task.start_date.split("T")[0] : "",
-      due_date: task.due_date ? task.due_date.split("T")[0] : "",
-    });
-    setShowFormForMilestone(milestoneId);
-    setExpandedMilestones(prev => new Set([...prev, milestoneId]));
-  };
-
   return (
     <>
       <div className="space-y-4 sm:space-y-8">
@@ -410,7 +334,7 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
           <div>
             <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Tasks</h3>
             <p className="text-sm sm:text-base text-muted-foreground mt-2">
-              {tasks.length} total • {tasks.filter(t => t.status === "done").length} completed
+              {tasks.length} total • {tasks.filter((t) => t.status === "done").length} completed
             </p>
           </div>
         </div>
@@ -441,7 +365,8 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                         <p className="text-sm text-muted-foreground mt-1">{milestone.description}</p>
                       )}
                       <p className="text-xs text-muted-foreground mt-2">
-                        {milestoneTasks.length} {milestoneTasks.length === 1 ? 'task' : 'tasks'} • {milestoneTasks.filter(t => t.status === "done").length} completed
+                        {milestoneTasks.length} {milestoneTasks.length === 1 ? "task" : "tasks"} •{" "}
+                        {milestoneTasks.filter((t) => t.status === "done").length} completed
                       </p>
                     </div>
                     {isExpanded ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
@@ -464,7 +389,7 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                 whileTap={{ scale: 0.98 }}
                                 onClick={() => {
                                   if (showingForm) {
-                                    resetForm();
+                                    setShowFormForMilestone(null);
                                   } else {
                                     openAddForm(milestone.id);
                                   }
@@ -489,7 +414,7 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                               >
                                 <GlassCard>
                                   <h4 className="text-xl font-bold mb-6">
-                                    {editingTaskId ? "Edit Task" : "Add New Task"}
+                                    {editForm.id ? "Edit Task" : "Add New Task"}
                                   </h4>
                                   <div className="space-y-4">
                                     <div>
@@ -498,10 +423,11 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                       </label>
                                       <input
                                         type="text"
-                                        value={editingTaskId ? (editForm.title || "") : createForm.title}
-                                        onChange={(e) => editingTaskId 
-                                          ? setEditForm({ ...editForm, title: e.target.value })
-                                          : setCreateForm({ ...createForm, title: e.target.value })
+                                        value={editForm.id ? (editForm.title || "") : createForm.title}
+                                        onChange={(e) =>
+                                          editForm.id
+                                            ? setEditForm({ ...editForm, title: e.target.value })
+                                            : setCreateForm({ ...createForm, title: e.target.value })
                                         }
                                         placeholder="Enter task title"
                                         className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
@@ -515,10 +441,11 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                         Description
                                       </label>
                                       <textarea
-                                        value={editingTaskId ? (editForm.description || "") : createForm.description}
-                                        onChange={(e) => editingTaskId
-                                          ? setEditForm({ ...editForm, description: e.target.value })
-                                          : setCreateForm({ ...createForm, description: e.target.value })
+                                        value={editForm.id ? (editForm.description || "") : createForm.description}
+                                        onChange={(e) =>
+                                          editForm.id
+                                            ? setEditForm({ ...editForm, description: e.target.value })
+                                            : setCreateForm({ ...createForm, description: e.target.value })
                                         }
                                         placeholder="Add task description"
                                         rows={3}
@@ -533,16 +460,19 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                           Status
                                         </label>
                                         <select
-                                          value={editingTaskId ? (editForm.status || "") : createForm.status}
-                                          onChange={(e) => editingTaskId
-                                            ? setEditForm({ ...editForm, status: e.target.value as any })
-                                            : setCreateForm({ ...createForm, status: e.target.value as any })
+                                          value={editForm.id ? (editForm.status || "todo") : createForm.status}
+                                          onChange={(e) =>
+                                            editForm.id
+                                              ? setEditForm({ ...editForm, status: e.target.value as any })
+                                              : setCreateForm({ ...createForm, status: e.target.value as any })
                                           }
                                           className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
                                           disabled={loading}
                                         >
                                           {Object.entries(statusConfig).map(([v, c]) => (
-                                            <option key={v} value={v} className="bg-background">{c.label}</option>
+                                            <option key={v} value={v} className="bg-background">
+                                              {c.label}
+                                            </option>
                                           ))}
                                         </select>
                                       </div>
@@ -552,16 +482,19 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                           Priority
                                         </label>
                                         <select
-                                          value={editingTaskId ? (editForm.priority || "") : createForm.priority}
-                                          onChange={(e) => editingTaskId
-                                            ? setEditForm({ ...editForm, priority: e.target.value as any })
-                                            : setCreateForm({ ...createForm, priority: e.target.value as any })
+                                          value={editForm.id ? (editForm.priority || "medium") : createForm.priority}
+                                          onChange={(e) =>
+                                            editForm.id
+                                              ? setEditForm({ ...editForm, priority: e.target.value as any })
+                                              : setCreateForm({ ...createForm, priority: e.target.value as any })
                                           }
                                           className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
                                           disabled={loading}
                                         >
                                           {Object.entries(priorityConfig).map(([v, c]) => (
-                                            <option key={v} value={v} className="bg-background">{c.label}</option>
+                                            <option key={v} value={v} className="bg-background">
+                                              {c.label}
+                                            </option>
                                           ))}
                                         </select>
                                       </div>
@@ -571,20 +504,26 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                           Assign To
                                         </label>
                                         <select
-                                          value={editingTaskId ? (editForm.assigned_to || "") : createForm.assigned_to}
-                                          onChange={(e) => editingTaskId
-                                            ? setEditForm({ ...editForm, assigned_to: e.target.value })
-                                            : setCreateForm({ ...createForm, assigned_to: e.target.value })
+                                          value={editForm.id ? (editForm.assigned_to || "") : createForm.assigned_to}
+                                          onChange={(e) =>
+                                            editForm.id
+                                              ? setEditForm({ ...editForm, assigned_to: e.target.value })
+                                              : setCreateForm({ ...createForm, assigned_to: e.target.value })
                                           }
-                                          disabled={loadingTeamMembers || teamMembersError || assignableUsers.length === 0}
                                           className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
+                                          disabled={loading}
                                         >
-                                          <option value="" className="bg-background">Unassigned</option>
-                                          {!loadingTeamMembers && !teamMembersError && assignableUsers.map(u => (
-                                            <option key={u.id} value={u.id} className="bg-background">{u.full_name}</option>
+                                          <option value="">Unassigned</option>
+                                          {assignableWorkers.map((w) => (
+                                            <option key={w.id} value={w.id} className="bg-background">
+                                              {w.full_name} • {w.role.replace("_", " ")}
+                                            </option>
                                           ))}
-                                          {loadingTeamMembers && <option disabled className="bg-background">Loading...</option>}
-                                          {teamMembersError && <option disabled className="bg-background">Error loading members</option>}
+                                          {assignableWorkers.length === 0 && (
+                                            <option disabled className="bg-background">
+                                              No active workers available
+                                            </option>
+                                          )}
                                         </select>
                                       </div>
 
@@ -595,10 +534,11 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                         <input
                                           type="date"
                                           min={todayISO}
-                                          value={editingTaskId ? (editForm.start_date || "") : createForm.start_date}
-                                          onChange={(e) => editingTaskId
-                                            ? setEditForm({ ...editForm, start_date: e.target.value })
-                                            : setCreateForm({ ...createForm, start_date: e.target.value })
+                                          value={editForm.id ? (editForm.start_date || "") : createForm.start_date}
+                                          onChange={(e) =>
+                                            editForm.id
+                                              ? setEditForm({ ...editForm, start_date: e.target.value })
+                                              : setCreateForm({ ...createForm, start_date: e.target.value })
                                           }
                                           className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
                                           disabled={loading}
@@ -611,11 +551,16 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                         </label>
                                         <input
                                           type="date"
-                                          min={editingTaskId ? (editForm.start_date || todayISO) : (createForm.start_date || todayISO)}
-                                          value={editingTaskId ? (editForm.due_date || "") : createForm.due_date}
-                                          onChange={(e) => editingTaskId
-                                            ? setEditForm({ ...editForm, due_date: e.target.value })
-                                            : setCreateForm({ ...createForm, due_date: e.target.value })
+                                          min={
+                                            editForm.id
+                                              ? editForm.start_date || todayISO
+                                              : createForm.start_date || todayISO
+                                          }
+                                          value={editForm.id ? (editForm.due_date || "") : createForm.due_date}
+                                          onChange={(e) =>
+                                            editForm.id
+                                              ? setEditForm({ ...editForm, due_date: e.target.value })
+                                              : setCreateForm({ ...createForm, due_date: e.target.value })
                                           }
                                           className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
                                           disabled={loading}
@@ -626,19 +571,19 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                     <div className="flex gap-3 pt-4">
                                       <button
                                         type="button"
-                                        onClick={() => editingTaskId ? handleUpdateTask(editingTaskId) : handleCreateTask()}
+                                        onClick={() => (editForm.id ? handleUpdateTask(editForm.id as string) : handleCreateTask())}
                                         className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2"
                                         disabled={loading}
                                       >
                                         {loading ? (
                                           <>
                                             <div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin"></div>
-                                            {editingTaskId ? "Updating..." : "Creating..."}
+                                            {editForm.id ? "Updating..." : "Creating..."}
                                           </>
                                         ) : (
                                           <>
                                             <Check className="w-5 h-5" />
-                                            {editingTaskId ? "Update Task" : "Create Task"}
+                                            {editForm.id ? "Update Task" : "Create Task"}
                                           </>
                                         )}
                                       </button>
@@ -662,14 +607,19 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                           {milestoneTasks.length === 0 ? (
                             <div className="text-center py-8 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl">
                               <CheckCircle2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                              <p className="text-muted-foreground">No tasks for this milestone yet.</p>
+                              <p className="text-muted-foreground">No tasks assigned to this milestone yet.</p>
+                              {canEdit && (
+                                <p className="text-sm text-muted-foreground mt-2">
+                                  Click "Add Task" above to get started.
+                                </p>
+                              )}
                             </div>
                           ) : (
                             <div className="space-y-3">
                               {milestoneTasks.map((task, idx) => {
-                                const isEditing = editingTaskId === task.id;
-                                if (isEditing && showingForm) return null; // Don't show in list when editing in form
-                                
+                                const isEditing = editForm.id === task.id;
+                                if (isEditing && showingForm) return null;
+
                                 const priority = priorityConfig[task.priority as keyof typeof priorityConfig] || priorityConfig.medium;
                                 const status = statusConfig[task.status as keyof typeof statusConfig] || statusConfig.todo;
                                 const PriorityIcon = priority.icon;
@@ -677,42 +627,54 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                 const daysColor = getDaysRemainingColor(daysRemaining);
 
                                 return (
-                                  <motion.div 
-                                    key={task.id} 
-                                    initial={{ opacity: 0, y: 20 }} 
+                                  <motion.div
+                                    key={task.id}
+                                    initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: idx * 0.03 }}
                                     className="backdrop-blur-xl bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-4 sm:p-5 transition-all"
                                   >
                                     <div className="flex items-start gap-3 sm:gap-4">
-                                      <button 
-                                        onClick={() => handleQuickStatusToggle(task)} 
-                                        disabled={!canEdit} 
-                                        className={`mt-0.5 sm:mt-0 ${!canEdit ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                                      <button
+                                        onClick={() => handleQuickStatusToggle(task)}
+                                        disabled={!canEdit}
+                                        className={`mt-0.5 sm:mt-0 ${!canEdit ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
                                       >
-                                        <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border-2 flex items-center justify-center transition-all ${task.status === "done" ? "bg-primary border-primary" : "border-white/30 hover:border-primary"} ${!canEdit ? 'pointer-events-none' : ''}`}>
+                                        <div
+                                          className={`w-5 h-5 sm:w-6 sm:h-6 rounded border-2 flex items-center justify-center transition-all ${
+                                            task.status === "done" ? "bg-primary border-primary" : "border-white/30 hover:border-primary"
+                                          } ${!canEdit ? "pointer-events-none" : ""}`}
+                                        >
                                           {task.status === "done" && <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-background" />}
                                         </div>
                                       </button>
 
                                       <div className="flex-1 min-w-0">
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                                          <h4 className={`font-semibold text-sm sm:text-base md:text-lg break-words ${task.status === "done" ? "line-through opacity-60" : ""}`}>
+                                          <h4
+                                            className={`font-semibold text-sm sm:text-base md:text-lg break-words ${
+                                              task.status === "done" ? "line-through opacity-60" : ""
+                                            }`}
+                                          >
                                             {task.title}
                                           </h4>
-                                          <span className={`px-2 py-1 rounded-lg text-xs font-semibold backdrop-blur-xl border ${priority.color} flex items-center gap-1 w-fit`}>
+                                          <span
+                                            className={`px-2 py-1 rounded-lg text-xs font-semibold backdrop-blur-xl border ${priority.color} flex items-center gap-1 w-fit`}
+                                          >
                                             <PriorityIcon className="w-3 h-3" />
                                             {priority.label}
                                           </span>
                                         </div>
 
-                                        {task.description && <p className="text-xs sm:text-sm text-muted-foreground mb-3">{task.description}</p>}
+                                        {task.description && (
+                                          <p className="text-xs sm:text-sm text-muted-foreground mb-3">{task.description}</p>
+                                        )}
 
                                         <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
-                                          {task.assigned_user && (
+                                          {task.assigned_worker && (
                                             <div className="flex items-center gap-1.5">
                                               <User className="w-3.5 h-3.5" />
-                                              <span>{task.assigned_user.full_name}</span>
+                                              <span>{task.assigned_worker.full_name}</span>
                                             </div>
                                           )}
                                           {task.start_date && (
@@ -731,12 +693,11 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
                                             <div className={`flex items-center gap-1.5 font-semibold ${daysColor}`}>
                                               <Clock className="w-3.5 h-3.5" />
                                               <span>
-                                                {daysRemaining < 0 
+                                                {daysRemaining < 0
                                                   ? `Overdue by ${Math.abs(daysRemaining)} days`
-                                                  : daysRemaining === 0 
+                                                  : daysRemaining === 0
                                                   ? "Due today"
-                                                  : `${daysRemaining} days left`
-                                                }
+                                                  : `${daysRemaining} days left`}
                                               </span>
                                             </div>
                                           )}
@@ -749,18 +710,18 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
 
                                       {canEdit && (
                                         <div className="flex gap-2 flex-shrink-0">
-                                          <motion.button 
-                                            whileHover={{ scale: 1.1 }} 
-                                            whileTap={{ scale: 0.9 }} 
+                                          <motion.button
+                                            whileHover={{ scale: 1.1 }}
+                                            whileTap={{ scale: 0.9 }}
                                             onClick={() => startEdit(task, milestone.id)}
                                             className="p-2 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all"
                                           >
                                             <Edit2 className="w-4 h-4" />
                                           </motion.button>
-                                          <motion.button 
-                                            whileHover={{ scale: 1.1 }} 
-                                            whileTap={{ scale: 0.9 }} 
-                                            onClick={() => handleDelete(milestone.id, task.id)}
+                                          <motion.button
+                                            whileHover={{ scale: 1.1 }}
+                                            whileTap={{ scale: 0.9 }}
+                                            onClick={() => setConfirmDelete({ milestoneId: milestone.id, taskId: task.id })}
                                             className="p-2 backdrop-blur-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg transition-all text-red-400"
                                           >
                                             <Trash2 className="w-4 h-4" />
@@ -846,7 +807,7 @@ export default function TasksTab({ projectId, tasks, milestones, teamMembers, ca
         </AnimatePresence>
       </div>
 
-      {/* Floating Toasts - Windows 11 Style */}
+      {/* Floating Toasts */}
       <div className="fixed bottom-6 right-6 z-[9999] space-y-3 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
