@@ -114,6 +114,7 @@ interface WorkersTabProps {
   onUpdate?: () => void;
 }
 
+// type TabType = 'attendance' | 'workers' | 'assignments';
 type TabType = 'attendance' | 'workers' | 'assignments' | 'performance';
 
 // Toast Notification Component
@@ -873,7 +874,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           <StatCard icon={Users} title="Total Workers" value={stats.total_workers} color="text-primary" />
           <StatCard icon={UserCheck} title="Present Today" value={stats.present_today} color="text-green-600" />
           <StatCard icon={UserX} title="Absent Today" value={stats.absent_today} color="text-red-600" />
-          <StatCard icon={TrendingUp} title="Performance" value={`${stats.avg_performance}%`} color="text-blue-600" />
+          {/* <StatCard icon={TrendingUp} title="Performance" value={`${stats.avg_performance}%`} color="text-blue-600" /> */}
         </div>
 
         {/* Tab Navigation */}
@@ -883,7 +884,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
               { id: 'workers' as TabType, label: 'Workers List', icon: Users },
               { id: 'attendance' as TabType, label: 'Daily Attendance', icon: Clock },
               { id: 'assignments' as TabType, label: 'Task Assignments', icon: CheckCircle },
-              { id: 'performance' as TabType, label: 'Performance', icon: TrendingUp },
+              // { id: 'performance' as TabType, label: 'Performance', icon: TrendingUp },
             ].map((tab) => {
               const Icon = tab.icon;
               return (

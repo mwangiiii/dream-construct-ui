@@ -230,6 +230,9 @@ export default function TasksTab({ projectId, tasks, milestones, workers, canEdi
   };
 
   const handleCreateTask = async () => {
+  console.log("Form state right before send:", createForm);
+  console.log("Assigned_to raw value:", createForm.assigned_to);
+  console.log("Assigned_to after || null:", createForm.assigned_to || null);
     if (!createForm.title.trim()) return showToast("Task title is required", "warning");
     if (!createForm.milestone_id) return showToast("Please select a milestone", "warning");
 

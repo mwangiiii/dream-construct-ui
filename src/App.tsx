@@ -60,7 +60,7 @@ import ProjectManagerDashboard from "./pages/project_manager/dashboard";
 import PMStages from "./pages/project_manager/stages";
 import PMWorkers from "./pages/project_manager/workers";
 import PMDailyProgress from "./pages/project_manager/daily-progress";
-import PMInspections from "./pages/project_manager/inspections";
+// import PMInspections from "./pages/project_manager/InspectionsTab.tsx";
 import PMMaterials from "./pages/project_manager/materials";
 import PMFinancials from "./pages/project_manager/financials";
 import PMIssues from "./pages/project_manager/issues";
@@ -603,7 +603,7 @@ const App = () => {
                 </ProtectedRoute>
               }
             />
-            <Route
+            {/* <Route
               path="/project_manager/inspections"
               element={
                 <ProtectedRoute requiredRoles={["project_manager"]}>
@@ -612,7 +612,7 @@ const App = () => {
                   </ProjectManagerLayout>
                 </ProtectedRoute>
               }
-            />
+            /> */}
             <Route
               path="/project_manager/materials"
               element={

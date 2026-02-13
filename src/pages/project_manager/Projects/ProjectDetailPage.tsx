@@ -41,8 +41,8 @@ import {
   Award,
 } from "lucide-react";
 import DailyProgress from "@/components/projects/tabs/DailyProgress";
-import Inspections from "@/components/projects/tabs/inpections";
-import MaterialTracking from "@/components/projects/tabs/MaterialTracking";
+import InspectionsTab from "@/components/projects/tabs/InspectionsTab";
+import MaterialTrackingTab from "@/components/projects/tabs/MaterialTracking";
 import ProblemsAndIssues from "@/components/projects/tabs/ProblemsandIssues";
 import Financials from "@/components/projects/tabs/financials";
 import Stages from "@/components/projects/tabs/Stages";
@@ -150,6 +150,13 @@ interface Document {
   milestone_id: string | null;
   task_id: string | null;
   uploaded_by_user?: { full_name: string } | null;
+}
+
+interface Worker {
+  id: string;
+  full_name: string;
+  role: string;
+  status: string;
 }
 
 interface TeamMember {
@@ -379,7 +386,6 @@ export default function ProjectDetailPage() {
         tasks: tasksEnriched,
         approvals: approvalsEnriched,
         documents: documentsEnriched,
-        // team: formattedTeam, // removed, not needed
       });
 
       // Photos: Try edge function, fallback to direct
@@ -593,15 +599,14 @@ export default function ProjectDetailPage() {
     { id: "milestones", label: "Milestones", icon: Calendar },
     { id: "tasks", label: "Tasks", icon: CheckCircle2 },
     { id: "workers", label: "Workers", icon: Users },
+    { id: "material-tracking", label: "Material Tracking", icon: Package },
+    { id: "daily-logs", label: "Daily Progress", icon: BarChart3 },
     { id: "updates", label: "Updates", icon: MessageSquare },
     { id: "photos", label: "Site Photos", icon: Camera },
-    { id: "documents", label: "Documents", icon: FileText },
-    
-    { id: "financials", label: "Financials", icon: DollarSign },
-    { id: "daily-logs", label: "Daily Progress", icon: BarChart3 },
-    { id: "stages", label: "Stages", icon: Layers },
     { id: "inspections", label: "Inspections", icon: ClipboardList },
-    { id: "material-tracking", label: "Material Tracking", icon: Package },
+    { id: "documents", label: "Documents", icon: FileText },
+    { id: "financials", label: "Financials", icon: DollarSign },
+    { id: "stages", label: "Stages", icon: Layers },
     { id: "problems-issues", label: "Problems & Issues", icon: AlertTriangle },
   ];
 
@@ -738,7 +743,6 @@ export default function ProjectDetailPage() {
               <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-
             {activeTab === "tasks" && (
               <TasksTab
                 projectId={id!}
@@ -750,7 +754,7 @@ export default function ProjectDetailPage() {
               />
             )}
 
-             {activeTab === "workers" && (
+            {activeTab === "workers" && (
               <WorkersTab
                 projectId={id!}
                 canEdit={canEdit}
@@ -784,14 +788,6 @@ export default function ProjectDetailPage() {
               <DocumentsTab projectId={id!} documents={documents} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
-            {/* {activeTab === "workers" && (
-              <WorkersTab
-                projectId={id!}
-                canEdit={canEdit}
-                onUpdate={fetchProjectAndData}
-              />
-            )} */}
-
             {activeTab === "daily-logs" && (
               <DailyProgress projectId={id!} />
             )}
@@ -801,11 +797,21 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "inspections" && (
-              <Inspections projectId={id!} />
+              <InspectionsTab 
+                projectId={id!}
+                milestones={milestones}
+                canEdit={canEdit}
+                onUpdate={fetchProjectAndData}
+              />
             )}
 
             {activeTab === "material-tracking" && (
-              <MaterialTracking projectId={id!} />
+              <MaterialTrackingTab 
+                projectId={id!}
+                milestones={milestones}
+                canEdit={canEdit}
+                onUpdate={fetchProjectAndData}
+              />
             )}
 
             {activeTab === "problems-issues" && (
