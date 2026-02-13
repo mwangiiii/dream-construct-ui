@@ -30,6 +30,8 @@ type Financial = {
   id: number;
   project_id: string;
   milestone_id: string;
+  category: string;
+  stage: string;
   
   // Column 1-2: Materials (Quantity Surveyor only)
   material_name: string;
@@ -75,6 +77,8 @@ type Financial = {
   tender_company?: {
     id: string;
     name: string;
+    contact_email: string;
+    contact_phone: string;
   };
 };
 
@@ -90,6 +94,13 @@ type CompanyPrice = {
   company_id: string;
   company_name: string;
   price_per_unit: number;
+};
+
+type EmailModalData = {
+  type: 'order_request' | 'order_approval' | 'funds_request' | 'funds_sent' | 'funds_received' | 'goods_paid';
+  financial: Financial;
+  milestoneId: string;
+  itemIdx: number;
 };
 
 const materialUnits = ["kg", "tonnes", "pieces", "meters", "liters", "bags", "boxes", "units", "m²", "m³"];
@@ -117,13 +128,22 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const [editIdx, setEditIdx] = useState(-1);
   const [editId, setEditId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  // Confirmation modal state
   const [confirmDelete, setConfirmDelete] = useState<{ milestoneId: string; idx: number } | null>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState<string>("");
   const [companyPrices, setCompanyPrices] = useState<CompanyPrice[]>([]);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  
+  // Email Modal States
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailModalData, setEmailModalData] = useState<EmailModalData | null>(null);
+  const [emailForm, setEmailForm] = useState({
+    to: "",
+    subject: "",
+    body: ""
+  });
+  const [sendingEmail, setSendingEmail] = useState(false);
   
   // Tender Company CRUD states
   const [showCompanyModal, setShowCompanyModal] = useState(false);
@@ -166,7 +186,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     
     if (!error && data) {
       setMilestones(data);
-      // Auto-expand first 3 milestones
       const firstThree = new Set(data.slice(0, 3).map(m => m.id));
       setExpandedMilestones(firstThree);
     }
@@ -179,13 +198,12 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .from("project_financials")
       .select(`
         *,
-        tender_company:tender_companies(id, name)
+        tender_company:tender_companies(id, name, contact_email, contact_phone)
       `)
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
     
     if (!error && data) {
-      // Group by milestone_id
       const grouped = data.reduce((acc, item) => {
         const milestoneId = item.milestone_id || "unassigned";
         if (!acc[milestoneId]) {
@@ -239,7 +257,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     resetForm();
     setForm(prev => ({ ...prev, milestone_id: milestoneId }));
     setShowFormForMilestone(milestoneId);
-    // Auto-expand the milestone
     setExpandedMilestones(prev => new Set([...prev, milestoneId]));
   };
 
@@ -277,11 +294,8 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         {
           project_id: projectId,
           milestone_id: form.milestone_id,
-          
-          // Add these required fields
-          category: 'Materials',           // NEW
-          stage: 'Procurement',            // NEW
-          
+          category: 'Materials',
+          stage: 'Procurement',
           material_name: form.material_name,
           material_quantity: Number(form.material_quantity) || 0,
           material_unit: form.material_unit,
@@ -303,7 +317,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       ])
       .select(`
         *,
-        tender_company:tender_companies(id, name)
+        tender_company:tender_companies(id, name, contact_email, contact_phone)
       `);
     
     if (!error && data) {
@@ -367,11 +381,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .eq("id", editId)
       .select(`
         *,
-        tender_company:tender_companies(id, name)
+        tender_company:tender_companies(id, name, contact_email, contact_phone)
       `);
       
     if (!error && data) {
-      // Update local state
       const milestoneId = form.milestone_id;
       const items = financials[milestoneId] || [];
       const updated = [...items];
@@ -397,14 +410,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     const itemToDelete = items[idx];
     const id = itemToDelete.id;
     
-    console.log("Attempting to delete material with ID:", id);
-    console.log("Material details:", itemToDelete);
-    
     setLoading(true);
     
     try {
-      // Execute the delete operation without .select()
-      // This avoids RLS policy issues with reading deleted rows
       const { error } = await supabase
         .from("project_financials")
         .delete()
@@ -418,38 +426,28 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         return;
       }
       
-      console.log("Delete executed successfully");
-      
-      // Verify deletion by checking if record still exists
-      const { data: checkData, error: checkError } = await supabase
+      const { data: checkData } = await supabase
         .from("project_financials")
         .select("id")
         .eq("id", id)
         .maybeSingle();
       
       if (checkData) {
-        // Record still exists - deletion failed
-        console.error("Record still exists after delete attempt");
         alert("Failed to delete material. Please check your permissions or contact support.");
         setLoading(false);
         setConfirmDelete(null);
         return;
       }
       
-      console.log("Deletion confirmed - record no longer exists");
-      
-      // Successfully deleted - update local state
       setFinancials(prev => ({
         ...prev,
         [milestoneId]: items.filter((_, i) => i !== idx)
       }));
       
-      // Clear edit form if we're editing the deleted item
       if (editId === id) {
         resetForm();
       }
       
-      // Show success toast
       setSuccessMessage("Material deleted successfully!");
       setShowSuccessToast(true);
       setTimeout(() => setShowSuccessToast(false), 3000);
@@ -485,48 +483,299 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setShowFormForMilestone(null);
   };
 
-  const handleRequestOrder = async (milestoneId: string, idx: number) => {
-    if (!isFinanceTeam) {
-      alert("Only finance team can request orders");
-      return;
-    }
-
-    const items = financials[milestoneId] || [];
-    const item = items[idx];
+  // Email Template Generators
+  const generateEmailTemplate = (type: EmailModalData['type'], financial: Financial, milestoneName: string) => {
+    const company = financial.tender_company;
     
-    if (!item.tender_company_id) {
-      alert("Please select a tender company first");
+    const templates = {
+      order_request: {
+        subject: `Order Request - ${financial.material_name} for ${milestoneName}`,
+        body: `Dear ${company?.name || 'Supplier'},
+
+We would like to request an order for the following materials:
+
+ORDER DETAILS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Material: ${financial.material_name}
+Quantity: ${financial.material_quantity} ${financial.material_unit}
+Price per Unit: KSH ${financial.price_per_unit.toLocaleString()}
+Total Amount: KSH ${financial.total_price.toLocaleString()}
+
+DELIVERY INFORMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Expected Delivery Date: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}
+Delivery Option: ${financial.delivery_option}
+Delivery Cost: KSH ${financial.delivery_price.toLocaleString()}
+
+PROJECT INFORMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Milestone: ${milestoneName}
+${financial.remarks ? `Additional Notes: ${financial.remarks}` : ''}
+
+TOTAL ORDER VALUE: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}
+
+Please confirm receipt of this order request and provide an estimated delivery timeline.
+
+Best regards,
+Project Finance Team`
+      },
+      order_approval: {
+        subject: `Order ${financial.order_approved ? 'Approved' : 'Rejected'} - ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},
+
+This is to inform you that your order has been ${financial.order_approved ? 'APPROVED' : 'REJECTED'}.
+
+ORDER REFERENCE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Material: ${financial.material_name}
+Quantity: ${financial.material_quantity} ${financial.material_unit}
+Total Amount: KSH ${financial.total_price.toLocaleString()}
+Status: ${financial.order_approved ? '✓ APPROVED' : '✗ REJECTED'}
+
+${financial.order_approved ? 
+`Please proceed with the order preparation. We will initiate the payment process shortly.
+
+Expected Delivery: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}
+Delivery Method: ${financial.delivery_option}` : 
+`We regret to inform you that we cannot proceed with this order at this time.`}
+
+Best regards,
+Project Finance Team`
+      },
+      funds_request: {
+        subject: `Funds Request - ${financial.material_name} Payment`,
+        body: `Dear Finance Department,
+
+We are requesting funds for the following approved order:
+
+PAYMENT REQUEST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Supplier: ${company?.name || 'N/A'}
+Material: ${financial.material_name}
+Quantity: ${financial.material_quantity} ${financial.material_unit}
+Material Cost: KSH ${financial.total_price.toLocaleString()}
+Delivery Cost: KSH ${financial.delivery_price.toLocaleString()}
+
+TOTAL AMOUNT REQUESTED: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}
+
+PROJECT DETAILS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Milestone: ${milestoneName}
+Expected Delivery: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}
+
+Please approve and transfer the funds at your earliest convenience.
+
+Best regards,
+Project Team`
+      },
+      funds_sent: {
+        subject: `Payment Sent - ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},
+
+This is to confirm that payment has been sent for your order.
+
+PAYMENT CONFIRMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Material: ${financial.material_name}
+Quantity: ${financial.material_quantity} ${financial.material_unit}
+Amount Sent: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}
+Date Sent: ${financial.funds_sent_at ? new Date(financial.funds_sent_at).toLocaleDateString() : new Date().toLocaleDateString()}
+
+Please confirm receipt of payment and proceed with order preparation and delivery.
+
+Expected Delivery Date: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}
+Delivery Method: ${financial.delivery_option}
+
+Thank you for your service.
+
+Best regards,
+Project Finance Team`
+      },
+      funds_received: {
+        subject: `Payment Received Confirmation - ${financial.material_name}`,
+        body: `Dear Project Team,
+
+This is to confirm that we have received payment for the following order:
+
+PAYMENT RECEIVED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+From: ${company?.name || 'Supplier'}
+Material: ${financial.material_name}
+Quantity: ${financial.material_quantity} ${financial.material_unit}
+Amount: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}
+Date Received: ${financial.funds_received_at ? new Date(financial.funds_received_at).toLocaleDateString() : new Date().toLocaleDateString()}
+
+Order preparation will commence immediately.
+
+Best regards,
+${company?.name || 'Supplier'}`
+      },
+      goods_paid: {
+        subject: `Final Payment Confirmation - ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},
+
+This is to confirm that final payment has been processed for the delivered goods.
+
+FINAL PAYMENT DETAILS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Material: ${financial.material_name}
+Quantity Delivered: ${financial.material_quantity} ${financial.material_unit}
+Final Amount Paid: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}
+Payment Date: ${financial.goods_paid_at ? new Date(financial.goods_paid_at).toLocaleDateString() : new Date().toLocaleDateString()}
+
+Thank you for your excellent service. This transaction is now complete.
+
+We look forward to future business opportunities.
+
+Best regards,
+Project Finance Team`
+      }
+    };
+
+    return templates[type];
+  };
+
+  const openEmailModal = (type: EmailModalData['type'], milestoneId: string, idx: number) => {
+    const items = financials[milestoneId] || [];
+    const financial = items[idx];
+    
+    if (!financial.tender_company_id || !financial.tender_company?.contact_email) {
+      alert("No email address found for this company. Please update company details.");
       return;
     }
 
-    setLoading(true);
+    const milestone = milestones.find(m => m.id === milestoneId);
+    const template = generateEmailTemplate(type, financial, milestone?.title || 'Project');
+    
+    setEmailModalData({ type, financial, milestoneId, itemIdx: idx });
+    setEmailForm({
+      to: financial.tender_company.contact_email,
+      subject: template.subject,
+      body: template.body
+    });
+    setShowEmailModal(true);
+  };
+
+  const closeEmailModal = () => {
+    setShowEmailModal(false);
+    setEmailModalData(null);
+    setEmailForm({ to: "", subject: "", body: "" });
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setEmailForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const sendEmail = async () => {
+    if (!emailModalData) return;
+    
+    setSendingEmail(true);
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/request-order`, {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-financial-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({
-          financial_id: item.id,
+          financial_id: emailModalData.financial.id,
           project_id: projectId,
-          milestone_id: milestoneId
+          milestone_id: emailModalData.milestoneId,
+          email_type: emailModalData.type,
+          email_data: {
+            to: emailForm.to,
+            subject: emailForm.subject,
+            body: emailForm.body
+          }
         })
       });
 
       if (response.ok) {
-        await fetchFinancials();
-        alert("Order request sent successfully!");
+        // Update the record based on email type
+        await updateFinancialAfterEmail(emailModalData.type, emailModalData.milestoneId, emailModalData.itemIdx);
+        
+        setSuccessMessage("Email sent successfully!");
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 3000);
+        closeEmailModal();
+        await fetchFinancials(); // Refresh data
       } else {
         const error = await response.json();
-        alert("Error requesting order: " + error.message);
+        alert("Error sending email: " + (error.message || 'Unknown error'));
       }
     } catch (error: any) {
-      alert("Error requesting order: " + error.message);
+      console.error("Error sending email:", error);
+      alert("Error sending email: " + error.message);
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
+  const updateFinancialAfterEmail = async (type: EmailModalData['type'], milestoneId: string, idx: number) => {
+    const items = financials[milestoneId] || [];
+    const item = items[idx];
+    
+    let updateData: any = {};
+    
+    switch(type) {
+      case 'order_request':
+        updateData = {
+          order_requested: true,
+          order_requested_at: new Date().toISOString(),
+          order_requested_by: currentUser?.profile?.id
+        };
+        break;
+      case 'order_approval':
+        // Already handled by separate approval function
+        break;
+      case 'funds_request':
+        updateData = {
+          funds_requested: true,
+          funds_requested_at: new Date().toISOString(),
+          funds_requested_by: currentUser?.profile?.id
+        };
+        break;
+      case 'funds_sent':
+        updateData = {
+          funds_sent: true,
+          funds_sent_at: new Date().toISOString()
+        };
+        break;
+      case 'funds_received':
+        updateData = {
+          funds_received: true,
+          funds_received_at: new Date().toISOString()
+        };
+        break;
+      case 'goods_paid':
+        updateData = {
+          goods_paid: true,
+          goods_paid_at: new Date().toISOString(),
+          goods_paid_by: currentUser?.profile?.id
+        };
+        break;
     }
     
-    setLoading(false);
+    if (Object.keys(updateData).length > 0) {
+      const { data, error } = await supabase
+        .from("project_financials")
+        .update(updateData)
+        .eq("id", item.id)
+        .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
+
+      if (!error && data) {
+        const updated = [...items];
+        updated[idx] = data[0];
+        setFinancials(prev => ({
+          ...prev,
+          [milestoneId]: updated
+        }));
+      }
+    }
   };
 
   const handleToggleOrderApproval = async (milestoneId: string, idx: number, approved: boolean) => {
@@ -551,7 +800,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         order_approved_at: approved ? new Date().toISOString() : null
       })
       .eq("id", item.id)
-      .select(`*, tender_company:tender_companies(id, name)`);
+      .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
 
     if (!error && data) {
       const updated = [...items];
@@ -560,51 +809,12 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         ...prev,
         [milestoneId]: updated
       }));
-    }
-    setLoading(false);
-  };
-
-  const handleRequestFunds = async (milestoneId: string, idx: number) => {
-    if (!isFinanceTeam) {
-      alert("Only finance team can request funds");
-      return;
-    }
-
-    const items = financials[milestoneId] || [];
-    const item = items[idx];
-    
-    if (!item.order_approved) {
-      alert("Order must be approved before requesting funds");
-      return;
-    }
-
-    setLoading(true);
-    
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/request-funds`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
-        },
-        body: JSON.stringify({
-          financial_id: item.id,
-          project_id: projectId,
-          milestone_id: milestoneId
-        })
-      });
-
-      if (response.ok) {
-        await fetchFinancials();
-        alert("Funds request sent successfully!");
-      } else {
-        const error = await response.json();
-        alert("Error requesting funds: " + error.message);
+      
+      // Optionally open email modal to notify supplier
+      if (approved) {
+        openEmailModal('order_approval', milestoneId, idx);
       }
-    } catch (error: any) {
-      alert("Error requesting funds: " + error.message);
     }
-    
     setLoading(false);
   };
 
@@ -622,25 +832,30 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       return;
     }
 
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("project_financials")
-      .update({
-        funds_sent: sent,
-        funds_sent_at: sent ? new Date().toISOString() : null
-      })
-      .eq("id", item.id)
-      .select(`*, tender_company:tender_companies(id, name)`);
+    if (sent) {
+      // Open email modal before updating
+      openEmailModal('funds_sent', milestoneId, idx);
+    } else {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("project_financials")
+        .update({
+          funds_sent: sent,
+          funds_sent_at: sent ? new Date().toISOString() : null
+        })
+        .eq("id", item.id)
+        .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
 
-    if (!error && data) {
-      const updated = [...items];
-      updated[idx] = data[0];
-      setFinancials(prev => ({
-        ...prev,
-        [milestoneId]: updated
-      }));
+      if (!error && data) {
+        const updated = [...items];
+        updated[idx] = data[0];
+        setFinancials(prev => ({
+          ...prev,
+          [milestoneId]: updated
+        }));
+      }
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleToggleFundsReceived = async (milestoneId: string, idx: number, received: boolean) => {
@@ -652,25 +867,30 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       return;
     }
 
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("project_financials")
-      .update({
-        funds_received: received,
-        funds_received_at: received ? new Date().toISOString() : null
-      })
-      .eq("id", item.id)
-      .select(`*, tender_company:tender_companies(id, name)`);
+    if (received) {
+      // Open email modal before updating
+      openEmailModal('funds_received', milestoneId, idx);
+    } else {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("project_financials")
+        .update({
+          funds_received: received,
+          funds_received_at: received ? new Date().toISOString() : null
+        })
+        .eq("id", item.id)
+        .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
 
-    if (!error && data) {
-      const updated = [...items];
-      updated[idx] = data[0];
-      setFinancials(prev => ({
-        ...prev,
-        [milestoneId]: updated
-      }));
+      if (!error && data) {
+        const updated = [...items];
+        updated[idx] = data[0];
+        setFinancials(prev => ({
+          ...prev,
+          [milestoneId]: updated
+        }));
+      }
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleToggleGoodsPaid = async (milestoneId: string, idx: number, paid: boolean) => {
@@ -687,33 +907,37 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       return;
     }
 
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("project_financials")
-      .update({
-        goods_paid: paid,
-        goods_paid_at: paid ? new Date().toISOString() : null,
-        goods_paid_by: paid ? currentUser?.profile?.id : null
-      })
-      .eq("id", item.id)
-      .select(`*, tender_company:tender_companies(id, name)`);
+    if (paid) {
+      // Open email modal before updating
+      openEmailModal('goods_paid', milestoneId, idx);
+    } else {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("project_financials")
+        .update({
+          goods_paid: paid,
+          goods_paid_at: paid ? new Date().toISOString() : null,
+          goods_paid_by: paid ? currentUser?.profile?.id : null
+        })
+        .eq("id", item.id)
+        .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
 
-    if (!error && data) {
-      const updated = [...items];
-      updated[idx] = data[0];
-      setFinancials(prev => ({
-        ...prev,
-        [milestoneId]: updated
-      }));
+      if (!error && data) {
+        const updated = [...items];
+        updated[idx] = data[0];
+        setFinancials(prev => ({
+          ...prev,
+          [milestoneId]: updated
+        }));
+      }
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleViewPrices = async (materialName: string) => {
     setSelectedMaterial(materialName);
     setLoading(true);
     
-    // Mock prices - In production, fetch from materials_pricing table
     const mockPrices: CompanyPrice[] = tenderCompanies.map(company => ({
       company_id: company.id,
       company_name: company.name,
@@ -836,8 +1060,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     
     try {
-      // Use soft delete by setting is_active to false instead of hard delete
-      const { error, data } = await supabase
+      const { error } = await supabase
         .from("tender_companies")
         .update({ is_active: false })
         .eq("id", companyId)
@@ -851,7 +1074,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         return;
       }
 
-      // Remove from local state
       setTenderCompanies(prev => prev.filter(c => c.id !== companyId));
       setSuccessMessage("Company deleted successfully!");
       setShowSuccessToast(true);
@@ -863,13 +1085,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       setLoading(false);
       setConfirmDeleteCompany(null);
     }
-  };
-
-  const calculateMilestoneTotals = (milestoneId: string) => {
-    const items = financials[milestoneId] || [];
-    const materialsCost = items.reduce((sum, f) => sum + f.total_price, 0);
-    const deliveryCost = items.reduce((sum, f) => sum + f.delivery_price, 0);
-    return { materialsCost, deliveryCost, total: materialsCost + deliveryCost };
   };
 
   const calculateGrandTotals = () => {
@@ -897,13 +1112,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   };
 
   const grandTotals = calculateGrandTotals();
-
-  const summaryStats = [
-    { icon: Package, value: `KES ${grandTotals.totalMaterials.toLocaleString()}`, label: "Materials Cost" },
-    { icon: Truck, value: `KES ${grandTotals.totalDelivery.toLocaleString()}`, label: "Delivery Cost" },
-    { icon: DollarSign, value: `KES ${grandTotals.grandTotal.toLocaleString()}`, label: "Total Cost" },
-    { icon: CheckCircle, value: `${grandTotals.totalPaid} / ${grandTotals.totalItems}`, label: "Goods Paid" },
-  ];
 
   return (
     <AnimatePresence>
@@ -1225,14 +1433,15 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       KSH {item.delivery_price.toLocaleString()}
                                     </td>
                                     
+                                    {/* Column 9: Request Order */}
                                     <td className="py-3 px-3 text-center">
                                       {!item.order_requested ? (
-                                        isFinanceTeam && !isClient ? (
+                                        isFinanceTeam && !isClient && item.tender_company_id ? (
                                           <button
-                                            onClick={() => handleRequestOrder(milestone.id, idx)}
+                                            onClick={() => openEmailModal('order_request', milestone.id, idx)}
                                             disabled={loading}
                                             className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                            title="Request order"
+                                            title="Request order via email"
                                           >
                                             <Mail className="w-4 h-4" />
                                           </button>
@@ -1249,6 +1458,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
                                     
+                                    {/* Column 10: Order Approval */}
                                     <td className="py-3 px-3 text-center">
                                       {item.order_requested ? (
                                         isFinanceTeam && !isClient ? (
@@ -1292,14 +1502,15 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
                                     
+                                    {/* Column 11: Request Funds */}
                                     <td className="py-3 px-3 text-center">
                                       {item.order_approved === true && !item.funds_requested ? (
                                         isFinanceTeam && !isClient ? (
                                           <button
-                                            onClick={() => handleRequestFunds(milestone.id, idx)}
+                                            onClick={() => openEmailModal('funds_request', milestone.id, idx)}
                                             disabled={loading}
                                             className="bg-purple-500 text-white p-2 rounded-lg hover:bg-purple-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                            title="Request funds"
+                                            title="Request funds via email"
                                           >
                                             <Mail className="w-4 h-4" />
                                           </button>
@@ -1313,19 +1524,20 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
                                     
+                                    {/* Column 12: Funds Sent */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_requested ? (
                                         isFinanceTeam && !isClient ? (
                                           <button
                                             onClick={() => handleToggleFundsSent(milestone.id, idx, !item.funds_sent)}
-                                            disabled={loading}
+                                            disabled={loading || item.funds_sent}
                                             className={cn(
                                               "p-1.5 rounded transition",
                                               item.funds_sent 
                                                 ? "bg-green-500 text-white" 
                                                 : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                                             )}
-                                            title={item.funds_sent ? "Funds sent" : "Mark as sent"}
+                                            title={item.funds_sent ? "Funds sent" : "Mark as sent (will send email)"}
                                           >
                                             <Check className="w-4 h-4" />
                                           </button>
@@ -1339,6 +1551,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
                                     
+                                    {/* Column 13: Funds Received */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_sent ? (
                                         !isClient ? (
@@ -1352,22 +1565,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                                   ? "bg-green-500 text-white" 
                                                   : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                                               )}
-                                              title="Confirm receipt"
+                                              title="Confirm receipt (will send email)"
                                             >
                                               <Check className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleToggleFundsReceived(milestone.id, idx, false)}
-                                              disabled={loading || !item.funds_received}
-                                              className={cn(
-                                                "p-1.5 rounded transition",
-                                                !item.funds_received && item.funds_sent
-                                                  ? "bg-white/5 hover:bg-red-500/20" 
-                                                  : "bg-white/5 opacity-50 cursor-not-allowed"
-                                              )}
-                                              title="Not received"
-                                            >
-                                              <X className="w-4 h-4" />
                                             </button>
                                           </div>
                                         ) : (
@@ -1380,6 +1580,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
                                     
+                                    {/* Column 14: Goods Paid */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_received ? (
                                         isFinanceTeam && !isClient ? (
@@ -1393,20 +1594,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                                   ? "bg-green-500 text-white" 
                                                   : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                                               )}
-                                              title="Mark as paid"
+                                              title="Mark as paid (will send email)"
                                             >
                                               <Check className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleToggleGoodsPaid(milestone.id, idx, false)}
-                                              disabled={loading || !item.goods_paid}
-                                              className={cn(
-                                                "p-1.5 rounded transition",
-                                                "bg-white/5 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                              )}
-                                              title="Mark as unpaid"
-                                            >
-                                              <X className="w-4 h-4" />
                                             </button>
                                           </div>
                                         ) : (
@@ -1456,6 +1646,122 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
               </div>
             );
           })}
+
+          {/* Email Modal */}
+          <AnimatePresence>
+            {showEmailModal && emailModalData && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={closeEmailModal}
+              >
+                <motion.div
+                  initial={{ scale: 0.9 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0.9 }}
+                  className="bg-background border border-white/20 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex justify-between items-center mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-bold">Compose Email</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {emailModalData.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={closeEmailModal} 
+                      className="p-2 hover:bg-white/10 rounded-lg transition"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        To
+                      </label>
+                      <input
+                        name="to"
+                        type="email"
+                        value={emailForm.to}
+                        onChange={handleEmailChange}
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
+                        required
+                        disabled={sendingEmail}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Subject
+                      </label>
+                      <input
+                        name="subject"
+                        type="text"
+                        value={emailForm.subject}
+                        onChange={handleEmailChange}
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
+                        required
+                        disabled={sendingEmail}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                        Message
+                      </label>
+                      <textarea
+                        name="body"
+                        value={emailForm.body}
+                        onChange={handleEmailChange}
+                        rows={16}
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground resize-none font-mono"
+                        required
+                        disabled={sendingEmail}
+                      />
+                    </div>
+
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={sendEmail}
+                        className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                        disabled={sendingEmail}
+                      >
+                        {sendingEmail ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin"></div>
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-5 h-5" />
+                            Send Email
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={closeEmailModal}
+                        className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2"
+                        disabled={sendingEmail}
+                      >
+                        <X className="w-5 h-5" />
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Price Comparison Modal */}
           <AnimatePresence>
@@ -1582,7 +1888,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* Company Management Modal - Full Screen */}
+          {/* Company Management Modal */}
           <AnimatePresence>
             {showCompanyModal && (
               <motion.div
@@ -1599,7 +1905,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                   className="bg-background border border-white/20 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* Header */}
                   <div className="flex justify-between items-center p-6 border-b border-white/10">
                     <div>
                       <h2 className="text-2xl font-bold flex items-center gap-3">
@@ -1628,7 +1933,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                     </div>
                   </div>
 
-                  {/* Companies List */}
                   <div className="flex-1 overflow-y-auto p-6">
                     {tenderCompanies.length === 0 ? (
                       <div className="text-center py-16 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl">
@@ -1699,7 +2003,6 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                     )}
                   </div>
 
-                  {/* Footer */}
                   <div className="p-4 border-t border-white/10 bg-background/60">
                     <p className="text-sm text-muted-foreground text-center">
                       Total: <span className="font-semibold text-foreground">{tenderCompanies.length}</span> {tenderCompanies.length === 1 ? 'company' : 'companies'}
@@ -1759,7 +2062,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
 
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">
-                        Contact Email
+                        Contact Email *
                       </label>
                       <input
                         name="contact_email"
@@ -1768,6 +2071,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                         onChange={handleCompanyChange}
                         placeholder="contact@company.com"
                         className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
+                        required
                         disabled={loading}
                       />
                     </div>
