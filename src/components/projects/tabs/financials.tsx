@@ -675,7 +675,39 @@ Project Finance Team`
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-financial-email`, {
+      // Get Supabase URL - try multiple methods for compatibility
+      const getSupabaseUrl = () => {
+        // Method 1: From supabase client (most reliable)
+        if (supabase && (supabase as any).supabaseUrl) {
+          return (supabase as any).supabaseUrl;
+        }
+        
+        // Method 2: From window location (if your supabase client uses window)
+        if (typeof window !== 'undefined' && (window as any).SUPABASE_URL) {
+          return (window as any).SUPABASE_URL;
+        }
+        
+        // Method 3: Check common env variable names
+        const envUrl = 
+          (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
+          (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL) ||
+          (typeof process !== 'undefined' && process.env?.REACT_APP_SUPABASE_URL);
+        
+        if (envUrl) return envUrl;
+        
+        // Method 4: Extract from current auth session (fallback)
+        // This won't work for edge functions but shows the pattern
+        console.error('Could not determine Supabase URL. Please set SUPABASE_URL in your environment.');
+        return null;
+      };
+      
+      const supabaseUrl = getSupabaseUrl();
+      
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured. Please check your environment variables.');
+      }
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/send-financial-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
