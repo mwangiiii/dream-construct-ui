@@ -1,4 +1,23 @@
+import WorkInProgressPage from "./pages/finance/Work_in_progress";
+import ChangeOrdersTrackingPage from "./pages/finance/Change_orders_tracking";
+import InventoryPage from "./pages/finance/Inventory";
+import EndMonthCloseChecklistPage from "./pages/finance/End_month_close_checklist";
+import BankReconciliationPage from "./pages/finance/BankReconciliationPage.tsx";
+import FixedAssetEquipmentDepreciationPage from "./pages/finance/Fixed_Asset_Equipment_Depreciation";
+import BalanceSheetPage from "./pages/finance/BalanceSheetPage.tsx";
+import StatementOfAccountPage from "./pages/finance/Statement_of_Account";
+import IncomeStatementPage from "./pages/finance/Income_Statement";
+import TaxesPage from "./pages/finance/Taxes";
+import LoansPage from "./pages/finance/Loans";
+import AccountsPayablePage from "./pages/finance/AccountsPayablePage.tsx";
+import AccountsReceivedPage from "./pages/finance/AccountsReceivablePage.tsx";
+import CashFlowPage from "./pages/finance/CashFlowPage.tsx";
+import ChartOfAccountsPage from "./pages/finance/chart_of_accounts_page";
+import JobPostingPage from "./pages/finance/JobPosting";
+import PayrollChecklistPage from "./pages/finance/Payroll_checkList";
 import MediaGalleryPage from "./pages/MediaGalleryPage";
+import FinanceDashboardPage from "./pages/finance/FinanceDashboardPage";
+
 // src/App.tsx
 import { useEffect, useState, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
@@ -16,11 +35,12 @@ import MainLayout from "./components/layout/MainLayout";
 import AdminLayout from "./components/layout/AdminLayout";
 import ClientLayout from "./components/layout/ClientLayout";
 import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
+import FinanceLayout from "./components/layout/FinanceLayout";
 import AdminSettingsPage from "./pages/admin/settings";
 import ClientSettingsPage from "./pages/client/settings";
 import MediaManagement from "./pages/admin/mediaManagement";
 import ProjectManagerProjectManagement from "./pages/project_manager/Projects/ProjectDetailPage.tsx";
-
+import FinanceDetailPage from "./pages/FinanceDetailPage.tsx";
 
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -72,7 +92,7 @@ const queryClient = new QueryClient();
 // Content Management Layout Component with Tabs
 const ContentManagement = () => {
   const location = useLocation();
-  
+
   const tabs = [
     { name: "Overview", path: "/admin/content" },
     { name: "Reviews", path: "/admin/content/reviews" },
@@ -158,28 +178,27 @@ const ContentOverview = () => (
   </div>
 );
 
-// Media Library Tabs: Library & Create Media
 import { useNavigate } from "react-router-dom";
 
 // Media Library Tabs: Library & Create Media
 const MediaLibraryTabs = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   const tabs = [
     { name: "Library", path: "/admin/content/media" },
     { name: "Create Media", path: "/admin/content/media/create" },
   ];
-  
+
   const isCreatePage = location.pathname === "/admin/content/media/create";
-  
+
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-3xl font-bold">Media Library</h2>
         <p className="text-muted-foreground mt-2">Manage and upload advertisements, images, and videos</p>
       </div>
-      
+
       <div className="border-b border-border mb-6">
         <nav className="flex space-x-8">
           {tabs.map((tab) => {
@@ -200,8 +219,7 @@ const MediaLibraryTabs = () => {
           })}
         </nav>
       </div>
-      
-      {/* Fixed: comment moved above the JSX */}
+
       {isCreatePage ? (
         <MediaCreate />
       ) : (
@@ -220,9 +238,7 @@ const PagesContent = () => (
   </div>
 );
 
-// ... (ProtectedRoute and rest of your code unchanged)
-
-const ProtectedRoute: React.FC<{ 
+const ProtectedRoute: React.FC<{
   children: React.ReactNode;
   requiredRoles?: string[];
 }> = ({ children, requiredRoles }) => {
@@ -237,7 +253,7 @@ const ProtectedRoute: React.FC<{
   const checkAuthorization = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (!session) {
         setIsAuthorized(false);
         setLoading(false);
@@ -251,14 +267,14 @@ const ProtectedRoute: React.FC<{
       }
 
       const user = await getCurrentUser();
-      
+
       if (!user) {
         setIsAuthorized(false);
         setLoading(false);
         return;
       }
 
-      const hasRequiredRole = user.roles.some(role => 
+      const hasRequiredRole = user.roles.some(role =>
         requiredRoles.includes(role.role_name)
       );
 
@@ -362,6 +378,27 @@ const App = () => {
 
         <BrowserRouter>
           <Routes>
+            {/* === FINANCE ROUTES === */}
+            <Route path="/finance/dashboard" element={<FinanceLayout><FinanceDashboardPage /></FinanceLayout>} />
+
+            <Route path="/finance/work-in-progress" element={<FinanceLayout><WorkInProgressPage /></FinanceLayout>} />
+            <Route path="/finance/change-orders-tracking" element={<FinanceLayout><ChangeOrdersTrackingPage /></FinanceLayout>} />
+            <Route path="/finance/inventory" element={<FinanceLayout><InventoryPage /></FinanceLayout>} />
+            <Route path="/finance/end-month-close-checklist" element={<FinanceLayout><EndMonthCloseChecklistPage /></FinanceLayout>} />
+            <Route path="/finance/bank-reconciliation" element={<FinanceLayout><BankReconciliationPage /></FinanceLayout>} />
+            <Route path="/finance/fixed-asset-equipment-depreciation" element={<FinanceLayout><FixedAssetEquipmentDepreciationPage /></FinanceLayout>} />
+            <Route path="/finance/balance-sheet" element={<FinanceLayout><BalanceSheetPage /></FinanceLayout>} />
+            <Route path="/finance/statement-of-account" element={<FinanceLayout><StatementOfAccountPage /></FinanceLayout>} />
+            <Route path="/finance/income-statement" element={<FinanceLayout><IncomeStatementPage /></FinanceLayout>} />
+            <Route path="/finance/taxes" element={<FinanceLayout><TaxesPage /></FinanceLayout>} />
+            <Route path="/finance/loans" element={<FinanceLayout><LoansPage /></FinanceLayout>} />
+            <Route path="/finance/accounts-payable" element={<FinanceLayout><AccountsPayablePage /></FinanceLayout>} />
+            <Route path="/finance/accounts-received" element={<FinanceLayout><AccountsReceivedPage /></FinanceLayout>} />
+            <Route path="/finance/cash-flow" element={<FinanceLayout><CashFlowPage /></FinanceLayout>} />
+            <Route path="/finance/chart-of-accounts" element={<FinanceLayout><ChartOfAccountsPage /></FinanceLayout>} />
+            <Route path="/finance/job-posting" element={<FinanceLayout><JobPostingPage /></FinanceLayout>} />
+            <Route path="/finance/payroll-checklist" element={<FinanceLayout><PayrollChecklistPage /></FinanceLayout>} />
+
             {/* === PUBLIC ROUTES === */}
             <Route path="/" element={<MainLayout><Index /></MainLayout>} />
             <Route path="/services" element={<MainLayout><Services /></MainLayout>} />
@@ -371,7 +408,7 @@ const App = () => {
             <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
             <Route path="/media" element={<MainLayout><MediaGalleryPage /></MainLayout>} />
 
-            {/* === PASSWORD RESET ROUTE === */}
+            {/* === PASSWORD RESET ROUTES === */}
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
 
@@ -389,7 +426,7 @@ const App = () => {
               }
             />
 
-            {/* USER MANAGEMENT — Full List + Edit + Delete */}
+            {/* USER MANAGEMENT */}
             <Route
               path="/admin/users"
               element={
@@ -397,10 +434,7 @@ const App = () => {
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">
-                        <div>
-                          {/* <h1 className="text-4xl font-bold">Users Management</h1> */}
-                          {/* <p className="text-muted-foreground mt-2">Manage users, roles, and permissions</p> */}
-                        </div>
+                        <div></div>
                         <Link to="/admin/users/create">
                           <Button className="bg-primary hover:bg-primary/90">
                             <UserPlus className="w-4 h-4 mr-2" />
@@ -415,7 +449,6 @@ const App = () => {
               }
             />
 
-            {/* USER CREATION — Dedicated create form */}
             <Route
               path="/admin/users/create"
               element={
@@ -426,7 +459,6 @@ const App = () => {
             />
 
             {/* === PROJECT MANAGEMENT ROUTES === */}
-            
             <Route
               path="/admin/projects"
               element={
@@ -450,7 +482,6 @@ const App = () => {
             />
 
             {/* === CLIENT ROUTES === */}
-            
             <Route
               path="/client/dashboard"
               element={
@@ -462,7 +493,7 @@ const App = () => {
               }
             />
 
-            <Route 
+            <Route
               path="/client/projects"
               element={
                 <ProtectedRoute requiredRoles={["client"]}>
@@ -511,7 +542,7 @@ const App = () => {
               <Route path="pages" element={<PagesContent />} />
             </Route>
 
-            {/* MEDIA LIBRARY ROUTES - Separate from nested content routes */}
+            {/* MEDIA LIBRARY ROUTES */}
             <Route
               path="/admin/content/media"
               element={
@@ -664,15 +695,12 @@ const App = () => {
               }
             />
 
-
             <Route
               path="/project_manager/projects"
               element={
-                // <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMsProjectDetailPage />
-                  </ProjectManagerLayout>
-                // </ProtectedRoute>
+                <ProjectManagerLayout>
+                  <PMsProjectDetailPage />
+                </ProjectManagerLayout>
               }
             />
 
@@ -687,6 +715,14 @@ const App = () => {
               }
             />
 
+            <Route
+              path="/finance/"
+              element={
+                <ProjectManagerLayout>
+                  <FinanceDetailPage />
+                </ProjectManagerLayout>
+              }
+            />
 
             {/* === 404 === */}
             <Route path="*" element={<NotFound />} />
