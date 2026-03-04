@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -7,232 +6,204 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-
 interface Project {
-  id:                       string;
-  project_number:           string;
-  title:                    string;
-  description:              string | null;
-  status:                   string | null;
-  progress_percent:         number | null;
-  budget_numeric:           number | null;
-  currency:                 string | null;
-  site_address:             string | null;
-  site_city:                string | null;
-  site_country:             string | null;
-  start_date:               string | null;
+  id: string;
+  project_number: string;
+  title: string;
+  description: string | null;
+  status: string | null;
+  progress_percent: number | null;
+  budget_numeric: number | null;
+  currency: string | null;
+  site_address: string | null;
+  site_city: string | null;
+  site_country: string | null;
+  start_date: string | null;
   expected_completion_date: string | null;
-  created_at:               string;
+  created_at: string;
 }
-
-type LoanType        = "Term Loan" | "Asset Finance" | "Overdraft" | "Revolving Credit" | "Mortgage" | "Invoice Discounting" | "Other";
-type InterestType    = "Fixed" | "Variable" | "CBR-Linked";
-type RepayFrequency  = "Monthly" | "Quarterly" | "Semi-Annual" | "Annual" | "Bullet";
-type PaymentStatus   = "Paid" | "Partially Paid" | "Due" | "Overdue" | "Waived";
+type LoanType = "Term Loan" | "Asset Finance" | "Overdraft" | "Revolving Credit" | "Mortgage" | "Invoice Discounting" | "Other";
+type InterestType = "Fixed" | "Variable" | "CBR-Linked";
+type RepayFrequency = "Monthly" | "Quarterly" | "Semi-Annual" | "Annual" | "Bullet";
+type PaymentStatus = "Paid" | "Partially Paid" | "Due" | "Overdue" | "Waived";
 type WithholdingApplicable = "Yes" | "No";
-
 interface Loan {
-  id:                         number;
-  project_id:                 string;
+  id: number;
+  project_id: string;
   // Facility details
-  facility_ref:               string;
-  lender_name:                string;
-  loan_type:                  LoanType;
-  purpose:                    string;
-  loan_start_date:            string;
-  tenure_months:              number;
-  repayment_frequency:        RepayFrequency;
+  facility_ref: string;
+  lender_name: string;
+  loan_type: LoanType;
+  purpose: string;
+  loan_start_date: string;
+  tenure_months: number;
+  repayment_frequency: RepayFrequency;
   // Principal & Rate
-  principal_approved_kes:     number;
-  interest_rate_pa:           number;         // % p.a.
-  interest_type:              InterestType;
+  principal_approved_kes: number;
+  interest_rate_pa: number; // % p.a.
+  interest_type: InterestType;
   // Period schedule
-  opening_balance:            number;
-  installment_due:            number;
-  principal_portion:          number;
-  interest_portion:           number;
+  opening_balance: number;
+  installment_due: number;
+  principal_portion: number;
+  interest_portion: number;
   // Kenyan tax fields
   withholding_tax_applicable: WithholdingApplicable; // KRA WHT on interest: 15% residents / 15% NR banks
-  withholding_tax_rate:       number;                // e.g. 15
-  withholding_tax_amount:     number;                // COMPUTED: interest_portion * wht_rate / 100
-  net_interest_payable:       number;                // COMPUTED: interest_portion - withholding_tax_amount
-  interest_deductible_ita:    WithholdingApplicable; // s.15(1) ITA – is interest deductible?
-  thin_cap_flag:              boolean;               // Thin-cap alert: debt/equity > 3:1 (s.16(2) ITA)
+  withholding_tax_rate: number; // e.g. 15
+  withholding_tax_amount: number; // COMPUTED: interest_portion * wht_rate / 100
+  net_interest_payable: number; // COMPUTED: interest_portion - withholding_tax_amount
+  interest_deductible_ita: WithholdingApplicable; // s.15(1) ITA – is interest deductible?
+  thin_cap_flag: boolean; // Thin-cap alert: debt/equity > 3:1 (s.16(2) ITA)
   // Fees
-  fees_and_charges:           number;
-  total_due:                  number;                // COMPUTED: principal + net_interest + fees
+  fees_and_charges: number;
+  total_due: number; // COMPUTED: principal + net_interest + fees
   // Payment
-  due_date:                   string;
-  amount_paid:                number;
-  payment_date:               string | null;
-  closing_balance:            number;                // COMPUTED: opening - principal_portion
-  payment_status:             PaymentStatus;
-  days_in_arrears:            number;
-  next_due_date:              string | null;
-  date_period:                string;                // e.g. 2026-Q1
-  notes:                      string | null;
-  created_at?:                string;
-  updated_at?:                string;
+  due_date: string;
+  amount_paid: number;
+  payment_date: string | null;
+  closing_balance: number; // COMPUTED: opening - principal_portion
+  payment_status: PaymentStatus;
+  days_in_arrears: number;
+  next_due_date: string | null;
+  date_period: string; // e.g. 2026-Q1
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
-
 type LoanFormData = Omit<Loan, "id" | "created_at" | "updated_at">;
-
 interface Props {
   projectId?: string;
-  canEdit?:   boolean;
+  canEdit?: boolean;
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-
-const LOAN_TYPES:       LoanType[]       = ["Term Loan","Asset Finance","Overdraft","Revolving Credit","Mortgage","Invoice Discounting","Other"];
-const INTEREST_TYPES:   InterestType[]   = ["Fixed","Variable","CBR-Linked"];
-const REPAY_FREQS:      RepayFrequency[] = ["Monthly","Quarterly","Semi-Annual","Annual","Bullet"];
-const PAYMENT_STATUSES: PaymentStatus[]  = ["Paid","Partially Paid","Due","Overdue","Waived"];
+const LOAN_TYPES: LoanType[] = ["Term Loan","Asset Finance","Overdraft","Revolving Credit","Mortgage","Invoice Discounting","Other"];
+const INTEREST_TYPES: InterestType[] = ["Fixed","Variable","CBR-Linked"];
+const REPAY_FREQS: RepayFrequency[] = ["Monthly","Quarterly","Semi-Annual","Annual","Bullet"];
+const PAYMENT_STATUSES: PaymentStatus[] = ["Paid","Partially Paid","Due","Overdue","Waived"];
 
 // Kenya WHT rates (Income Tax Act Cap.470):
-// s.35(1)(a) – interest paid to resident individual/company: 15%
-// s.35(3)(b) – interest paid to non-resident bank: 15%
-// Thin-cap rule s.16(2): total debt/equity ratio > 3:1 → excess interest disallowed
-const KE_WHT_RESIDENT    = 15;
-const KE_WHT_NR_BANK     = 15;
-const KE_THIN_CAP_RATIO  = 3;
+const KE_WHT_RESIDENT = 15;
+const KE_WHT_NR_BANK = 15;
+const KE_THIN_CAP_RATIO = 3;
 
 const STATUS_STYLE: Record<string, string> = {
-  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  planning: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  active: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  on_hold: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
   completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
 const PAYMENT_STATUS_STYLE: Record<PaymentStatus, string> = {
-  "Paid":           "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
-  "Partially Paid": "bg-yellow-500/10  border-yellow-500/30  text-yellow-300",
-  "Due":            "bg-sky-500/10     border-sky-500/30     text-sky-300",
-  "Overdue":        "bg-rose-500/10    border-rose-500/30    text-rose-300",
-  "Waived":         "bg-slate-500/10   border-slate-500/30   text-slate-300",
+  "Paid": "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+  "Partially Paid": "bg-yellow-500/10 border-yellow-500/30 text-yellow-300",
+  "Due": "bg-sky-500/10 border-sky-500/30 text-sky-300",
+  "Overdue": "bg-rose-500/10 border-rose-500/30 text-rose-300",
+  "Waived": "bg-slate-500/10 border-slate-500/30 text-slate-300",
 };
 
 const LOAN_TYPE_STYLE: Record<LoanType, { dot: string; accent: string; badge: string; row: string }> = {
-  "Term Loan":           { dot: "bg-violet-400",  accent: "text-violet-400",  badge: "bg-violet-500/10  border-violet-500/30  text-violet-300",  row: "hover:bg-violet-950/30"  },
-  "Asset Finance":       { dot: "bg-amber-400",   accent: "text-amber-400",   badge: "bg-amber-500/10   border-amber-500/30   text-amber-300",   row: "hover:bg-amber-950/30"   },
-  "Overdraft":           { dot: "bg-rose-400",    accent: "text-rose-400",    badge: "bg-rose-500/10    border-rose-500/30    text-rose-300",    row: "hover:bg-rose-950/30"    },
-  "Revolving Credit":    { dot: "bg-cyan-400",    accent: "text-cyan-400",    badge: "bg-cyan-500/10    border-cyan-500/30    text-cyan-300",    row: "hover:bg-cyan-950/30"    },
-  "Mortgage":            { dot: "bg-orange-400",  accent: "text-orange-400",  badge: "bg-orange-500/10  border-orange-500/30  text-orange-300",  row: "hover:bg-orange-950/30"  },
-  "Invoice Discounting": { dot: "bg-pink-400",    accent: "text-pink-400",    badge: "bg-pink-500/10    border-pink-500/30    text-pink-300",    row: "hover:bg-pink-950/30"    },
-  "Other":               { dot: "bg-slate-400",   accent: "text-slate-400",   badge: "bg-slate-500/10   border-slate-500/30   text-slate-300",   row: "hover:bg-slate-950/30"   },
+  "Term Loan": { dot: "bg-violet-400", accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300", row: "hover:bg-violet-950/30" },
+  "Asset Finance": { dot: "bg-amber-400", accent: "text-amber-400", badge: "bg-amber-500/10 border-amber-500/30 text-amber-300", row: "hover:bg-amber-950/30" },
+  "Overdraft": { dot: "bg-rose-400", accent: "text-rose-400", badge: "bg-rose-500/10 border-rose-500/30 text-rose-300", row: "hover:bg-rose-950/30" },
+  "Revolving Credit": { dot: "bg-cyan-400", accent: "text-cyan-400", badge: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300", row: "hover:bg-cyan-950/30" },
+  "Mortgage": { dot: "bg-orange-400", accent: "text-orange-400", badge: "bg-orange-500/10 border-orange-500/30 text-orange-300", row: "hover:bg-orange-950/30" },
+  "Invoice Discounting": { dot: "bg-pink-400", accent: "text-pink-400", badge: "bg-pink-500/10 border-pink-500/30 text-pink-300", row: "hover:bg-pink-950/30" },
+  "Other": { dot: "bg-slate-400", accent: "text-slate-400", badge: "bg-slate-500/10 border-slate-500/30 text-slate-300", row: "hover:bg-slate-950/30" },
 };
 
 // ─── KENYA TAX COMPUTATIONS ───────────────────────────────────────────────────
-// All calculations per Kenya Income Tax Act Cap. 470 & Finance Acts
-
-/**
- * Compute WHT amount on interest (ITA s.35).
- * Rate: 15% for both resident and non-resident banks.
- */
 function computeWHT(interestPortion: number, applicable: WithholdingApplicable, rate: number): number {
   if (applicable !== "Yes") return 0;
   return parseFloat(((interestPortion * rate) / 100).toFixed(2));
 }
 
-/**
- * Net interest payable after deducting WHT already remitted to KRA.
- * Borrower remits WHT to KRA and pays lender the net.
- */
 function computeNetInterest(interestPortion: number, whtAmount: number): number {
   return parseFloat((interestPortion - whtAmount).toFixed(2));
 }
 
-/**
- * Total due = principal_portion + net_interest_payable + fees_and_charges.
- * WHT is remitted to KRA separately; lender receives net interest.
- */
 function computeTotalDue(principal: number, netInterest: number, fees: number): number {
   return parseFloat((principal + netInterest + fees).toFixed(2));
 }
 
-/**
- * Closing balance = opening_balance - principal_portion.
- */
 function computeClosingBalance(opening: number, principal: number): number {
   return parseFloat(Math.max(0, opening - principal).toFixed(2));
 }
 
-/**
- * Thin-cap check (ITA s.16(2) & s.16(3)).
- * If total interest-bearing debt > 3× equity, flag true.
- * We approximate here by checking if a flag is manually set or auto-derived.
- * In practice this needs equity figure; we expose the flag for the user.
- */
 function thinCapFlag(principalApproved: number, equity: number): boolean {
   if (equity <= 0) return false;
   return principalApproved / equity > KE_THIN_CAP_RATIO;
 }
 
 // ─── DERIVED FORM HELPERS ─────────────────────────────────────────────────────
-
 function deriveComputedFields(f: LoanFormData): LoanFormData {
-  const wht      = computeWHT(f.interest_portion, f.withholding_tax_applicable, f.withholding_tax_rate);
-  const netInt   = computeNetInterest(f.interest_portion, wht);
+  const wht = computeWHT(f.interest_portion, f.withholding_tax_applicable, f.withholding_tax_rate);
+  const netInt = computeNetInterest(f.interest_portion, wht);
   const totalDue = computeTotalDue(f.principal_portion, netInt, f.fees_and_charges);
-  const closing  = computeClosingBalance(f.opening_balance, f.principal_portion);
+  const closing = computeClosingBalance(f.opening_balance, f.principal_portion);
   return {
     ...f,
     withholding_tax_amount: wht,
-    net_interest_payable:   netInt,
-    total_due:              totalDue,
-    closing_balance:        closing,
+    net_interest_payable: netInt,
+    total_due: totalDue,
+    closing_balance: closing,
   };
 }
 
 const makeEmptyForm = (projectId: string): LoanFormData => ({
-  project_id:                 projectId,
-  facility_ref:               "",
-  lender_name:                "",
-  loan_type:                  "Term Loan",
-  purpose:                    "",
-  loan_start_date:            new Date().toISOString().split("T")[0],
-  tenure_months:              12,
-  repayment_frequency:        "Monthly",
-  principal_approved_kes:     0,
-  interest_rate_pa:           0,
-  interest_type:              "Fixed",
-  opening_balance:            0,
-  installment_due:            0,
-  principal_portion:          0,
-  interest_portion:           0,
+  project_id: projectId,
+  facility_ref: "",
+  lender_name: "",
+  loan_type: "Term Loan",
+  purpose: "",
+  loan_start_date: new Date().toISOString().split("T")[0],
+  tenure_months: 12,
+  repayment_frequency: "Monthly",
+  principal_approved_kes: 0,
+  interest_rate_pa: 0,
+  interest_type: "Fixed",
+  opening_balance: 0,
+  installment_due: 0,
+  principal_portion: 0,
+  interest_portion: 0,
   withholding_tax_applicable: "Yes",
-  withholding_tax_rate:       KE_WHT_RESIDENT,
-  withholding_tax_amount:     0,
-  net_interest_payable:       0,
-  interest_deductible_ita:    "Yes",
-  thin_cap_flag:              false,
-  fees_and_charges:           0,
-  total_due:                  0,
-  due_date:                   "",
-  amount_paid:                0,
-  payment_date:               null,
-  closing_balance:            0,
-  payment_status:             "Due",
-  days_in_arrears:            0,
-  next_due_date:              null,
-  date_period:                "",
-  notes:                      null,
+  withholding_tax_rate: KE_WHT_RESIDENT,
+  withholding_tax_amount: 0,
+  net_interest_payable: 0,
+  interest_deductible_ita: "Yes",
+  thin_cap_flag: false,
+  fees_and_charges: 0,
+  total_due: 0,
+  due_date: "",
+  amount_paid: 0,
+  payment_date: null,
+  closing_balance: 0,
+  payment_status: "Due",
+  days_in_arrears: 0,
+  next_due_date: null,
+  date_period: "",
+  notes: null,
 });
 
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
-
-const fmtKES  = (n: number) => `KES ${new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2 }).format(n)}`;
-const fmtPct  = (n: number) => `${n}%`;
-const fmtC    = (n: number) => new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+const fmtKES = (n: number) => `KES ${new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2 }).format(n)}`;
+const fmtPct = (n: number) => `${n}%`;
+const fmtC = (n: number) => new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 const fmtDate = (d: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-
 function throwSb(error: { message?: string } | null, ctx: string): never {
   throw new Error(error?.message ?? `Supabase error during ${ctx}`);
 }
+
+const generatedLoanFields = [
+  "withholding_tax_amount",
+  "net_interest_payable",
+  "total_due",
+  "closing_balance",
+] as const;
 
 const api = {
   async projects(): Promise<Project[]> {
@@ -243,6 +214,7 @@ const api = {
     if (error) throwSb(error, "projects");
     return (data ?? []) as Project[];
   },
+
   async loanCounts(ids: string[]): Promise<Record<string, number>> {
     const { data } = await supabase.from("loans").select("project_id").in("project_id", ids);
     const tally: Record<string, number> = {};
@@ -251,6 +223,7 @@ const api = {
     });
     return tally;
   },
+
   async list(projectId: string): Promise<Loan[]> {
     const { data, error } = await supabase
       .from("loans")
@@ -260,20 +233,37 @@ const api = {
     if (error) throwSb(error, "list");
     return (data ?? []) as Loan[];
   },
+
   async create(body: LoanFormData): Promise<Loan> {
-    const { data, error } = await supabase.from("loans").insert([body]).select().single();
+    // Remove generated columns before insert
+    const cleanBody = { ...body };
+    for (const field of generatedLoanFields) {
+      delete cleanBody[field as keyof LoanFormData];
+    }
+
+    const { data, error } = await supabase.from("loans").insert([cleanBody]).select().single();
     if (error) throwSb(error, "create");
     return data as Loan;
   },
+
   async update(id: number, body: LoanFormData): Promise<Loan> {
-    const { created_at, updated_at, id: _id, ...safe } = body as LoanFormData & Partial<Loan>;
-    void created_at; void updated_at; void _id;
+    // Remove generated columns and id before update
+    const cleanBody = { ...body };
+    for (const field of generatedLoanFields) {
+      delete cleanBody[field as keyof LoanFormData];
+    }
+    delete cleanBody.id;
+
     const { data, error } = await supabase
-      .from("loans").update({ ...safe, updated_at: new Date().toISOString() })
-      .eq("id", id).select().single();
+      .from("loans")
+      .update({ ...cleanBody, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throwSb(error, "update");
     return data as Loan;
   },
+
   async remove(id: number): Promise<void> {
     const { error } = await supabase.from("loans").delete().eq("id", id);
     if (error) throwSb(error, "delete");
@@ -281,7 +271,6 @@ const api = {
 };
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
-
 function useToast() {
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: "success" | "error" }[]>([]);
   const push = useCallback((msg: string, type: "success" | "error" = "success") => {
@@ -293,7 +282,6 @@ function useToast() {
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
-
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
 
@@ -329,27 +317,22 @@ function SelectField({ label, hint, value, onChange, options }: {
 }
 
 // ─── LOAN MODAL ───────────────────────────────────────────────────────────────
-
 function LoanModal({ initial, onSave, onClose, loading }: {
   initial: LoanFormData & { id?: number };
-  onSave:  (d: LoanFormData) => void;
+  onSave: (d: LoanFormData) => void;
   onClose: () => void;
   loading: boolean;
 }) {
   const [form, setForm] = useState<LoanFormData>(deriveComputedFields({ ...initial }));
   const isEdit = Boolean(initial.id);
-
   const set = <K extends keyof LoanFormData>(k: K, v: LoanFormData[K]) =>
     setForm(p => deriveComputedFields({ ...p, [k]: v }));
-
-  // Section tabs for the modal
   const [tab, setTab] = useState<"facility" | "schedule" | "tax" | "payment">("facility");
-
   const tabs: { key: typeof tab; label: string }[] = [
-    { key: "facility", label: "Facility"  },
-    { key: "schedule", label: "Schedule"  },
-    { key: "tax",      label: "Tax / KRA" },
-    { key: "payment",  label: "Payment"   },
+    { key: "facility", label: "Facility" },
+    { key: "schedule", label: "Schedule" },
+    { key: "tax", label: "Tax / KRA" },
+    { key: "payment", label: "Payment" },
   ];
 
   return (
@@ -359,8 +342,8 @@ function LoanModal({ initial, onSave, onClose, loading }: {
       <motion.div
         className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white/10"
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1,    y: 0  }}
-        exit={{   opacity: 0, scale: 0.96,  y: 8  }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }}
         transition={{ duration: 0.2 }}
       >
         {/* Header */}
@@ -390,7 +373,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
         </div>
 
         <div className="px-6 py-5 max-h-[58vh] overflow-y-auto">
-
           {/* ── TAB: Facility ─────────────────────────────────────────────── */}
           {tab === "facility" && (
             <div className="grid grid-cols-2 gap-4">
@@ -469,14 +451,13 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                   onChange={e => set("next_due_date", e.target.value || null)} className={inputCls} />
               </Field>
               <div />
-
               {/* Computed preview boxes */}
               <div className="col-span-2 grid grid-cols-3 gap-3 mt-2">
                 {[
-                  { label: "WHT Amount",       value: fmtKES(form.withholding_tax_amount), color: "text-amber-400"   },
-                  { label: "Net Interest",      value: fmtKES(form.net_interest_payable),  color: "text-sky-400"     },
-                  { label: "Total Due",         value: fmtKES(form.total_due),             color: "text-emerald-400" },
-                  { label: "Closing Balance",   value: fmtKES(form.closing_balance),       color: "text-primary"     },
+                  { label: "WHT Amount", value: fmtKES(form.withholding_tax_amount), color: "text-amber-400" },
+                  { label: "Net Interest", value: fmtKES(form.net_interest_payable), color: "text-sky-400" },
+                  { label: "Total Due", value: fmtKES(form.total_due), color: "text-emerald-400" },
+                  { label: "Closing Balance", value: fmtKES(form.closing_balance), color: "text-primary" },
                 ].map(box => (
                   <div key={box.label} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{box.label}</div>
@@ -491,19 +472,17 @@ function LoanModal({ initial, onSave, onClose, loading }: {
           {/* ── TAB: Tax / KRA ────────────────────────────────────────────── */}
           {tab === "tax" && (
             <div className="grid grid-cols-2 gap-4">
-
               {/* KRA notice banner */}
               <div className="col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
                 <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                 </svg>
                 <div className="text-[11px] text-amber-300/90 leading-relaxed">
-                  <strong>Kenya ITA Cap.470 — Withholding Tax on Interest (s.35):</strong> 15% on interest paid to resident persons &amp; 
-                  non-resident banks. WHT is deducted by the borrower and remitted to KRA by the 20th of the following month (iTax). 
+                  <strong>Kenya ITA Cap.470 — Withholding Tax on Interest (s.35):</strong> 15% on interest paid to resident persons &amp;
+                  non-resident banks. WHT is deducted by the borrower and remitted to KRA by the 20th of the following month (iTax).
                   Interest deductibility governed by s.15(1)(a); thin-capitalisation disallowance under s.16(2) where debt/equity &gt; 3:1.
                 </div>
               </div>
-
               <SelectField
                 label="WHT Applicable? (ITA s.35)"
                 hint="Is withholding tax applicable on this interest payment?"
@@ -522,7 +501,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                   disabled={form.withholding_tax_applicable === "No"}
                 />
               </Field>
-
               <SelectField
                 label="Interest Deductible? (ITA s.15(1)(a))"
                 hint="Is interest expense deductible for corporation tax purposes?"
@@ -550,7 +528,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                   )}
                 </div>
               </Field>
-
               {/* Computed tax summary */}
               <div className="col-span-2 grid grid-cols-3 gap-3 mt-1">
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
@@ -606,7 +583,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                     className={inputCls + " resize-none"} />
                 </Field>
               </div>
-
               {/* Payment summary */}
               <div className="col-span-2 grid grid-cols-2 gap-3 mt-1">
                 <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
@@ -651,7 +627,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
 }
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
-
 function DeleteConfirm({ loan, onConfirm, onClose, loading }: {
   loan: Loan; onConfirm: () => void; onClose: () => void; loading: boolean;
 }) {
@@ -693,13 +668,11 @@ function DeleteConfirm({ loan, onConfirm, onClose, loading }: {
 }
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
-
 function ProjectCard({ project, onSelect, loanCount }: {
   project: Project; onSelect: (p: Project) => void; loanCount: number;
 }) {
-  const status    = project.status ?? "planning";
+  const status = project.status ?? "planning";
   const statusCls = STATUS_STYLE[status] ?? STATUS_STYLE.planning;
-
   return (
     <motion.button
       onClick={() => onSelect(project)}
@@ -778,13 +751,12 @@ function ProjectCard({ project, onSelect, loanCount }: {
 }
 
 // ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
-
 function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
-  const [projects,    setProjects]    = useState<Project[]>([]);
-  const [fetching,    setFetching]    = useState(true);
-  const [search,      setSearch]      = useState("");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const [search, setSearch] = useState("");
   const [statusFilter,setStatusFilter]= useState("all");
-  const [loanCounts,  setLoanCounts]  = useState<Record<string, number>>({});
+  const [loanCounts, setLoanCounts] = useState<Record<string, number>>({});
   const { toasts, push } = useToast();
 
   useEffect(() => {
@@ -852,9 +824,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects",       value: projects.length,                   sub: "in system"          },
-            { label: "Projects with Loans",  value: Object.keys(loanCounts).length,    sub: "have loan records"  },
-            { label: "Total Loan Records",   value: totalLoans,                        sub: "across all projects"},
+            { label: "Total Projects", value: projects.length, sub: "in system" },
+            { label: "Projects with Loans", value: Object.keys(loanCounts).length, sub: "have loan records" },
+            { label: "Total Loan Records", value: totalLoans, sub: "across all projects"},
           ].map(c => (
             <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -922,21 +894,19 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 }
 
 // ─── LOANS VIEW ───────────────────────────────────────────────────────────────
-
 function LoansView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
 }) {
-  const [loans,        setLoans]        = useState<Loan[]>([]);
-  const [fetching,     setFetching]     = useState(false);
-  const [search,       setSearch]       = useState("");
-  const [filterType,   setFilterType]   = useState<LoanType | "All">("All");
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<LoanType | "All">("All");
   const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
-  const [expanded,     setExpanded]     = useState<Record<string, boolean>>({});
-  const [modal,        setModal]        = useState<null | "create" | "edit">(null);
-  const [editing,      setEditing]      = useState<Loan | null>(null);
-  const [deleting,     setDeleting]     = useState<Loan | null>(null);
-  const [saving,       setSaving]       = useState(false);
-
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [modal, setModal] = useState<null | "create" | "edit">(null);
+  const [editing, setEditing] = useState<Loan | null>(null);
+  const [deleting, setDeleting] = useState<Loan | null>(null);
+  const [saving, setSaving] = useState(false);
   const { toasts, push } = useToast();
 
   const fetchLoans = useCallback(async () => {
@@ -986,14 +956,14 @@ function LoansView({ project, canEdit, onBack }: {
   // ── Derived ───────────────────────────────────────────────────────────────
   const filtered = useMemo(() =>
     loans.filter(l => {
-      if (filterType   !== "All" && l.loan_type      !== filterType)   return false;
+      if (filterType !== "All" && l.loan_type !== filterType) return false;
       if (filterStatus !== "All" && l.payment_status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
           l.facility_ref.toLowerCase().includes(q) ||
-          l.lender_name.toLowerCase().includes(q)  ||
-          l.purpose.toLowerCase().includes(q)       ||
+          l.lender_name.toLowerCase().includes(q) ||
+          l.purpose.toLowerCase().includes(q) ||
           l.date_period.toLowerCase().includes(q)
         );
       }
@@ -1001,7 +971,6 @@ function LoansView({ project, canEdit, onBack }: {
     }),
   [loans, filterType, filterStatus, search]);
 
-  // Group by loan_type
   const grouped = useMemo(() => {
     const g: Partial<Record<LoanType, Loan[]>> = {};
     filtered.forEach(l => {
@@ -1011,17 +980,16 @@ function LoansView({ project, canEdit, onBack }: {
     return g;
   }, [filtered]);
 
-  // Grand totals
   const totals = useMemo(() => ({
-    principal:  loans.reduce((s, l) => s + Number(l.principal_approved_kes), 0),
-    opening:    loans.reduce((s, l) => s + Number(l.opening_balance),        0),
-    closing:    loans.reduce((s, l) => s + Number(l.closing_balance),        0),
-    totalDue:   loans.reduce((s, l) => s + Number(l.total_due),              0),
-    amtPaid:    loans.reduce((s, l) => s + Number(l.amount_paid),            0),
-    wht:        loans.reduce((s, l) => s + Number(l.withholding_tax_amount), 0),
-    netInt:     loans.reduce((s, l) => s + Number(l.net_interest_payable),   0),
-    arrears:    loans.filter(l => l.days_in_arrears > 0).length,
-    thinCap:    loans.filter(l => l.thin_cap_flag).length,
+    principal: loans.reduce((s, l) => s + Number(l.principal_approved_kes), 0),
+    opening: loans.reduce((s, l) => s + Number(l.opening_balance), 0),
+    closing: loans.reduce((s, l) => s + Number(l.closing_balance), 0),
+    totalDue: loans.reduce((s, l) => s + Number(l.total_due), 0),
+    amtPaid: loans.reduce((s, l) => s + Number(l.amount_paid), 0),
+    wht: loans.reduce((s, l) => s + Number(l.withholding_tax_amount), 0),
+    netInt: loans.reduce((s, l) => s + Number(l.net_interest_payable), 0),
+    arrears: loans.filter(l => l.days_in_arrears > 0).length,
+    thinCap: loans.filter(l => l.thin_cap_flag).length,
   }), [loans]);
 
   const status = project.status ?? "planning";
@@ -1061,7 +1029,6 @@ function LoansView({ project, canEdit, onBack }: {
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-16">
-
         {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-10">
           <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
@@ -1070,7 +1037,6 @@ function LoansView({ project, canEdit, onBack }: {
             </svg>
             All Projects
           </button>
-
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Loans Tracking</p>
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
@@ -1122,10 +1088,10 @@ function LoansView({ project, canEdit, onBack }: {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
           className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Principal",   value: fmtKES(totals.principal), color: "text-foreground",  sub: `${loans.length} facilities` },
-            { label: "Total Due",         value: fmtKES(totals.totalDue),  color: "text-primary",     sub: "this period"                },
-            { label: "Total Paid",        value: fmtKES(totals.amtPaid),   color: "text-emerald-400", sub: `${loans.filter(l => l.payment_status === "Paid").length} settled` },
-            { label: "Closing Balance",   value: fmtKES(totals.closing),   color: "text-sky-400",     sub: "outstanding debt"           },
+            { label: "Total Principal", value: fmtKES(totals.principal), color: "text-foreground", sub: `${loans.length} facilities` },
+            { label: "Total Due", value: fmtKES(totals.totalDue), color: "text-primary", sub: "this period" },
+            { label: "Total Paid", value: fmtKES(totals.amtPaid), color: "text-emerald-400", sub: `${loans.filter(l => l.payment_status === "Paid").length} settled` },
+            { label: "Closing Balance", value: fmtKES(totals.closing), color: "text-sky-400", sub: "outstanding debt" },
           ].map(c => (
             <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -1139,8 +1105,8 @@ function LoansView({ project, canEdit, onBack }: {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.13 }}
           className="flex flex-wrap gap-2 mb-8">
           {LOAN_TYPES.filter(lt => loans.some(l => l.loan_type === lt)).map(lt => {
-            const s        = LOAN_TYPE_STYLE[lt];
-            const count    = loans.filter(l => l.loan_type === lt).length;
+            const s = LOAN_TYPE_STYLE[lt];
+            const count = loans.filter(l => l.loan_type === lt).length;
             const isActive = filterType === lt;
             return (
               <button key={lt} onClick={() => setFilterType(isActive ? "All" : lt)}
@@ -1174,6 +1140,7 @@ function LoansView({ project, canEdit, onBack }: {
                 </button>
               )}
             </div>
+
             {/* Toolbar */}
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
@@ -1224,14 +1191,13 @@ function LoansView({ project, canEdit, onBack }: {
             ) : (
               <div className="divide-y divide-white/8">
                 {LOAN_TYPES.filter(lt => grouped[lt]).map(lt => {
-                  const s      = LOAN_TYPE_STYLE[lt];
-                  const rows   = grouped[lt]!;
+                  const s = LOAN_TYPE_STYLE[lt];
+                  const rows = grouped[lt]!;
                   const isOpen = expanded[lt] ?? true;
                   const grpPrincipal = rows.reduce((a, l) => a + Number(l.principal_approved_kes), 0);
-                  const grpDue       = rows.reduce((a, l) => a + Number(l.total_due),              0);
-                  const grpPaid      = rows.reduce((a, l) => a + Number(l.amount_paid),            0);
-                  const grpWHT       = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
-
+                  const grpDue = rows.reduce((a, l) => a + Number(l.total_due), 0);
+                  const grpPaid = rows.reduce((a, l) => a + Number(l.amount_paid), 0);
+                  const grpWHT = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
                   return (
                     <div key={lt}>
                       {/* Group header */}
@@ -1429,7 +1395,6 @@ function LoansView({ project, canEdit, onBack }: {
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
-
 export default function LoansPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
