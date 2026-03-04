@@ -18,17 +18,17 @@ type Subcategory =
   | "Cost of Goods Sold" | "Operating Expense" | "Non-Operating Expense";
 
 interface Account {
-  id: number;
+  id:           number;
   account_type: AccountType;
-  category: Category;
-  subcategory: Subcategory;
+  category:     Category;
+  subcategory:  Subcategory;
   account_code: string;
   account_name: string;
-  description: string;
-  bank_name: string;
-  active: boolean;
-  created_at?: string;
-  updated_at?: string;
+  description:  string;
+  bank_name:    string;
+  active:       boolean;
+  created_at?:  string;
+  updated_at?:  string;
 }
 
 type FormData = Omit<Account, "id" | "created_at" | "updated_at">;
@@ -47,10 +47,10 @@ const SUBCATEGORIES: Record<Category, Subcategory[]> = {
 
 const CATEGORY_STYLE: Record<Category, { accent: string; badge: string; dot: string; row: string }> = {
   Asset:     { accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", dot: "bg-emerald-400", row: "hover:bg-emerald-950/30" },
-  Liability: { accent: "text-rose-400",    badge: "bg-rose-500/10    border-rose-500/30    text-rose-300",    dot: "bg-rose-400",    row: "hover:bg-rose-950/30" },
-  Equity:    { accent: "text-violet-400",  badge: "bg-violet-500/10  border-violet-500/30  text-violet-300",  dot: "bg-violet-400",  row: "hover:bg-violet-950/30" },
-  Income:    { accent: "text-sky-400",     badge: "bg-sky-500/10     border-sky-500/30     text-sky-300",     dot: "bg-sky-400",     row: "hover:bg-sky-950/30" },
-  Expense:   { accent: "text-amber-400",   badge: "bg-amber-500/10   border-amber-500/30   text-amber-300",   dot: "bg-amber-400",   row: "hover:bg-amber-950/30" },
+  Liability: { accent: "text-rose-400",    badge: "bg-rose-500/10    border-rose-500/30    text-rose-300",    dot: "bg-rose-400",    row: "hover:bg-rose-950/30"    },
+  Equity:    { accent: "text-violet-400",  badge: "bg-violet-500/10  border-violet-500/30  text-violet-300",  dot: "bg-violet-400",  row: "hover:bg-violet-950/30"  },
+  Income:    { accent: "text-sky-400",     badge: "bg-sky-500/10     border-sky-500/30     text-sky-300",     dot: "bg-sky-400",     row: "hover:bg-sky-950/30"     },
+  Expense:   { accent: "text-amber-400",   badge: "bg-amber-500/10   border-amber-500/30   text-amber-300",   dot: "bg-amber-400",   row: "hover:bg-amber-950/30"   },
 };
 
 const TYPE_STYLE: Record<AccountType, string> = {
@@ -70,10 +70,9 @@ const EMPTY_FORM: FormData = {
   active:       true,
 };
 
-// ─── API — uses Supabase JS client directly against PostgREST (/rest/v1/) ────
-// This bypasses the edge function entirely in the browser, eliminating the
-// CORS preflight problem. The edge function is still useful for server-side
-// or third-party integrations, but the browser talks directly to PostgREST.
+// ─── API — Supabase JS client directly against PostgREST (/rest/v1/) ─────────
+// Bypasses the edge function entirely in the browser, eliminating CORS
+// preflight problems. The edge function handles server-side / third-party use.
 
 function throwSb(error: { message?: string } | null, ctx: string): never {
   throw new Error(error?.message ?? `Supabase error during ${ctx}`);
@@ -151,7 +150,7 @@ function AccountModal({
   initial, onSave, onClose, loading,
 }: {
   initial: FormData & { id?: number };
-  onSave: (d: FormData) => void;
+  onSave:  (d: FormData) => void;
   onClose: () => void;
   loading: boolean;
 }) {
@@ -161,6 +160,7 @@ function AccountModal({
   const set = (k: keyof FormData, v: unknown) =>
     setForm((p) => {
       const next = { ...p, [k]: v } as FormData;
+      // Auto-sync subcategory when category changes
       if (k === "category") next.subcategory = SUBCATEGORIES[v as Category][0];
       return next;
     });
@@ -175,8 +175,8 @@ function AccountModal({
       <motion.div
         className="relative w-full max-w-xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white/10"
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1,    y: 0  }}
+        exit={{   opacity: 0, scale: 0.96,  y: 8  }}
         transition={{ duration: 0.2 }}
       >
         {/* Header */}
@@ -184,7 +184,10 @@ function AccountModal({
           <h2 className="text-base font-semibold text-foreground tracking-tight">
             {isEdit ? "Edit Account" : "New Account"}
           </h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
@@ -193,8 +196,14 @@ function AccountModal({
 
         {/* Body */}
         <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+
           <Field label="Account Code *">
-            <input value={form.account_code} onChange={(e) => set("account_code", e.target.value)} placeholder="e.g. 1010" className={inputCls} />
+            <input
+              value={form.account_code}
+              onChange={(e) => set("account_code", e.target.value)}
+              placeholder="e.g. 1010"
+              className={inputCls}
+            />
           </Field>
 
           <Field label="Account Type *">
@@ -202,15 +211,10 @@ function AccountModal({
               <select
                 value={form.account_type}
                 onChange={(e) => set("account_type", e.target.value as AccountType)}
-                className={
-                  inputCls +
-                  " appearance-none pr-10 font-medium tracking-wide text-sm focus:ring-2 focus:ring-primary/60 focus:border-primary/40 transition-all"
-                }
+                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}
               >
                 {(["Receivable", "Payable", "N/A"] as AccountType[]).map((t) => (
-                  <option key={t} value={t} className="bg-background text-foreground font-medium">
-                    {t}
-                  </option>
+                  <option key={t} value={t} className="bg-background text-foreground font-medium">{t}</option>
                 ))}
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -226,15 +230,10 @@ function AccountModal({
               <select
                 value={form.category}
                 onChange={(e) => set("category", e.target.value as Category)}
-                className={
-                  inputCls +
-                  " appearance-none pr-10 font-medium tracking-wide text-sm focus:ring-2 focus:ring-primary/60 focus:border-primary/40 transition-all"
-                }
+                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}
               >
                 {CATEGORY_ORDER.map((c) => (
-                  <option key={c} value={c} className="bg-background text-foreground font-medium">
-                    {c}
-                  </option>
+                  <option key={c} value={c} className="bg-background text-foreground font-medium">{c}</option>
                 ))}
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -250,15 +249,10 @@ function AccountModal({
               <select
                 value={form.subcategory}
                 onChange={(e) => set("subcategory", e.target.value as Subcategory)}
-                className={
-                  inputCls +
-                  " appearance-none pr-10 font-medium tracking-wide text-sm focus:ring-2 focus:ring-primary/60 focus:border-primary/40 transition-all"
-                }
+                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}
               >
                 {SUBCATEGORIES[form.category].map((s) => (
-                  <option key={s} value={s} className="bg-background text-foreground font-medium">
-                    {s}
-                  </option>
+                  <option key={s} value={s} className="bg-background text-foreground font-medium">{s}</option>
                 ))}
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -271,18 +265,34 @@ function AccountModal({
 
           <div className="col-span-2">
             <Field label="Account Name *">
-              <input value={form.account_name} onChange={(e) => set("account_name", e.target.value)} placeholder="e.g. Cash – Operating Account" className={inputCls} />
+              <input
+                value={form.account_name}
+                onChange={(e) => set("account_name", e.target.value)}
+                placeholder="e.g. Cash – Operating Account"
+                className={inputCls}
+              />
             </Field>
           </div>
 
           <div className="col-span-2">
             <Field label="Description">
-              <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={2} placeholder="Brief description of this account" className={inputCls + " resize-none"} />
+              <textarea
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                rows={2}
+                placeholder="Brief description of this account"
+                className={inputCls + " resize-none"}
+              />
             </Field>
           </div>
 
           <Field label="Bank Name">
-            <input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} placeholder="N/A or bank name" className={inputCls} />
+            <input
+              value={form.bank_name}
+              onChange={(e) => set("bank_name", e.target.value)}
+              placeholder="N/A or bank name"
+              className={inputCls}
+            />
           </Field>
 
           <Field label="Status">
@@ -290,12 +300,9 @@ function AccountModal({
               <select
                 value={form.active ? "true" : "false"}
                 onChange={(e) => set("active", e.target.value === "true")}
-                className={
-                  inputCls +
-                  " appearance-none pr-10 font-medium tracking-wide text-sm focus:ring-2 focus:ring-primary/60 focus:border-primary/40 transition-all"
-                }
+                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}
               >
-                <option value="true" className="bg-background text-foreground font-medium">Active</option>
+                <option value="true"  className="bg-background text-foreground font-medium">Active</option>
                 <option value="false" className="bg-background text-foreground font-medium">Inactive</option>
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -309,7 +316,10 @@ function AccountModal({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+          >
             Cancel
           </button>
           <button
@@ -318,7 +328,9 @@ function AccountModal({
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
           >
-            {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            {loading && (
+              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            )}
             {isEdit ? "Save Changes" : "Create Account"}
           </button>
         </div>
@@ -329,18 +341,26 @@ function AccountModal({
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
 
-function DeleteConfirm({ account, onConfirm, onClose, loading }: {
-  account: Account; onConfirm: () => void; onClose: () => void; loading: boolean;
+function DeleteConfirm({
+  account, onConfirm, onClose, loading,
+}: {
+  account:   Account;
+  onConfirm: () => void;
+  onClose:   () => void;
+  loading:   boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+      <motion.div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div
         className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-white/10"
-        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1   }}
+        exit={{   opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.18 }}
       >
         <div className="flex items-start gap-4 mb-5">
@@ -352,18 +372,28 @@ function DeleteConfirm({ account, onConfirm, onClose, loading }: {
           <div>
             <h3 className="font-semibold text-foreground mb-1">Delete Account</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Permanently delete <span className="text-foreground font-medium">{account.account_name}</span>{" "}
-              <span className="font-mono text-primary text-xs">({account.account_code})</span>? This cannot be undone.
+              Permanently delete{" "}
+              <span className="text-foreground font-medium">{account.account_name}</span>{" "}
+              <span className="font-mono text-primary text-xs">({account.account_code})</span>?{" "}
+              This cannot be undone.
             </p>
           </div>
         </div>
         <div className="flex gap-3 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
           <button
-            onClick={onConfirm} disabled={loading}
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
             className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2"
           >
-            {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            {loading && (
+              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            )}
             Delete Account
           </button>
         </div>
@@ -375,22 +405,22 @@ function DeleteConfirm({ account, onConfirm, onClose, loading }: {
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 export default function ChartOfAccountsPage() {
-  const [accounts, setAccounts]         = useState<Account[]>([]);
-  const [fetching, setFetching]         = useState(true);
-  const [search, setSearch]             = useState("");
-  const [filterCat, setFilterCat]       = useState<Category | "All">("All");
-  const [filterStatus, setFilterStatus] = useState<"All" | "Active" | "Inactive">("All");
-  const [expanded, setExpanded]         = useState<Record<string, boolean>>(
+  const [accounts,      setAccounts]      = useState<Account[]>([]);
+  const [fetching,      setFetching]      = useState(true);
+  const [search,        setSearch]        = useState("");
+  const [filterCat,     setFilterCat]     = useState<Category | "All">("All");
+  const [filterStatus,  setFilterStatus]  = useState<"All" | "Active" | "Inactive">("All");
+  const [expanded,      setExpanded]      = useState<Record<string, boolean>>(
     Object.fromEntries(CATEGORY_ORDER.map((c) => [c, true]))
   );
-  const [modal, setModal]       = useState<null | "create" | "edit">(null);
-  const [editing, setEditing]   = useState<Account | null>(null);
-  const [deleting, setDeleting] = useState<Account | null>(null);
-  const [saving, setSaving]     = useState(false);
+  const [modal,   setModal]   = useState<null | "create" | "edit">(null);
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [deleting,setDeleting]= useState<Account | null>(null);
+  const [saving,  setSaving]  = useState(false);
 
   const { toasts, push } = useToast();
 
-  // ── Fetch ────────────────────────────────────────────────────────────────
+  // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchAccounts = useCallback(async () => {
     setFetching(true);
     try {
@@ -405,7 +435,7 @@ export default function ChartOfAccountsPage() {
 
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
-  // ── Create ───────────────────────────────────────────────────────────────
+  // ── Create ───────────────────────────────────────────────────────────────────
   const handleCreate = async (form: FormData) => {
     setSaving(true);
     try {
@@ -420,7 +450,7 @@ export default function ChartOfAccountsPage() {
     } finally { setSaving(false); }
   };
 
-  // ── Update ───────────────────────────────────────────────────────────────
+  // ── Update ───────────────────────────────────────────────────────────────────
   const handleUpdate = async (form: FormData) => {
     if (!editing) return;
     setSaving(true);
@@ -435,7 +465,7 @@ export default function ChartOfAccountsPage() {
     } finally { setSaving(false); }
   };
 
-  // ── Delete ───────────────────────────────────────────────────────────────
+  // ── Delete ───────────────────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!deleting) return;
     setSaving(true);
@@ -449,22 +479,24 @@ export default function ChartOfAccountsPage() {
     } finally { setSaving(false); }
   };
 
-  // ── Derived ──────────────────────────────────────────────────────────────
-  const filtered = useMemo(() => accounts.filter((a) => {
-    if (filterCat !== "All" && a.category !== filterCat) return false;
-    if (filterStatus === "Active"   && !a.active) return false;
-    if (filterStatus === "Inactive" &&  a.active) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        a.account_name.toLowerCase().includes(q) ||
-        a.account_code.includes(q) ||
-        (a.description ?? "").toLowerCase().includes(q) ||
-        a.subcategory.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  }), [accounts, filterCat, filterStatus, search]);
+  // ── Derived ──────────────────────────────────────────────────────────────────
+  const filtered = useMemo(() =>
+    accounts.filter((a) => {
+      if (filterCat    !== "All"      && a.category !== filterCat)     return false;
+      if (filterStatus === "Active"   && !a.active)                    return false;
+      if (filterStatus === "Inactive" &&  a.active)                    return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          a.account_name.toLowerCase().includes(q) ||
+          a.account_code.includes(q) ||
+          (a.description ?? "").toLowerCase().includes(q) ||
+          a.subcategory.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    }),
+  [accounts, filterCat, filterStatus, search]);
 
   const grouped = useMemo(() => {
     const g: Partial<Record<Category, Account[]>> = {};
@@ -476,14 +508,16 @@ export default function ChartOfAccountsPage() {
   }, [filtered]);
 
   const totals = useMemo(() =>
-    Object.fromEntries(CATEGORY_ORDER.map((c) => [c, accounts.filter((a) => a.category === c).length])),
+    Object.fromEntries(
+      CATEGORY_ORDER.map((c) => [c, accounts.filter((a) => a.category === c).length])
+    ),
   [accounts]);
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
 
-      {/* ── Toasts ── */}
+      {/* ── Toasts ─────────────────────────────────────────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
@@ -502,10 +536,15 @@ export default function ChartOfAccountsPage() {
         </AnimatePresence>
       </div>
 
-      {/* ── Modals ── */}
+      {/* ── Modals ─────────────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {modal === "create" && (
-          <AccountModal initial={{ ...EMPTY_FORM }} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
+          <AccountModal
+            initial={{ ...EMPTY_FORM }}
+            onSave={handleCreate}
+            onClose={() => setModal(null)}
+            loading={saving}
+          />
         )}
         {modal === "edit" && editing && (
           <AccountModal
@@ -516,18 +555,25 @@ export default function ChartOfAccountsPage() {
           />
         )}
         {deleting && (
-          <DeleteConfirm account={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+          <DeleteConfirm
+            account={deleting}
+            onConfirm={handleDelete}
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
         )}
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-16">
 
-        {/* ── Hero ── */}
+        {/* ── Hero ───────────────────────────────────────────────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}
           className="mb-12 text-center"
         >
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">General Ledger</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">
+            General Ledger
+          </p>
           <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
             Chart of{" "}
             <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
@@ -539,13 +585,33 @@ export default function ChartOfAccountsPage() {
           </p>
         </motion.div>
 
-        {/* ── Category stat cards ── */}
+        {/* ── Summary stat cards ─────────────────────────────────────────────────── */}
         <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.12 }}
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8"
+        >
+          {[
+            { label: "Total Accounts",   value: accounts.length,                              sub: "in chart of accounts" },
+            { label: "Active Accounts",  value: accounts.filter((a) =>  a.active).length,     sub: "currently active"     },
+            { label: "Inactive Accounts",value: accounts.filter((a) => !a.active).length,     sub: "currently disabled"   },
+          ].map((card) => (
+            <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
+              <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">
+                {card.label}
+              </div>
+              <div className="text-3xl font-bold text-foreground tabular-nums">{card.value}</div>
+              <div className="text-xs text-muted-foreground mt-1">{card.sub}</div>
+            </div>
+          ))}
+        </motion.div>
+
+        {/* ── Category filter cards ───────────────────────────────────────────────── */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.15 }}
           className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8"
         >
           {CATEGORY_ORDER.map((cat) => {
-            const s = CATEGORY_STYLE[cat];
+            const s        = CATEGORY_STYLE[cat];
             const isActive = filterCat === cat;
             return (
               <button
@@ -553,8 +619,8 @@ export default function ChartOfAccountsPage() {
                 onClick={() => setFilterCat(isActive ? "All" : cat)}
                 className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm ${
                   isActive
-                    ? "bg-white/10 border-white/20 ring-1 ring-white/15"
-                    : "bg-white/5 border-white/10 hover:bg-white/8 hover:border-white/15"
+                    ? "bg-white/10 border-white/20 ring-1 ring-white/15 scale-[1.02]"
+                    : "bg-white/5  border-white/10 hover:bg-white/8 hover:border-white/15 hover:scale-[1.01]"
                 }`}
               >
                 <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{cat}</div>
@@ -565,7 +631,7 @@ export default function ChartOfAccountsPage() {
           })}
         </motion.div>
 
-        {/* ── Main card ── */}
+        {/* ── Main card ──────────────────────────────────────────────────────────── */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -585,23 +651,33 @@ export default function ChartOfAccountsPage() {
             {/* Toolbar */}
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                 </svg>
                 <input
-                  value={search} onChange={(e) => setSearch(e.target.value)}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name, code, or description…"
                   className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all"
                 />
               </div>
-              <select
-                value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
-              >
-                <option value="All">All Statuses</option>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as typeof filterStatus)}
+                  className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm min-w-[9rem]"}
+                >
+                  <option value="All"      className="bg-background text-foreground font-medium">All Statuses</option>
+                  <option value="Active"   className="bg-background text-foreground font-medium">Active</option>
+                  <option value="Inactive" className="bg-background text-foreground font-medium">Inactive</option>
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </div>
               <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
                 {filtered.length} / {accounts.length} shown
               </div>
@@ -620,12 +696,14 @@ export default function ChartOfAccountsPage() {
                   <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z" />
                 </svg>
                 <p className="text-sm">No accounts match your filters.</p>
-                <button
-                  onClick={() => { setSearch(""); setFilterCat("All"); setFilterStatus("All"); }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Clear filters
-                </button>
+                {(search || filterCat !== "All" || filterStatus !== "All") && (
+                  <button
+                    onClick={() => { setSearch(""); setFilterCat("All"); setFilterStatus("All"); }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-white/8">
@@ -636,14 +714,16 @@ export default function ChartOfAccountsPage() {
 
                   return (
                     <div key={category}>
-                      {/* Group toggle */}
+                      {/* Category group toggle */}
                       <button
                         onClick={() => setExpanded((p) => ({ ...p, [category]: !p[category] }))}
                         className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
                           <span className={`w-2 h-2 rounded-full ${s.dot}`} />
-                          <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{category}</span>
+                          <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>
+                            {category}
+                          </span>
                           <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>
                             {rows.length}
                           </Badge>
@@ -663,7 +743,7 @@ export default function ChartOfAccountsPage() {
                             key="rows"
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
+                            exit={{   height: 0,    opacity: 0 }}
                             transition={{ duration: 0.22 }}
                             style={{ overflow: "hidden" }}
                           >
@@ -683,12 +763,14 @@ export default function ChartOfAccountsPage() {
                                     <motion.tr
                                       key={acc.id}
                                       initial={{ opacity: 0, x: -6 }}
-                                      animate={{ opacity: 1, x: 0 }}
+                                      animate={{ opacity: 1, x:  0 }}
                                       transition={{ delay: ri * 0.02, duration: 0.16 }}
                                       className={`border-b border-white/5 transition-colors ${s.row} ${!acc.active ? "opacity-40" : ""}`}
                                     >
                                       <td className="px-5 py-3.5 whitespace-nowrap">
-                                        <span className="font-mono text-xs font-semibold text-primary">{acc.account_code}</span>
+                                        <span className="font-mono text-xs font-semibold text-primary">
+                                          {acc.account_code}
+                                        </span>
                                       </td>
                                       <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
                                         {acc.account_name}
@@ -740,7 +822,8 @@ export default function ChartOfAccountsPage() {
                                           >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                               <polyline points="3 6 5 6 21 6" />
-                                              <path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" />
+                                              <path d="M19 6l-1 14H6L5 6" />
+                                              <path d="M10 11v6M14 11v6" />
                                               <path d="M9 6V4h6v2" />
                                             </svg>
                                           </button>
@@ -764,9 +847,14 @@ export default function ChartOfAccountsPage() {
             {!fetching && accounts.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">
-                  {accounts.length} total &middot; {accounts.filter((a) => a.active).length} active &middot; {accounts.filter((a) => !a.active).length} inactive
+                  {accounts.length} total &middot;{" "}
+                  {accounts.filter((a) =>  a.active).length} active &middot;{" "}
+                  {accounts.filter((a) => !a.active).length} inactive
                 </span>
-                <button onClick={fetchAccounts} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <button
+                  onClick={fetchAccounts}
+                  className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
+                >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                     <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
