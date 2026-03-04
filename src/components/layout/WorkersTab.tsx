@@ -243,7 +243,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     milestone_id: '',
   });
 
-  // Stats state
+  // Stats state — computed locally from fetched data to ensure project-scoped accuracy
   const [stats, setStats] = useState<DashboardStats>({
     total_workers: 0,
     present_today: 0,
@@ -254,10 +254,46 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
   // Milestones state
   const [milestones, setMilestones] = useState<{ id: string; name: string }[]>([]);
 
+  // Compute stats locally from workers + attendance + assignments.
+  // workers list is already scoped to this project via fetchWorkers (project_id filter),
+  // so total_workers is always the correct per-project count.
+  const computeStats = (
+    workerList: Worker[],
+    attendanceList: AttendanceRecord[],
+    assignmentList: Assignment[]
+  ): DashboardStats => {
+    const total_workers = workerList.length;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayAttendance = attendanceList.filter(a => a.date === todayStr);
+
+    // Map attendance by worker_id for today
+    const todayAttendanceMap: Record<string, AttendanceRecord> = {};
+    todayAttendance.forEach(a => { todayAttendanceMap[a.worker_id] = a; });
+
+    let present_today = 0;
+    let absent_today = 0;
+    workerList.forEach(w => {
+      const rec = todayAttendanceMap[w.id];
+      if (rec) {
+        if (rec.status === 'present' || rec.status === 'late') present_today++;
+        else if (rec.status === 'absent') absent_today++;
+      }
+      // Workers with no record today are not counted as absent unless explicitly marked
+    });
+
+    // Average quality score across assignments for this project
+    const scoredAssignments = assignmentList.filter(a => a.quality_score != null);
+    const avg_performance = scoredAssignments.length > 0
+      ? Math.round(scoredAssignments.reduce((sum, a) => sum + (a.quality_score ?? 0), 0) / scoredAssignments.length)
+      : 0;
+
+    return { total_workers, present_today, absent_today, avg_performance };
+  };
+
   // Fetch milestones for the project
   const fetchMilestones = async () => {
     try {
-      // Use the correct column name for milestone name (likely 'milestone_name')
       const { data, error } = await supabase
         .from('project_milestones')
         .select('id, title')
@@ -268,7 +304,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         setMilestones([]);
         return;
       }
-      // Map to expected structure: { id, name }
       setMilestones((data || []).map((m: any) => ({ id: m.id, name: m.title })));
     } catch (err) {
       console.error('[WorkersTab] Milestones fetch error:', err);
@@ -285,107 +320,149 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Fetch dashboard stats
-  const fetchStats = async () => {
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke('get-dashboard-stats', {
-        method: 'GET',
-      });
-
-      if (invokeError) {
-        console.error('Stats function error:', invokeError);
-        return;
-      }
-
-      if (data) {
-        setStats(data);
-      }
-    } catch (err: any) {
-      console.error('[WorkersTab] Stats error:', err);
-    }
-  };
-
-  // Fetch workers
-  const fetchWorkers = async () => {
+  // Fetch workers — scoped DIRECTLY to this project via the workers.project_id column.
+  // This is the correct approach given the schema: workers table has a project_id FK.
+  // Previously the code went through worker_assignments which caused cross-project leakage.
+  const fetchWorkers = async (): Promise<Worker[]> => {
     setError(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('get-workers', {
-        method: 'GET',
-      });
+      const { data, error: workersError } = await supabase
+        .from('workers')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true });
 
-      if (invokeError) {
-        console.error('Workers function error:', invokeError);
+      if (workersError) {
+        console.error('[WorkersTab] Workers fetch error:', workersError);
+        setError('Failed to fetch workers: ' + workersError.message);
         setWorkers([]);
-        setError('Failed to fetch workers: ' + invokeError.message);
-        return;
+        return [];
       }
 
-      setWorkers(data?.workers || []);
+      const workersData: Worker[] = data || [];
+      setWorkers(workersData);
+      return workersData;
     } catch (err: any) {
       console.error('[WorkersTab] Workers fetch error:', err);
       setWorkers([]);
       setError('Failed to fetch workers. Please check your connection.');
+      return [];
     }
   };
 
-  // Fetch attendance
-  const fetchAttendance = async (date: string) => {
+  // Fetch attendance — scoped to this project's workers on the given date
+  const fetchAttendance = async (date: string, workerIds?: string[]): Promise<AttendanceRecord[]> => {
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('get-daily-attendance', {
+      const ids = workerIds ?? workers.map(w => w.id);
+
+      if (ids.length === 0) {
+        setAttendance([]);
+        return [];
+      }
+
+      // Try direct Supabase query first for accurate project-scoped data
+      const { data, error: dbError } = await supabase
+        .from('worker_attendance')
+        .select('*')
+        .eq('date', date)
+        .in('worker_id', ids);
+
+      if (!dbError && data) {
+        setAttendance(data as AttendanceRecord[]);
+        return data as AttendanceRecord[];
+      }
+
+      // Fallback to edge function
+      const { data: fnData, error: invokeError } = await supabase.functions.invoke('get-daily-attendance', {
         method: 'POST',
-        body: { date },
+        body: { date, worker_ids: ids },
       });
 
       if (invokeError) {
         console.error('Attendance function error:', invokeError);
         setAttendance([]);
-        return;
+        return [];
       }
 
-      if (data?.attendance) {
-        setAttendance(data.attendance);
-      } else {
-        setAttendance([]);
-      }
+      const records = (fnData?.attendance || []) as AttendanceRecord[];
+      // Filter to only this project's workers
+      const filtered = records.filter(r => ids.includes(r.worker_id));
+      setAttendance(filtered);
+      return filtered;
     } catch (err: any) {
       console.error('[WorkersTab] Attendance fetch error:', err);
       setAttendance([]);
+      return [];
     }
   };
 
-  // Fetch assignments
-  const fetchAssignments = async () => {
+  // Fetch assignments — scoped to this project
+  const fetchAssignments = async (): Promise<Assignment[]> => {
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('quick-task', {
+      // Direct Supabase query scoped to this project
+      const { data, error: dbError } = await supabase
+        .from('worker_assignments')
+        .select(`
+          *,
+          worker:workers(full_name, role),
+          milestone:project_milestones(id, title)
+        `)
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
+
+      if (!dbError && data) {
+        // Normalize milestone shape: API returns { id, title } but our interface expects { id, name }
+        const normalized = data.map((a: any) => ({
+          ...a,
+          milestone: a.milestone ? { id: a.milestone.id, name: a.milestone.title } : null,
+        })) as Assignment[];
+        setAssignments(normalized);
+        return normalized;
+      }
+
+      // Fallback to edge function
+      const { data: fnData, error: invokeError } = await supabase.functions.invoke('quick-task', {
         method: 'GET',
+        body: { project_id: projectId },
       });
 
       if (invokeError) {
         console.error('Assignments function error:', invokeError);
         setAssignments([]);
-        return;
+        return [];
       }
 
-      setAssignments(data?.assignments || []);
+      // Filter to this project only (edge function may return all)
+      const all = (fnData?.assignments || []) as Assignment[];
+      const projectAssignments = all.filter(a => a.project_id === projectId);
+      setAssignments(projectAssignments);
+      return projectAssignments;
     } catch (err: any) {
       console.error('[WorkersTab] Assignments fetch error:', err);
       setAssignments([]);
+      return [];
     }
   };
 
-  // Initial load
+  // Initial load — fetch everything and compute stats locally
   useEffect(() => {
     const loadInitialData = async () => {
       setLoading(true);
       setError(null);
       try {
-        await Promise.all([
-          fetchStats(),
+        const [fetchedWorkers, fetchedAssignments] = await Promise.all([
           fetchWorkers(),
           fetchAssignments(),
-          fetchMilestones()
+          fetchMilestones(),
         ]);
-        await fetchAttendance(selectedDate);
+
+        const fetchedAttendance = await fetchAttendance(
+          selectedDate,
+          fetchedWorkers.map(w => w.id)
+        );
+
+        // Compute stats from project-scoped data
+        setStats(computeStats(fetchedWorkers, fetchedAttendance, fetchedAssignments));
       } catch (err) {
         console.error('[WorkersTab] Initial load error:', err);
       } finally {
@@ -393,14 +470,24 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       }
     };
     loadInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Reload attendance when date or tab changes
+  // Reload attendance when date or tab changes, then recompute stats
   useEffect(() => {
-    if (activeTab === 'attendance') {
-      fetchAttendance(selectedDate);
+    if (activeTab === 'attendance' && workers.length > 0) {
+      fetchAttendance(selectedDate, workers.map(w => w.id)).then(fetchedAttendance => {
+        setStats(prev => computeStats(workers, fetchedAttendance, assignments));
+      });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, activeTab]);
+
+  // Recompute stats whenever workers, attendance, or assignments change
+  useEffect(() => {
+    setStats(computeStats(workers, attendance, assignments));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workers, attendance, assignments]);
 
   // Add Worker
   const handleAddWorker = async () => {
@@ -416,7 +503,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           role: workerForm.role,
           phone: workerForm.phone || null,
           id_number: workerForm.id_number || null,
-          address: workerForm.address || null
+          address: workerForm.address || null,
+          project_id: projectId,
         }
       });
       
@@ -428,7 +516,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       showToast('Worker added successfully!', 'success');
       setShowAddWorker(false);
       setWorkerForm({ name: '', role: '', phone: '', id_number: '', address: '' });
-      await Promise.all([fetchWorkers(), fetchStats()]);
+      const freshWorkers = await fetchWorkers();
+      setStats(computeStats(freshWorkers, attendance, assignments));
       if (onUpdate) onUpdate();
     } catch (err: any) {
       showToast('Failed to add worker: ' + (err.message || 'Unknown error'), 'error');
@@ -474,7 +563,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       showToast('Attendance saved successfully!', 'success');
       setShowMarkAttendance(false);
       setAttendanceRecords({});
-      await Promise.all([fetchAttendance(selectedDate), fetchStats()]);
+      const freshAttendance = await fetchAttendance(selectedDate, workers.map(w => w.id));
+      setStats(computeStats(workers, freshAttendance, assignments));
       if (onUpdate) onUpdate();
     } catch (err: any) {
       showToast('Failed to save attendance: ' + (err.message || 'Unknown error'), 'error');
@@ -488,7 +578,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       return;
     }
     try {
-      // Prepare payload matching worker_assignments schema
       const payload: any = {
         worker_id: assignmentForm.worker_id,
         project_id: projectId,
@@ -497,7 +586,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         start_date: assignmentForm.start_date ? assignmentForm.start_date : null,
         end_date: assignmentForm.due_date ? assignmentForm.due_date : null,
         status: assignmentForm.status,
-        // assigned_role, tasks_assigned, tasks_completed, quality_score can be added if needed
+        notes: assignmentForm.notes || null,
         updated_at: new Date().toISOString(),
       };
       if (editingAssignment) {
@@ -524,7 +613,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       setShowAssignTask(false);
       setEditingAssignment(null);
       setAssignmentForm({ worker_id: '', task: '', start_date: '', due_date: '', status: 'assigned', notes: '', milestone_id: '' });
-      await fetchAssignments();
+      const freshAssignments = await fetchAssignments();
+      setStats(computeStats(workers, attendance, freshAssignments));
       if (onUpdate) onUpdate();
     } catch (err: any) {
       showToast('Failed to save task: ' + (err.message || 'Unknown error'), 'error');
@@ -543,7 +633,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         return;
       }
       showToast('Task deleted!', 'success');
-      await fetchAssignments();
+      const freshAssignments = await fetchAssignments();
+      setStats(computeStats(workers, attendance, freshAssignments));
       if (onUpdate) onUpdate();
     } catch (err: any) {
       showToast('Failed to delete task: ' + (err.message || 'Unknown error'), 'error');
@@ -572,9 +663,10 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       if (assignmentFilter.worker_id) match = match && a.worker_id === assignmentFilter.worker_id;
       if (assignmentFilter.status) match = match && a.status === assignmentFilter.status;
       if (assignmentFilter.date) {
-        const aDate = a.due_date || a.end_date;
+        const aDate = a.end_date;
         match = match && aDate === assignmentFilter.date;
       }
+      if (assignmentFilter.milestone_id) match = match && a.milestone_id === assignmentFilter.milestone_id;
       return match;
     });
   }, [assignments, assignmentFilter]);
@@ -628,12 +720,12 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     <>
       <div className="space-y-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard icon={Users} title="Total Workers" value={stats.total_workers} color="text-primary" />
           <StatCard icon={UserCheck} title="Present Today" value={stats.present_today} color="text-green-600" />
           <StatCard icon={UserX} title="Absent Today" value={stats.absent_today} color="text-red-600" />
-          <StatCard icon={TrendingUp} title="Performance" value={`${stats.avg_performance}%`} color="text-blue-600" />
-        </div>
+          <StatCard icon={TrendingUp} title="Avg Performance" value={stats.avg_performance > 0 ? `${stats.avg_performance}%` : '—'} color="text-blue-600" />
+        </div> */}
 
         {/* Tab Navigation */}
         <GlassCard className="p-2">
@@ -900,6 +992,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Quality</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Notes</th>
+                          {canEdit && <th className="px-4 py-3 text-left font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -918,7 +1011,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                               {a.start_date ? new Date(a.start_date).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                              {a.due_date ? new Date(a.due_date).toLocaleDateString() : (a.end_date ? new Date(a.end_date).toLocaleDateString() : '—')}
+                              {a.end_date ? new Date(a.end_date).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap">
                               <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>{a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
@@ -929,28 +1022,30 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                               {a.notes || '—'}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap flex gap-2">
-                              <button
-                                onClick={() => {
-                                  setEditingAssignment(a);
-                                  setAssignmentForm({
-                                    worker_id: a.worker_id,
-                                    task: a.task_description || '',
-                                    start_date: a.start_date || '',
-                                    due_date: a.end_date || '',
-                                    status: a.status,
-                                    notes: a.notes || '',
-                                    milestone_id: a.milestone_id || '',
-                                  });
-                                  setShowAssignTask(true);
-                                }}
-                                className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
-                              >Edit</button>
-                              <button
-                                onClick={() => handleDeleteAssignment(a.id)}
-                                className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
-                              >Delete</button>
-                            </td>
+                            {canEdit && (
+                              <td className="px-4 py-3 whitespace-nowrap flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingAssignment(a);
+                                    setAssignmentForm({
+                                      worker_id: a.worker_id,
+                                      task: a.task_description || '',
+                                      start_date: a.start_date || '',
+                                      due_date: a.end_date || '',
+                                      status: a.status,
+                                      notes: a.notes || '',
+                                      milestone_id: a.milestone_id || '',
+                                    });
+                                    setShowAssignTask(true);
+                                  }}
+                                  className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
+                                >Edit</button>
+                                <button
+                                  onClick={() => handleDeleteAssignment(a.id)}
+                                  className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
+                                >Delete</button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -1020,7 +1115,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           .filter(a => assignmentFilter.worker_id ? a.worker_id === assignmentFilter.worker_id : true)
                           .map(a => (
                             <tr key={a.id} className="border-b border-white/10 hover:bg-primary/5 transition-all">
-                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.task}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.task_description}</td>
                               <td className="px-4 py-3 whitespace-nowrap">
                                 <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>{a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
                               </td>
@@ -1034,7 +1129,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                     onChange={async e => {
                                       const val = e.target.value === '' ? null : Number(e.target.value);
                                       setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, quality_score: val } : ass));
-                                      // Persist to DB
                                       try {
                                         const { error } = await supabase
                                           .from('worker_assignments')
@@ -1070,11 +1164,22 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                               {canEdit && (
                                 <td className="px-4 py-3 whitespace-nowrap flex gap-2">
                                   <button
-                                    onClick={() => {/* Save logic here, e.g. call API */ showToast('Performance updated!', 'success'); }}
+                                    onClick={async () => {
+                                      try {
+                                        const { error } = await supabase
+                                          .from('worker_assignments')
+                                          .update({ notes: a.notes, updated_at: new Date().toISOString() })
+                                          .eq('id', a.id);
+                                        if (error) showToast('Failed to save performance', 'error');
+                                        else showToast('Performance updated!', 'success');
+                                      } catch (err) {
+                                        showToast('Failed to save performance', 'error');
+                                      }
+                                    }}
                                     className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all"
                                   >Save</button>
                                   <button
-                                    onClick={() => setAssignments(prev => prev.filter(ass => ass.id !== a.id))}
+                                    onClick={() => handleDeleteAssignment(a.id)}
                                     className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all"
                                   >Delete</button>
                                 </td>

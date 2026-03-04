@@ -46,22 +46,22 @@ const financeRoutes = [
   {
     group: "Accounting",
     items: [
-      { label: "Chart of Accounts",    path: "/finance/chart-of-accounts",                 short: "CoA", icon: BookOpen            },
-      { label: "Balance Sheet",        path: "/finance/balance-sheet",                      short: "BS",  icon: LayoutGrid           },
-      { label: "Income Statement",     path: "/finance/income-statement",                   short: "IS",  icon: TrendingUp           },
-      { label: "Cash Flow",            path: "/finance/cash-flow",                          short: "CF",  icon: Droplets             },
-      { label: "Statement of Account", path: "/finance/statement-of-account",               short: "SA",  icon: FileText             },
-      { label: "Bank Reconciliation",  path: "/finance/bank-reconciliation",                short: "BR",  icon: Landmark             },
+      { label: "Chart of Accounts",    path: "/finance/chart-of-accounts",              icon: BookOpen            },
+      { label: "Balance Sheet",        path: "/finance/balance-sheet",                   icon: LayoutGrid           },
+      { label: "Income Statement",     path: "/finance/income-statement",                   icon: TrendingUp           },
+      { label: "Cash Flow",            path: "/finance/cash-flow",                          icon: Droplets             },
+      { label: "Statement of Account", path: "/finance/statement-of-account",               icon: FileText             },
+      { label: "Bank Reconciliation",  path: "/finance/bank-reconciliation",                icon: Landmark             },
     ],
   },
   {
     group: "Operations",
     items: [
-      { label: "Accounts Payable",    path: "/finance/accounts-payable",                   short: "AP",  icon: CreditCard           },
-      { label: "Accounts Receivable", path: "/finance/accounts-received",                  short: "AR",  icon: ReceiptText          },
-      { label: "Work in Progress",    path: "/finance/work-in-progress",                   short: "WIP", icon: HardHat              },
-      { label: "Change Orders",       path: "/finance/change-orders-tracking",             short: "CO",  icon: GitPullRequestArrow  },
-      { label: "Inventory",           path: "/finance/inventory",                          short: "INV", icon: Package              },
+      { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
+      { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
+      { label: "Work in Progress",    path: "/finance/work-in-progress",                   icon: HardHat              },
+      { label: "Change Orders",       path: "/finance/change-orders-tracking",             icon: GitPullRequestArrow  },
+      { label: "Inventory",           path: "/finance/inventory",                          icon: Package              },
     ],
   },
   {
@@ -75,7 +75,7 @@ const financeRoutes = [
   {
     group: "Payroll",
     items: [
-      { label: "Job Posting",         path: "/finance/job-posting",                        short: "JP",  icon: Briefcase            },
+      { label: "Job Costing",         path: "/finance/job-posting",                        short: "JP",  icon: Briefcase            },
       { label: "Payroll Checklist",   path: "/finance/payroll-checklist",                  short: "PC",  icon: ClipboardList        },
     ],
   },

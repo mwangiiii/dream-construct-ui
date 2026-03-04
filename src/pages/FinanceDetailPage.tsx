@@ -423,12 +423,12 @@ export default function FinanceDetailPage() {
             />
           )}
 
-          {activeTab === "balance-sheet" && (
-            <BalanceSheetPage
-              projectId={id!}
-              canEdit={canEdit}
-            />
-          )}
+          {activeTab === "balance-sheet" && id && (
+  <BalanceSheetPage
+    projectId={id}
+    canEdit={canEdit}
+  />
+)}
 
           {activeTab === "bank-reconciliation" && (
             <BankReconciliationPage

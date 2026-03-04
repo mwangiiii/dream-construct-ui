@@ -203,7 +203,7 @@ const Navbar = () => {
               <span className="font-bold text-base sm:text-lg leading-tight text-foreground">
                 Reve Construct Limited
               </span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Build Your Dreams</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Building Your Dreams</span>
             </div>
           </Link>
 
