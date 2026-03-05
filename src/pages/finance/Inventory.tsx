@@ -16,13 +16,12 @@ interface InventoryItem {
   vendor:                 string;
   quantity_of_item:       number;
   cost_per_quantity:      number;
-  total_value:            number;           // GENERATED
-  quantity_used:          number;
-  total_value_used:       number;           // GENERATED
-  projects_used:          string[];         // or string if comma-separated
+  total_value:            number;           // GENERATED ALWAYS
+  quantity_used?:         number;
+  total_value_used?:      number;           // GENERATED
+  projects_used?:         string[];
   usage:                  string;
-  quantity_remaining:     number;           // GENERATED
-  total_value_remaining:  number;           // GENERATED
+  quantity_remaining?:    number;           // GENERATED
   date:                   string;
   notes:                  string;
   created_at?:            string;
@@ -34,11 +33,11 @@ type FormData = Omit<InventoryItem,
   | "total_value"
   | "total_value_used"
   | "quantity_remaining"
-  | "total_value_remaining"
   | "created_at"
   | "updated_at"
 > & {
-  projects_used?: string[]; // or string if you store as comma-separated
+  quantity_used?: number;
+  projects_used?: string[];
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -82,14 +81,11 @@ const makeEmptyForm = (): FormData => ({
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", minimumFractionDigits: 2 }).format(n);
 
-const fmtC = (n: number) =>
-  new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+const fmtQty = (n: number) =>
+  new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(n);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-
-const fmtQty = (n: number) =>
-  new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(n);
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
@@ -102,22 +98,27 @@ const api = {
     const { data, error } = await supabase
       .from("inventory")
       .select("*")
-      .order("date",           { ascending: false })
-      .order("factorial_code", { ascending: true  });
+      .order("date", { ascending: false })
+      .order("factorial_code", { ascending: true });
     if (error) throwSb(error, "list");
     return (data ?? []) as InventoryItem[];
   },
-  async create(body: FormData): Promise<InventoryItem> {
+  async create(body: Partial<FormData>): Promise<InventoryItem> {
     const { data, error } = await supabase
-      .from("inventory").insert([body]).select().single();
+      .from("inventory")
+      .insert([body])
+      .select()
+      .single();
     if (error) throwSb(error, "create");
     return data as InventoryItem;
   },
-  async update(id: number, body: FormData): Promise<InventoryItem> {
+  async update(id: number, body: Partial<FormData>): Promise<InventoryItem> {
     const { data, error } = await supabase
       .from("inventory")
       .update({ ...body, updated_at: new Date().toISOString() })
-      .eq("id", id).select().single();
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throwSb(error, "update");
     return data as InventoryItem;
   },
@@ -156,10 +157,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // ─── ITEM MODAL ───────────────────────────────────────────────────────────────
 
 function ItemModal({
-  initial, onSave, onClose, loading,
+  initial,
+  onSave,
+  onClose,
+  loading,
 }: {
   initial: FormData & { id?: number };
-  onSave:  (d: FormData) => void;
+  onSave: (d: Partial<FormData>) => void;
   onClose: () => void;
   loading: boolean;
 }) {
@@ -167,27 +171,36 @@ function ItemModal({
   const isEdit = Boolean(initial.id);
   const set = <K extends keyof FormData>(k: K, v: FormData[K]) => setForm(p => ({ ...p, [k]: v }));
 
-  const liveTotal         = form.quantity_of_item * form.cost_per_quantity;
-  const liveUsedValue     = form.quantity_used * form.cost_per_quantity;
-  const liveRemainingQty  = Math.max(0, form.quantity_of_item - form.quantity_used);
+  const qtyUsed = form.quantity_used ?? 0;
+  const liveTotal          = form.quantity_of_item * form.cost_per_quantity;
+  const liveUsedValue      = qtyUsed * form.cost_per_quantity;
+  const liveRemainingQty   = Math.max(0, form.quantity_of_item - qtyUsed);
   const liveRemainingValue = liveRemainingQty * form.cost_per_quantity;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+      />
       <motion.div
         className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white/10"
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1,    y: 0  }}
-        exit={{   opacity: 0, scale: 0.96,  y: 8  }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }}
         transition={{ duration: 0.2 }}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <h2 className="text-base font-semibold text-foreground tracking-tight">
             {isEdit ? "Edit Inventory Item" : "New Inventory Item"}
           </h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
@@ -195,64 +208,113 @@ function ItemModal({
         </div>
 
         <div className="px-6 py-5 grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-[65vh] overflow-y-auto">
-          {/* Form fields – unchanged from previous version */}
           <Field label="Factorial Code *">
-            <input value={form.factorial_code} onChange={e => set("factorial_code", e.target.value)}
-              placeholder="e.g. F-001" className={inputCls} required />
+            <input
+              value={form.factorial_code}
+              onChange={e => set("factorial_code", e.target.value)}
+              placeholder="e.g. F-001"
+              className={inputCls}
+              required
+            />
           </Field>
 
           <Field label="Serial Number">
-            <input value={form.serial_number ?? ""} onChange={e => set("serial_number", e.target.value)}
-              placeholder="e.g. SN-1001" className={inputCls} />
+            <input
+              value={form.serial_number ?? ""}
+              onChange={e => set("serial_number", e.target.value)}
+              placeholder="e.g. SN-1001"
+              className={inputCls}
+            />
           </Field>
 
           <div className="col-span-2 sm:col-span-3">
             <Field label="Description *">
-              <input value={form.description} onChange={e => set("description", e.target.value)}
-                placeholder="e.g. 50kg Cement Bag" className={inputCls} required />
+              <input
+                value={form.description}
+                onChange={e => set("description", e.target.value)}
+                placeholder="e.g. 50kg Cement Bag"
+                className={inputCls}
+                required
+              />
             </Field>
           </div>
 
           <Field label="Vendor">
-            <input value={form.vendor ?? ""} onChange={e => set("vendor", e.target.value)}
-              placeholder="e.g. Bamburi / Eastmatt" className={inputCls} />
+            <input
+              value={form.vendor ?? ""}
+              onChange={e => set("vendor", e.target.value)}
+              placeholder="e.g. Bamburi / Eastmatt"
+              className={inputCls}
+            />
           </Field>
 
           <Field label="Usage / Category *">
             <div className="relative">
-              <select value={form.usage} onChange={e => set("usage", e.target.value)}
-                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"} required>
+              <select
+                value={form.usage}
+                onChange={e => set("usage", e.target.value)}
+                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}
+                required
+              >
                 {USAGE_CATEGORIES.map(u => (
                   <option key={u} value={u}>{u}</option>
                 ))}
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
               </span>
             </div>
           </Field>
 
           <Field label="Projects Used">
-            <input type="text" value={form.projects_used?.join(", ") ?? ""}
-              onChange={e => set("projects_used", e.target.value.split(",").map(s => s.trim()).filter(Boolean))}
-              placeholder="Proj A, Proj B, ..." className={inputCls} />
+            <input
+              type="text"
+              value={form.projects_used?.join(", ") ?? ""}
+              onChange={e => {
+                const arr = e.target.value.split(",").map(s => s.trim()).filter(Boolean);
+                set("projects_used", arr);
+              }}
+              placeholder="Proj A, Proj B, ..."
+              className={inputCls}
+            />
           </Field>
 
           <Field label="Quantity Received *">
-            <input type="number" step="0.0001" min="0" value={form.quantity_of_item}
-              onChange={e => set("quantity_of_item", parseFloat(e.target.value) || 0)} className={inputCls} required />
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={form.quantity_of_item}
+              onChange={e => set("quantity_of_item", parseFloat(e.target.value) || 0)}
+              className={inputCls}
+              required
+            />
           </Field>
 
           <Field label="Cost per Unit (KES) *">
-            <input type="number" step="0.01" min="0" value={form.cost_per_quantity}
-              onChange={e => set("cost_per_quantity", parseFloat(e.target.value) || 0)} className={inputCls} required />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.cost_per_quantity}
+              onChange={e => set("cost_per_quantity", parseFloat(e.target.value) || 0)}
+              className={inputCls}
+              required
+            />
           </Field>
 
           <Field label="Quantity Used">
-            <input type="number" step="0.0001" min="0" max={form.quantity_of_item}
-              value={form.quantity_used}
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              max={form.quantity_of_item}
+              value={qtyUsed}
               onChange={e => set("quantity_used", Math.min(parseFloat(e.target.value) || 0, form.quantity_of_item))}
-              className={inputCls} />
+              className={inputCls}
+            />
           </Field>
 
           <div className="col-span-2 sm:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
@@ -272,23 +334,40 @@ function ItemModal({
 
           <div className="col-span-2 sm:col-span-3">
             <Field label="Notes">
-              <textarea value={form.notes ?? ""} onChange={e => set("notes", e.target.value)}
-                rows={2} placeholder="Delivery note, batch, damage, etc…" className={inputCls + " resize-none"} />
+              <textarea
+                value={form.notes ?? ""}
+                onChange={e => set("notes", e.target.value)}
+                rows={2}
+                placeholder="Delivery note, batch, damage, etc…"
+                className={inputCls + " resize-none"}
+              />
             </Field>
           </div>
 
           <Field label="Date *">
-            <input type="date" value={form.date} onChange={e => set("date", e.target.value)} className={inputCls} required />
+            <input
+              type="date"
+              value={form.date}
+              onChange={e => set("date", e.target.value)}
+              className={inputCls}
+              required
+            />
           </Field>
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+          >
             Cancel
           </button>
-          <button onClick={() => onSave(form)} disabled={loading}
+          <button
+            onClick={() => onSave(form)}
+            disabled={loading}
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
-            style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+            style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+          >
             {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             {isEdit ? "Save Changes" : "Add Item"}
           </button>
@@ -297,8 +376,6 @@ function ItemModal({
     </div>
   );
 }
-
-// DeleteConfirm component (omitted for brevity – copy from your original if needed)
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
@@ -335,10 +412,21 @@ export default function InventoryPage() {
     fetchItems();
   }, [fetchItems]);
 
+  // ── Helper: remove generated fields before sending to Supabase ─────────────
+  const cleanPayload = (data: Partial<FormData>): Partial<FormData> => {
+    const copy = { ...data };
+    // Never send generated columns
+    delete copy.total_value;
+    delete copy.quantity_remaining;
+    delete copy.total_value_used;
+    return copy;
+  };
+
   const handleCreate = async (form: FormData) => {
     setSaving(true);
     try {
-      const row = await api.create(form);
+      const clean = cleanPayload(form);
+      const row = await api.create(clean);
       setItems(p => [row, ...p]);
       push("Item added successfully.");
       setModal(null);
@@ -353,7 +441,8 @@ export default function InventoryPage() {
     if (!editing) return;
     setSaving(true);
     try {
-      const row = await api.update(editing.id, form);
+      const clean = cleanPayload(form);
+      const row = await api.update(editing.id, clean);
       setItems(p => p.map(i => i.id === editing.id ? row : i));
       push("Item updated.");
       setModal(null);
@@ -419,28 +508,26 @@ export default function InventoryPage() {
 
   const sortedUsages = useMemo(() => Object.keys(grouped).sort(), [grouped]);
 
-  const grandTotals = useMemo(() => ({
-    totalItems:    items.length,
-    totalValue:    items.reduce((s, i) => s + Number(i.total_value), 0),
-    totalQty:      items.reduce((s, i) => s + Number(i.quantity_of_item), 0),
-    totalUsed:     items.reduce((s, i) => s + Number(i.quantity_used), 0),
-    totalRemaining: items.reduce((s, i) => s + Number(i.quantity_remaining), 0),
-    uniqueVendors: new Set(items.map(i => i.vendor).filter(Boolean)).size,
-  }), [items]);
-
-  const usageTotals = useMemo(() =>
-    Object.fromEntries(
-      allUsages.map(u => [u, {
-        count: items.filter(i => (i.usage || "Other") === u).length,
-        value: items.filter(i => (i.usage || "Other") === u).reduce((s, i) => s + Number(i.total_value), 0),
-      }])
-    ),
-  [items, allUsages]);
+  const grandTotals = useMemo(() => {
+    const totals = {
+      totalItems: items.length,
+      totalValue: items.reduce((s, i) => s + (i.total_value ?? 0), 0),
+      totalQty: items.reduce((s, i) => s + (i.quantity_of_item ?? 0), 0),
+      totalUsed: items.reduce((s, i) => s + (i.quantity_used ?? 0), 0),
+      totalRemaining: items.reduce((s, i) => {
+        const rem = Math.max(0, (i.quantity_of_item ?? 0) - (i.quantity_used ?? 0));
+        return s + rem;
+      }, 0),
+      uniqueVendors: new Set(items.map(i => i.vendor).filter(Boolean)).size,
+    };
+    return totals;
+  }, [items]);
 
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+
       {/* Toasts */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
@@ -474,13 +561,52 @@ export default function InventoryPage() {
           />
         )}
         {deleting && (
-          // DeleteConfirm component here – add your original DeleteConfirm if needed
-          <div>Delete confirmation modal placeholder</div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeleting(null)} />
+            <motion.div
+              className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-white/10"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-start gap-4 mb-5">
+                <div className="w-10 h-10 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground mb-1">Delete Inventory Item</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Permanently delete <span className="text-foreground font-medium">{deleting.description}</span> (
+                    <span className="font-mono text-primary text-xs">{deleting.factorial_code}</span>)?
+                    This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setDeleting(null)}
+                  className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {saving && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                  Delete Item
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-16">
-        {/* Hero section, grand totals cards, usage filter cards – add them back from your original code if needed */}
 
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-4">
@@ -497,8 +623,6 @@ export default function InventoryPage() {
                 New Item
               </button>
             </div>
-
-            {/* Search + filters toolbar – copy from original if needed */}
           </CardHeader>
 
           <CardContent className="p-0">
@@ -538,12 +662,19 @@ export default function InventoryPage() {
                   const isOpen = expanded[usage] ?? true;
                   const rows = grouped[usage] ?? [];
 
-                  const gQty = rows.reduce((sum, i) => sum + Number(i.quantity_of_item), 0);
-                  const gUsed = rows.reduce((sum, i) => sum + Number(i.quantity_used), 0);
-                  const gRemaining = rows.reduce((sum, i) => sum + Number(i.quantity_remaining), 0);
-                  const gTotal = rows.reduce((sum, i) => sum + Number(i.total_value), 0);
-                  const gUsedValue = rows.reduce((sum, i) => sum + Number(i.total_value_used), 0);
-                  const gRemValue = rows.reduce((sum, i) => sum + Number(i.total_value_remaining), 0);
+                  const gQty = rows.reduce((sum, i) => sum + (i.quantity_of_item ?? 0), 0);
+                  const gUsed = rows.reduce((sum, i) => sum + (i.quantity_used ?? 0), 0);
+                  const gRemainingQty = rows.reduce((sum, i) => {
+                    return sum + Math.max(0, (i.quantity_of_item ?? 0) - (i.quantity_used ?? 0));
+                  }, 0);
+                  const gTotal = rows.reduce((sum, i) => sum + (i.total_value ?? 0), 0);
+                  const gUsedValue = rows.reduce((sum, i) => {
+                    return sum + (i.total_value_used ?? (i.quantity_used ?? 0) * (i.cost_per_quantity ?? 0));
+                  }, 0);
+                  const gRemValue = rows.reduce((sum, i) => {
+                    const remQty = Math.max(0, (i.quantity_of_item ?? 0) - (i.quantity_used ?? 0));
+                    return sum + remQty * (i.cost_per_quantity ?? 0);
+                  }, 0);
 
                   return (
                     <div key={usage}>
@@ -603,89 +734,96 @@ export default function InventoryPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {rows.map((item, ri) => (
-                                    <motion.tr
-                                      key={item.id}
-                                      initial={{ opacity: 0, x: -6 }}
-                                      animate={{ opacity: 1, x: 0 }}
-                                      transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                      className={`border-b border-white/5 transition-colors ${s.row}`}
-                                    >
-                                      <td className="px-4 py-3.5 whitespace-nowrap">
-                                        <span className="font-mono text-xs font-semibold text-primary">{item.factorial_code}</span>
-                                      </td>
-                                      <td className="px-4 py-3.5 font-medium max-w-[160px]">
-                                        <span className="line-clamp-1">{item.description}</span>
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap">
-                                        <span className="font-mono text-xs text-muted-foreground">{item.serial_number || "—"}</span>
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap">{item.vendor || "—"}</td>
-                                      <td className="px-4 py-3.5 max-w-[140px]">
-                                        <span className="text-xs text-muted-foreground line-clamp-1">
-                                          {item.projects_used?.join(", ") || "—"}
-                                        </span>
-                                      </td>
-                                      <td className="px-4 py-3.5">
-                                        <Badge variant="outline" className={`${getUsageStyle(item.usage).badge} text-xs px-2 py-0`}>
-                                          {item.usage}
-                                        </Badge>
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono">
-                                        {fmtQty(Number(item.quantity_of_item))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-amber-300">
-                                        {fmtQty(Number(item.quantity_used))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-sky-300">
-                                        {fmtQty(Number(item.quantity_remaining))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap tabular-nums text-muted-foreground">
-                                        {fmt(Number(item.cost_per_quantity))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap font-bold text-emerald-400">
-                                        {fmt(Number(item.total_value))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap text-amber-300 font-medium">
-                                        {fmt(Number(item.total_value_used))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap text-sky-300 font-medium">
-                                        {fmt(Number(item.total_value_remaining))}
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground">
-                                        {fmtDate(item.date)}
-                                      </td>
-                                      <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[140px]">
-                                        <span className="line-clamp-1">{item.notes || "—"}</span>
-                                      </td>
-                                      <td className="px-4 py-3.5 whitespace-nowrap">
-                                        <div className="flex items-center gap-1.5">
-                                          <button
-                                            onClick={() => { setEditing(item); setModal("edit"); }}
-                                            title="Edit"
-                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                            </svg>
-                                          </button>
-                                          <button
-                                            onClick={() => setDeleting(item)}
-                                            title="Delete"
-                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                              <polyline points="3 6 5 6 21 6" />
-                                              <path d="M19 6l-1 14H6L5 6" />
-                                              <path d="M10 11v6M14 11v6" />
-                                              <path d="M9 6V4h6v2" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </motion.tr>
-                                  ))}
+                                  {rows.map((item, ri) => {
+                                    const qtyUsed     = item.quantity_used ?? 0;
+                                    const qtyRem      = Math.max(0, (item.quantity_of_item ?? 0) - qtyUsed);
+                                    const valUsed     = item.total_value_used ?? (qtyUsed * (item.cost_per_quantity ?? 0));
+                                    const valRem      = qtyRem * (item.cost_per_quantity ?? 0);
+
+                                    return (
+                                      <motion.tr
+                                        key={item.id}
+                                        initial={{ opacity: 0, x: -6 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: ri * 0.02, duration: 0.16 }}
+                                        className={`border-b border-white/5 transition-colors ${getUsageStyle(item.usage).row}`}
+                                      >
+                                        <td className="px-4 py-3.5 whitespace-nowrap">
+                                          <span className="font-mono text-xs font-semibold text-primary">{item.factorial_code}</span>
+                                        </td>
+                                        <td className="px-4 py-3.5 font-medium max-w-[160px]">
+                                          <span className="line-clamp-1">{item.description}</span>
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap">
+                                          <span className="font-mono text-xs text-muted-foreground">{item.serial_number || "—"}</span>
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap">{item.vendor || "—"}</td>
+                                        <td className="px-4 py-3.5 max-w-[140px]">
+                                          <span className="text-xs text-muted-foreground line-clamp-1">
+                                            {item.projects_used?.join(", ") || "—"}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3.5">
+                                          <Badge variant="outline" className={`${getUsageStyle(item.usage).badge} text-xs px-2 py-0`}>
+                                            {item.usage}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono">
+                                          {fmtQty(item.quantity_of_item ?? 0)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-amber-300">
+                                          {fmtQty(qtyUsed)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-sky-300">
+                                          {fmtQty(qtyRem)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap tabular-nums text-muted-foreground">
+                                          {fmt(item.cost_per_quantity ?? 0)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap font-bold text-emerald-400">
+                                          {fmt(item.total_value ?? 0)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap text-amber-300 font-medium">
+                                          {fmt(valUsed)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap text-sky-300 font-medium">
+                                          {fmt(valRem)}
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground">
+                                          {fmtDate(item.date)}
+                                        </td>
+                                        <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[140px]">
+                                          <span className="line-clamp-1">{item.notes || "—"}</span>
+                                        </td>
+                                        <td className="px-4 py-3.5 whitespace-nowrap">
+                                          <div className="flex items-center gap-1.5">
+                                            <button
+                                              onClick={() => { setEditing(item); setModal("edit"); }}
+                                              title="Edit"
+                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                              </svg>
+                                            </button>
+                                            <button
+                                              onClick={() => setDeleting(item)}
+                                              title="Delete"
+                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                                <polyline points="3 6 5 6 21 6" />
+                                                <path d="M19 6l-1 14H6L5 6" />
+                                                <path d="M10 11v6M14 11v6" />
+                                                <path d="M9 6V4h6v2" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </motion.tr>
+                                    );
+                                  })}
                                 </tbody>
                                 <tfoot>
                                   <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
@@ -695,7 +833,7 @@ export default function InventoryPage() {
                                     <td className="px-4 py-2.5" />
                                     <td className="px-4 py-2.5 font-bold tabular-nums">{fmtQty(gQty)}</td>
                                     <td className="px-4 py-2.5 font-bold tabular-nums text-amber-300">{fmtQty(gUsed)}</td>
-                                    <td className="px-4 py-2.5 font-bold tabular-nums text-sky-300">{fmtQty(gRemaining)}</td>
+                                    <td className="px-4 py-2.5 font-bold tabular-nums text-sky-300">{fmtQty(gRemainingQty)}</td>
                                     <td />
                                     <td className="px-4 py-2.5 font-bold text-emerald-400">{fmt(gTotal)}</td>
                                     <td className="px-4 py-2.5 font-bold text-amber-300">{fmt(gUsedValue)}</td>
@@ -737,4 +875,4 @@ export default function InventoryPage() {
       </div>
     </div>
   );
-}
+} 

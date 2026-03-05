@@ -123,7 +123,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
               className="flex flex-col overflow-hidden"
             >
               <span className="font-bold text-sm leading-tight text-foreground">
-                Finance Panel
+                Accounts
               </span>
               <span className="text-xs text-muted-foreground">
                 Reve Construct
