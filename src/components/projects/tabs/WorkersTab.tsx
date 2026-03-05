@@ -353,7 +353,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           *,
           milestone:project_milestones(id, title)
         `)
-        .eq('project_id', projectId)  // ← Added filter to only get workers for this project
+        .eq('project_id', projectId)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -506,13 +506,11 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       return;
     }
 
-    // Safety check: ensure projectId exists
     if (!projectId) {
       showToast('No project selected – cannot save worker', 'error');
       return;
     }
 
-    // Validate payment method specific fields
     if (workerForm.payment_method === 'bank_transfer') {
       if (!workerForm.bank_name || !workerForm.bank_account_number || !workerForm.bank_account_name) {
         showToast('Bank details are required for bank transfer', 'warning');
@@ -532,7 +530,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         showToast('Card details are required for card payment', 'warning');
         return;
       }
-      // Validate last 4 digits
       if (workerForm.card_number_last4.length !== 4 || !/^\d{4}$/.test(workerForm.card_number_last4)) {
         showToast('Card number must be exactly 4 digits', 'warning');
         return;
@@ -566,11 +563,10 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         cheque_payable_to: workerForm.payment_method === 'cheque' ? workerForm.cheque_payable_to : null,
         payment_notes: workerForm.payment_notes || null,
         status: 'active',
-        project_id: projectId,  // ← CRITICAL FIX: link worker to current project
+        project_id: projectId,
       };
 
       if (editingWorker) {
-        // Update existing worker
         const { error } = await supabase
           .from('workers')
           .update(workerData)
@@ -583,7 +579,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
 
         showToast('Worker updated successfully!', 'success');
       } else {
-        // Add new worker
         const { error } = await supabase
           .from('workers')
           .insert([workerData]);
@@ -814,7 +809,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     }
   };
 
-  const units = ['mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'laborer', 'supervisor', 'foreman', 'driver', 'general_worker'];
+  const units = ['mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'laborer'];
   const paymentMethods = [
     { value: 'cash', label: 'Cash', icon: Wallet },
     { value: 'bank_transfer', label: 'Bank Transfer', icon: Building2 },
@@ -874,7 +869,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           <StatCard icon={Users} title="Total Workers" value={stats.total_workers} color="text-primary" />
           <StatCard icon={UserCheck} title="Present Today" value={stats.present_today} color="text-green-600" />
           <StatCard icon={UserX} title="Absent Today" value={stats.absent_today} color="text-red-600" />
-          {/* <StatCard icon={TrendingUp} title="Performance" value={`${stats.avg_performance}%`} color="text-blue-600" /> */}
         </div>
 
         {/* Tab Navigation */}
@@ -884,7 +878,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
               { id: 'workers' as TabType, label: 'Workers List', icon: Users },
               { id: 'attendance' as TabType, label: 'Daily Attendance', icon: Clock },
               { id: 'assignments' as TabType, label: 'Task Assignments', icon: CheckCircle },
-              // { id: 'performance' as TabType, label: 'Performance', icon: TrendingUp },
             ].map((tab) => {
               const Icon = tab.icon;
               return (
@@ -1189,8 +1182,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           <th className="px-4 py-3 text-left font-semibold text-primary">Start Date</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Due Date</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Quality</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Notes</th>
                           {canEdit && <th className="px-4 py-3 text-center font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
@@ -1216,12 +1207,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                               <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>
                                 {a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                               </span>
-                            </td>
-                            <td className="px-4 py-3 text-blue-600 font-bold whitespace-nowrap">
-                              {a.quality_score != null ? `${a.quality_score}/100` : '—'}
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap max-w-xs truncate">
-                              {a.notes || '—'}
                             </td>
                             {canEdit && (
                               <td className="px-4 py-3 whitespace-nowrap">
@@ -1302,9 +1287,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                         <tr>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Task</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Quality Score</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Completed</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Notes</th>
                           {canEdit && <th className="px-4 py-3 text-left font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
@@ -1319,59 +1302,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                   {a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-blue-600 font-bold whitespace-nowrap">
-                                {canEdit ? (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={100}
-                                    value={a.quality_score ?? ''}
-                                    onChange={async e => {
-                                      const val = e.target.value === '' ? null : Number(e.target.value);
-                                      setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, quality_score: val } : ass));
-                                      try {
-                                        const { error } = await supabase
-                                          .from('worker_assignments')
-                                          .update({ quality_score: val, updated_at: new Date().toISOString() })
-                                          .eq('id', a.id);
-                                        if (error) showToast('Failed to update quality score', 'error');
-                                        else showToast('Quality score updated!', 'success');
-                                      } catch (err) {
-                                        showToast('Failed to update quality score', 'error');
-                                      }
-                                    }}
-                                    className="w-20 px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-blue-600 font-bold focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                                  />
-                                ) : (
-                                  a.quality_score != null ? `${a.quality_score}/100` : '—'
-                                )}
-                              </td>
                               <td className="px-4 py-3 text-green-600 font-bold whitespace-nowrap">{a.status === 'completed' ? 'Yes' : 'No'}</td>
-                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                                {canEdit ? (
-                                  <input
-                                    type="text"
-                                    value={a.notes ?? ''}
-                                    onChange={e => {
-                                      setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, notes: e.target.value } : ass));
-                                    }}
-                                    onBlur={async () => {
-                                      try {
-                                        const { error } = await supabase
-                                          .from('worker_assignments')
-                                          .update({ notes: a.notes, updated_at: new Date().toISOString() })
-                                          .eq('id', a.id);
-                                        if (error) showToast('Failed to update notes', 'error');
-                                      } catch (err) {
-                                        showToast('Failed to update notes', 'error');
-                                      }
-                                    }}
-                                    className="w-full px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
-                                  />
-                                ) : (
-                                  a.notes || '—'
-                                )}
-                              </td>
                               {canEdit && (
                                 <td className="px-4 py-3 whitespace-nowrap flex gap-2">
                                   <button
@@ -1533,7 +1464,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           onValueChange={(value: any) => setWorkerForm(prev => ({ 
                             ...prev, 
                             payment_method: value,
-                            // Clear other payment fields when changing method
                             bank_name: '',
                             bank_account_number: '',
                             bank_account_name: '',

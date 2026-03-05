@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 const clientSections = [
   { label: "My Projects", icon: Briefcase, path: "/client/projects" },
   { label: "Notifications", icon: Bell, path: "/client/notifications" },
-  { label: "Documents", icon: FileText, path: "/client/documents" },
+  // { label: "Documents", icon: FileText, path: "/client/documents" },
   // { label: "Reports", icon: BarChart3, path: "/client/reports" },
   { label: "Settings", icon: Settings, path: "/client/settings" },
 ];
