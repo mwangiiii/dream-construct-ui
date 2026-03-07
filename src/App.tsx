@@ -1,3 +1,61 @@
+// src/App.tsx
+import { useEffect, useState, useRef } from "react";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  Outlet,
+} from "react-router-dom";
+import {
+  Volume2,
+  VolumeX,
+  Volume1,
+  UserPlus,
+  Image as ImageIcon,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+import { supabase } from "@/lib/supabaseClient";
+import { getCurrentUser } from "@/lib/auth";
+
+// ─── Layouts ──────────────────────────────────────────────────────────────────
+import MainLayout from "./components/layout/MainLayout";
+import AdminLayout from "./components/layout/AdminLayout";
+import ClientLayout from "./components/layout/ClientLayout";
+import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
+import FinanceLayout from "./components/layout/FinanceLayout";
+
+// ─── Admin Pages ──────────────────────────────────────────────────────────────
+import AdminSettingsPage from "./pages/admin/settings";
+import ClientSettingsPage from "./pages/client/settings";
+import MediaManagement from "./pages/admin/mediaManagement";
+import AdminUserCreate from "./pages/admin/UserCreate";
+import UserManagement from "./pages/admin/UserManagement";
+import ReviewsManagement from "./pages/admin/ReviewsManagement";
+import Dashboard from "./pages/admin/Dashboard";
+import MediaCreate from "./pages/admin/multimedia/mediaCreate";
+
+// ─── Project Manager Pages ────────────────────────────────────────────────────
+import ProjectManagerProjectManagement from "./pages/project_manager/Projects/ProjectDetailPage.tsx";
+import PMsProjectDetailPage from "./pages/project_manager/projects.tsx";
+import ProjectManagerDashboard from "./pages/project_manager/dashboard";
+import PMStages from "./pages/project_manager/stages";
+import PMWorkers from "./pages/project_manager/workers";
+import PMDailyProgress from "./pages/project_manager/daily-progress";
+import PMMaterials from "./pages/project_manager/materials";
+import PMFinancials from "./pages/project_manager/financials";
+import PMIssues from "./pages/project_manager/issues";
+import PMReports from "./pages/project_manager/reports";
+import PMSettings from "./pages/project_manager/settings";
+
+// ─── Finance Pages ────────────────────────────────────────────────────────────
 import WorkInProgressPage from "./pages/finance/Work_in_progress";
 import ChangeOrdersTrackingPage from "./pages/finance/Change_orders_tracking";
 import InventoryPage from "./pages/finance/Inventory";
@@ -15,39 +73,19 @@ import CashFlowPage from "./pages/finance/CashFlowPage.tsx";
 import ChartOfAccountsPage from "./pages/finance/chart_of_accounts_page";
 import JobPostingPage from "./pages/finance/JobPosting";
 import PayrollChecklistPage from "./pages/finance/Payroll_checkList";
-import MediaGalleryPage from "./pages/MediaGalleryPage";
 import FinanceDashboardPage from "./pages/finance/FinanceDashboardPage";
-import PoliciesPage      from "./pages/PoliciesPage";
-import StaffPoliciesPage from "./pages/Staffpoliciespage";
-
-// src/App.tsx
-import { useEffect, useState, useRef } from "react";
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
-import { Volume2, VolumeX, Volume1, UserPlus, Plus, Image as ImageIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
-
-import { supabase } from "@/lib/supabaseClient";
-import { getCurrentUser } from "@/lib/auth";
-
-import MainLayout from "./components/layout/MainLayout";
-import AdminLayout from "./components/layout/AdminLayout";
-import ClientLayout from "./components/layout/ClientLayout";
-import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
-import FinanceLayout from "./components/layout/FinanceLayout";
-import AdminSettingsPage from "./pages/admin/settings";
-import ClientSettingsPage from "./pages/client/settings";
-import MediaManagement from "./pages/admin/mediaManagement";
-import ProjectManagerProjectManagement from "./pages/project_manager/Projects/ProjectDetailPage.tsx";
 import FinanceDetailPage from "./pages/FinanceDetailPage.tsx";
 
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
+// ─── Project Pages ────────────────────────────────────────────────────────────
+import ProjectManagementDashboard from "./components/dashboard/ProjectManagementDashboard";
+import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
 
-// Public Pages
+// ─── Client Pages ─────────────────────────────────────────────────────────────
+import ClientDashboard from "./pages/client/Dashboard";
+import ClientProjects from "./pages/client/projects";
+import ClientNotifications from "./pages/client/clientNotifications";
+
+// ─── Public Pages ─────────────────────────────────────────────────────────────
 import Index from "./pages/Index";
 import Services from "./pages/Services";
 import Projects from "./pages/Projects";
@@ -56,88 +94,164 @@ import Contact from "./pages/contact";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Reviews from "./pages/Reviews";
-
-// Admin Pages
-import Dashboard from "./pages/admin/Dashboard";
-import AdminUserCreate from "./pages/admin/UserCreate";
-import UserManagement from "./pages/admin/UserManagement";
-import ReviewsManagement from "./pages/admin/ReviewsManagement";
-
-// Project Management Pages
-import ProjectManagementDashboard from "./components/dashboard/ProjectManagementDashboard";
-import ProjectDetailPage from "./pages/projects/ProjectDetailPage";
-import PMsProjectDetailPage from "./pages/project_manager/projects.tsx";
-import ClientDashboard from "./pages/client/Dashboard";
-import ClientProjects from "./pages/client/projects";
-import ClientNotifications from "./pages/client/clientNotifications";
-
-// Media Management
-import MediaCreate from "./pages/admin/multimedia/mediaCreate";
-
-// 404
+import MediaGalleryPage from "./pages/MediaGalleryPage";
+import PoliciesPage from "./pages/PoliciesPage";
+import StaffPoliciesPage from "./pages/Staffpoliciespage";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
-
-// Project Manager Pages
-import ProjectManagerDashboard from "./pages/project_manager/dashboard";
-import PMStages from "./pages/project_manager/stages";
-import PMWorkers from "./pages/project_manager/workers";
-import PMDailyProgress from "./pages/project_manager/daily-progress";
-// import PMInspections from "./pages/project_manager/InspectionsTab.tsx";
-import PMMaterials from "./pages/project_manager/materials";
-import PMFinancials from "./pages/project_manager/financials";
-import PMIssues from "./pages/project_manager/issues";
-import PMReports from "./pages/project_manager/reports";
-import PMSettings from "./pages/project_manager/settings";
 
 const queryClient = new QueryClient();
 
-// Content Management Layout Component with Tabs
-const ContentManagement = () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// ROLES REFERENCE
+//   1 → admin
+//   2 → manager
+//   3 → project_manager
+//   4 → client
+//   5 → finance
+//   6 → surveyor
+//
+// Finance routes are accessible to: admin, manager, finance
+// Admin routes:           admin
+// Project manager routes: admin, manager, project_manager
+// Client routes:          client
+// Staff policies:         admin, manager, project_manager, finance, surveyor
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Role groups (single source of truth) ────────────────────────────────────
+const ROLES = {
+  ADMIN_ONLY:      ["admin"],
+  ADMIN_MANAGER:   ["admin", "manager"],
+  FINANCE:         ["admin", "manager", "finance"],
+  PROJECT_MGMT:    ["admin", "manager", "project_manager"],
+  CLIENT:          ["client"],
+  STAFF:           ["admin", "manager", "project_manager", "finance", "surveyor"],
+  ALL_INTERNAL:    ["admin", "manager", "project_manager", "finance", "surveyor"],
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROTECTED ROUTE — authentication + optional role check
+// ─────────────────────────────────────────────────────────────────────────────
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  requiredRoles?: readonly string[] | string[];
+}> = ({ children, requiredRoles }) => {
+  const [status, setStatus] = useState<"loading" | "authorized" | "unauthorized">("loading");
   const location = useLocation();
 
-  const tabs = [
-    { name: "Overview", path: "/admin/content" },
-    { name: "Reviews", path: "/admin/content/reviews" },
-    { name: "Media", path: "/admin/content/media" },
-    { name: "Pages", path: "/admin/content/pages" },
-  ];
+  useEffect(() => {
+    let cancelled = false;
 
+    const check = async () => {
+      try {
+        // 1. Must have a valid Supabase session
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          if (!cancelled) setStatus("unauthorized");
+          return;
+        }
+
+        // 2. No role restriction → any authenticated user passes
+        if (!requiredRoles || requiredRoles.length === 0) {
+          if (!cancelled) setStatus("authorized");
+          return;
+        }
+
+        // 3. Role check
+        const user = await getCurrentUser();
+        if (!user) {
+          if (!cancelled) setStatus("unauthorized");
+          return;
+        }
+
+        const hasRole = user.roles.some((r: { role_name: string }) =>
+          (requiredRoles as string[]).includes(r.role_name)
+        );
+
+        if (!cancelled) setStatus(hasRole ? "authorized" : "unauthorized");
+      } catch (err) {
+        console.error("[ProtectedRoute] auth check failed:", err);
+        if (!cancelled) setStatus("unauthorized");
+      }
+    };
+
+    check();
+    return () => { cancelled = true; };
+  }, [location.pathname]);               // re-check on navigation
+
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <span className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+          <p className="text-white/70 text-sm tracking-wide">Verifying access…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "unauthorized") {
+    // Preserve the attempted URL so login can redirect back
+    const redirectTo = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?redirectTo=${redirectTo}`} replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FINANCE LAYOUT GUARD — wraps every /finance/* route
+// Single place to change who can access the entire finance module.
+// ─────────────────────────────────────────────────────────────────────────────
+const FinanceGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <ProtectedRoute requiredRoles={ROLES.FINANCE}>
+    <FinanceLayout>{children}</FinanceLayout>
+  </ProtectedRoute>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTENT MANAGEMENT (nested tabs)
+// ─────────────────────────────────────────────────────────────────────────────
+const ContentManagement = () => {
+  const location = useLocation();
+  const tabs = [
+    { name: "Overview",  path: "/admin/content"        },
+    { name: "Reviews",   path: "/admin/content/reviews" },
+    { name: "Media",     path: "/admin/content/media"   },
+    { name: "Pages",     path: "/admin/content/pages"   },
+  ];
   return (
     <div className="p-8">
       <div className="mb-6">
         <h1 className="text-4xl font-bold">Content Management</h1>
         <p className="text-muted-foreground mt-2">Update website content and media</p>
       </div>
-
-      {/* Tabs Navigation */}
       <div className="border-b border-border mb-6">
         <nav className="flex space-x-8">
-          {tabs.map((tab) => {
+          {tabs.map(tab => {
             const isActive = location.pathname === tab.path;
             return (
-              <Link
-                key={tab.path}
-                to={tab.path}
+              <Link key={tab.path} to={tab.path}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   isActive
                     ? "border-primary text-primary"
                     : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                }`}
-              >
+                }`}>
                 {tab.name}
               </Link>
             );
           })}
         </nav>
       </div>
-
-      {/* Content Area - renders child routes */}
       <Outlet />
     </div>
   );
 };
 
-// Content Overview Component
 const ContentOverview = () => (
   <div className="space-y-6">
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -147,7 +261,6 @@ const ContentOverview = () => (
           <p className="text-muted-foreground">Manage customer reviews and testimonials</p>
         </div>
       </Link>
-
       <Link to="/admin/content/media" className="block">
         <div className="p-6 border rounded-xl hover:border-primary/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer group">
           <div className="flex items-center justify-between mb-4">
@@ -169,7 +282,6 @@ const ContentOverview = () => (
           </div>
         </div>
       </Link>
-
       <Link to="/admin/content/pages">
         <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
           <h3 className="text-xl font-semibold mb-2">Pages Content</h3>
@@ -180,180 +292,91 @@ const ContentOverview = () => (
   </div>
 );
 
-import { useNavigate } from "react-router-dom";
-
-// Media Library Tabs: Library & Create Media
 const MediaLibraryTabs = () => {
   const location = useLocation();
   const navigate = useNavigate();
-
   const tabs = [
-    { name: "Library", path: "/admin/content/media" },
+    { name: "Library",      path: "/admin/content/media"        },
     { name: "Create Media", path: "/admin/content/media/create" },
   ];
-
   const isCreatePage = location.pathname === "/admin/content/media/create";
-
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-3xl font-bold">Media Library</h2>
         <p className="text-muted-foreground mt-2">Manage and upload advertisements, images, and videos</p>
       </div>
-
       <div className="border-b border-border mb-6">
         <nav className="flex space-x-8">
-          {tabs.map((tab) => {
+          {tabs.map(tab => {
             const isActive = location.pathname === tab.path;
             return (
-              <button
-                key={tab.path}
-                onClick={() => navigate(tab.path)}
+              <button key={tab.path} onClick={() => navigate(tab.path)}
                 className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   isActive
                     ? "border-primary text-primary"
                     : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                }`}
-              >
+                }`}>
                 {tab.name}
               </button>
             );
           })}
         </nav>
       </div>
-
-      {isCreatePage ? (
-        <MediaCreate />
-      ) : (
-        <MediaManagement />
-      )}
+      {isCreatePage ? <MediaCreate /> : <MediaManagement />}
     </div>
   );
 };
 
 const MediaLibrary = MediaLibraryTabs;
-
 const PagesContent = () => (
   <div className="text-center py-12">
     <h2 className="text-2xl font-semibold mb-4">Pages Content</h2>
-    <p className="text-muted-foreground">Page content editor coming soon...</p>
+    <p className="text-muted-foreground">Page content editor coming soon…</p>
   </div>
 );
 
-const ProtectedRoute: React.FC<{
-  children: React.ReactNode;
-  requiredRoles?: string[];
-}> = ({ children, requiredRoles }) => {
-  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
-  const location = useLocation();
-
-  useEffect(() => {
-    checkAuthorization();
-  }, []);
-
-  const checkAuthorization = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        setIsAuthorized(false);
-        setLoading(false);
-        return;
-      }
-
-      if (!requiredRoles || requiredRoles.length === 0) {
-        setIsAuthorized(true);
-        setLoading(false);
-        return;
-      }
-
-      const user = await getCurrentUser();
-
-      if (!user) {
-        setIsAuthorized(false);
-        setLoading(false);
-        return;
-      }
-
-      const hasRequiredRole = user.roles.some(role =>
-        requiredRoles.includes(role.role_name)
-      );
-
-      setIsAuthorized(hasRequiredRole);
-      setLoading(false);
-    } catch (error) {
-      console.error("Authorization check failed:", error);
-      setIsAuthorized(false);
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
-      </div>
-    );
-  }
-
-  if (isAuthorized === false) {
-    const redirectTo = encodeURIComponent(location.pathname + location.search);
-    return <Navigate to={`/login?redirectTo=${redirectTo}`} replace />;
-  }
-
-  return <>{children}</>;
-};
-
+// ─────────────────────────────────────────────────────────────────────────────
+// APP
+// ─────────────────────────────────────────────────────────────────────────────
 const App = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(0.2);
+  const [isMuted, setIsMuted]   = useState(false);
+  const [volume, setVolume]     = useState(0.2);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-
     audio.volume = volume;
-
-    const playAudio = async () => {
-      try {
-        await audio.play();
-      } catch (err) {
-        console.log("Autoplay prevented");
-      }
+    const play = async () => {
+      try { await audio.play(); } catch { /* autoplay blocked */ }
     };
-
-    const handleInteraction = () => {
-      playAudio();
-      document.removeEventListener("click", handleInteraction);
-      document.removeEventListener("touchstart", handleInteraction);
-      document.removeEventListener("keydown", handleInteraction);
+    const onInteraction = () => {
+      play();
+      document.removeEventListener("click",      onInteraction);
+      document.removeEventListener("touchstart", onInteraction);
+      document.removeEventListener("keydown",    onInteraction);
     };
-
-    document.addEventListener("click", handleInteraction, { once: true });
-    document.addEventListener("touchstart", handleInteraction, { once: true });
-    document.addEventListener("keydown", handleInteraction, { once: true });
-
+    document.addEventListener("click",      onInteraction, { once: true });
+    document.addEventListener("touchstart", onInteraction, { once: true });
+    document.addEventListener("keydown",    onInteraction, { once: true });
     return () => {
-      document.removeEventListener("click", handleInteraction);
-      document.removeEventListener("touchstart", handleInteraction);
-      document.removeEventListener("keydown", handleInteraction);
+      document.removeEventListener("click",      onInteraction);
+      document.removeEventListener("touchstart", onInteraction);
+      document.removeEventListener("keydown",    onInteraction);
     };
   }, []);
 
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
-      audioRef.current.muted = isMuted;
+      audioRef.current.muted  = isMuted;
     }
   }, [volume, isMuted]);
 
-  const toggleMute = () => setIsMuted(!isMuted);
-
   const getVolumeIcon = () => {
     if (isMuted || volume === 0) return <VolumeX className="w-5 h-5" />;
-    if (volume < 0.5) return <Volume1 className="w-5 h-5" />;
+    if (volume < 0.5)            return <Volume1 className="w-5 h-5" />;
     return <Volume2 className="w-5 h-5" />;
   };
 
@@ -370,7 +393,7 @@ const App = () => {
         {/* Floating Volume Control */}
         <div className="fixed bottom-6 right-6 z-50">
           <button
-            onClick={toggleMute}
+            onClick={() => setIsMuted(m => !m)}
             className="bg-black/80 hover:bg-black text-white p-4 rounded-full shadow-lg backdrop-blur-sm transition-all hover:scale-110"
             aria-label={isMuted ? "Unmute" : "Mute"}
           >
@@ -380,63 +403,116 @@ const App = () => {
 
         <BrowserRouter>
           <Routes>
-            {/* === FINANCE ROUTES === */}
-            <Route path="/finance/dashboard" element={<FinanceLayout><FinanceDashboardPage /></FinanceLayout>} />
 
-            <Route path="/finance/work-in-progress" element={<FinanceLayout><WorkInProgressPage /></FinanceLayout>} />
-            <Route path="/finance/change-orders-tracking" element={<FinanceLayout><ChangeOrdersTrackingPage /></FinanceLayout>} />
-            <Route path="/finance/inventory" element={<FinanceLayout><InventoryPage /></FinanceLayout>} />
-            <Route path="/finance/end-month-close-checklist" element={<FinanceLayout><EndMonthCloseChecklistPage /></FinanceLayout>} />
-            <Route path="/finance/bank-reconciliation" element={<FinanceLayout><BankReconciliationPage /></FinanceLayout>} />
-            <Route path="/finance/fixed-asset-equipment-depreciation" element={<FinanceLayout><FixedAssetEquipmentDepreciationPage /></FinanceLayout>} />
-            <Route path="/finance/balance-sheet" element={<FinanceLayout><BalanceSheetPage /></FinanceLayout>} />
-            <Route path="/finance/statement-of-account" element={<FinanceLayout><StatementOfAccountPage /></FinanceLayout>} />
-            <Route path="/finance/income-statement" element={<FinanceLayout><IncomeStatementPage /></FinanceLayout>} />
-            <Route path="/finance/taxes" element={<FinanceLayout><TaxesPage /></FinanceLayout>} />
-            <Route path="/finance/loans" element={<FinanceLayout><LoansPage /></FinanceLayout>} />
-            <Route path="/finance/accounts-payable" element={<FinanceLayout><AccountsPayablePage /></FinanceLayout>} />
-            <Route path="/finance/accounts-received" element={<FinanceLayout><AccountsReceivedPage /></FinanceLayout>} />
-            <Route path="/finance/cash-flow" element={<FinanceLayout><CashFlowPage /></FinanceLayout>} />
-            <Route path="/finance/chart-of-accounts" element={<FinanceLayout><ChartOfAccountsPage /></FinanceLayout>} />
-            <Route path="/finance/job-posting" element={<FinanceLayout><JobPostingPage /></FinanceLayout>} />
-            <Route path="/finance/payroll-checklist" element={<FinanceLayout><PayrollChecklistPage /></FinanceLayout>} />
+            {/* ══════════════════════════════════════════════════════════════
+                FINANCE ROUTES
+                Protected by FinanceGuard → requires auth + finance role
+                Accessible by: admin (1), manager (2), finance (5)
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/finance/dashboard"
+              element={<FinanceGuard><FinanceDashboardPage /></FinanceGuard>} />
 
-            {/* === PUBLIC ROUTES === */}
-            <Route path="/" element={<MainLayout><Index /></MainLayout>} />
+            <Route path="/finance/work-in-progress"
+              element={<FinanceGuard><WorkInProgressPage /></FinanceGuard>} />
+
+            <Route path="/finance/change-orders-tracking"
+              element={<FinanceGuard><ChangeOrdersTrackingPage /></FinanceGuard>} />
+
+            <Route path="/finance/inventory"
+              element={<FinanceGuard><InventoryPage /></FinanceGuard>} />
+
+            <Route path="/finance/end-month-close-checklist"
+              element={<FinanceGuard><EndMonthCloseChecklistPage /></FinanceGuard>} />
+
+            <Route path="/finance/bank-reconciliation"
+              element={<FinanceGuard><BankReconciliationPage /></FinanceGuard>} />
+
+            <Route path="/finance/fixed-asset-equipment-depreciation"
+              element={<FinanceGuard><FixedAssetEquipmentDepreciationPage /></FinanceGuard>} />
+
+            <Route path="/finance/balance-sheet"
+              element={<FinanceGuard><BalanceSheetPage /></FinanceGuard>} />
+
+            <Route path="/finance/statement-of-account"
+              element={<FinanceGuard><StatementOfAccountPage /></FinanceGuard>} />
+
+            <Route path="/finance/income-statement"
+              element={<FinanceGuard><IncomeStatementPage /></FinanceGuard>} />
+
+            <Route path="/finance/taxes"
+              element={<FinanceGuard><TaxesPage /></FinanceGuard>} />
+
+            <Route path="/finance/loans"
+              element={<FinanceGuard><LoansPage /></FinanceGuard>} />
+
+            <Route path="/finance/accounts-payable"
+              element={<FinanceGuard><AccountsPayablePage /></FinanceGuard>} />
+
+            <Route path="/finance/accounts-received"
+              element={<FinanceGuard><AccountsReceivedPage /></FinanceGuard>} />
+
+            <Route path="/finance/cash-flow"
+              element={<FinanceGuard><CashFlowPage /></FinanceGuard>} />
+
+            <Route path="/finance/chart-of-accounts"
+              element={<FinanceGuard><ChartOfAccountsPage /></FinanceGuard>} />
+
+            <Route path="/finance/job-posting"
+              element={<FinanceGuard><JobPostingPage /></FinanceGuard>} />
+
+            <Route path="/finance/payroll-checklist"
+              element={<FinanceGuard><PayrollChecklistPage /></FinanceGuard>} />
+
+            {/* Finance index/detail — admin + manager only (sensitive overview) */}
+            <Route path="/finance/"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.FINANCE}>
+                  <ProjectManagerLayout>
+                    <FinanceDetailPage />
+                  </ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ══════════════════════════════════════════════════════════════
+                PUBLIC ROUTES — no auth required
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/"         element={<MainLayout><Index /></MainLayout>} />
             <Route path="/services" element={<MainLayout><Services /></MainLayout>} />
             <Route path="/projects" element={<MainLayout><Projects /></MainLayout>} />
-            <Route path="/team" element={<MainLayout><Team /></MainLayout>} />
-            <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
-            <Route path="/reviews" element={<MainLayout><Reviews /></MainLayout>} />
-            <Route path="/media" element={<MainLayout><MediaGalleryPage /></MainLayout>} />
+            <Route path="/team"     element={<MainLayout><Team /></MainLayout>} />
+            <Route path="/contact"  element={<MainLayout><Contact /></MainLayout>} />
+            <Route path="/reviews"  element={<MainLayout><Reviews /></MainLayout>} />
+            <Route path="/media"    element={<MainLayout><MediaGalleryPage /></MainLayout>} />
+            <Route path="/policies" element={<PoliciesPage />} />
 
-            {/* === PASSWORD RESET ROUTES === */}
+            {/* ══════════════════════════════════════════════════════════════
+                AUTH ROUTES
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/login"           element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-
-            {/* === AUTH ROUTES === */}
-            <Route path="/login" element={<Login />} />
+            <Route path="/reset-password"  element={<ResetPassword />} />
             {/* <Route path="/register" element={<Register />} /> */}
 
-            {/* === ADMIN ROUTES === */}
-            <Route
-              path="/admin"
+            {/* ══════════════════════════════════════════════════════════════
+                ADMIN ROUTES — admin only
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/admin"
               element={
-                <ProtectedRoute requiredRoles={["admin"]}>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_ONLY}>
                   <AdminLayout><Dashboard /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* USER MANAGEMENT */}
-            <Route
-              path="/admin/users"
+            {/* User Management */}
+            <Route path="/admin/users"
               element={
-                <ProtectedRoute requiredRoles={["admin"]}>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_ONLY}>
                   <AdminLayout>
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-6">
-                        <div></div>
+                        <div />
                         <Link to="/admin/users/create">
                           <Button className="bg-primary hover:bg-primary/90">
                             <UserPlus className="w-4 h-4 mr-2" />
@@ -451,293 +527,229 @@ const App = () => {
               }
             />
 
-            <Route
-              path="/admin/users/create"
+            <Route path="/admin/users/create"
               element={
-                <ProtectedRoute requiredRoles={["admin"]}>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_ONLY}>
                   <AdminLayout><AdminUserCreate /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* === PROJECT MANAGEMENT ROUTES === */}
-            <Route
-              path="/admin/projects"
+            {/* Project Management */}
+            <Route path="/admin/projects"
               element={
-                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager"]}>
-                  <AdminLayout>
-                    <ProjectManagementDashboard />
-                  </AdminLayout>
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <AdminLayout><ProjectManagementDashboard /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            <Route
-              path="/admin/projects/:id"
+            <Route path="/admin/projects/:id"
               element={
-                <ProtectedRoute requiredRoles={["admin", "manager", "project_manager"]}>
-                  <AdminLayout>
-                    <ProjectDetailPage />
-                  </AdminLayout>
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <AdminLayout><ProjectDetailPage /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* === CLIENT ROUTES === */}
-            <Route
-              path="/client/dashboard"
+            {/* Content Management — nested routes */}
+            <Route path="/admin/content"
               element={
-                <ProtectedRoute requiredRoles={["client"]}>
-                  <ClientLayout>
-                    <ClientDashboard />
-                  </ClientLayout>
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/client/projects"
-              element={
-                <ProtectedRoute requiredRoles={["client"]}>
-                  <ClientLayout>
-                    <ClientProjects />
-                  </ClientLayout>
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/client/projects/:id"
-              element={
-                <ProtectedRoute requiredRoles={["client"]}>
-                  <ClientLayout>
-                    <ProjectDetailPage />
-                  </ClientLayout>
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/client/notifications"
-              element={
-                <ProtectedRoute requiredRoles={["client"]}>
-                  <ClientLayout>
-                    <ClientNotifications />
-                  </ClientLayout>
-                </ProtectedRoute>
-              }
-            />
-
-            {/* === CONTENT MANAGEMENT — Nested Routes with Tabs === */}
-            <Route
-              path="/admin/content"
-              element={
-                <ProtectedRoute requiredRoles={["admin", "manager"]}>
-                  <AdminLayout>
-                    <ContentManagement />
-                  </AdminLayout>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
+                  <AdminLayout><ContentManagement /></AdminLayout>
                 </ProtectedRoute>
               }
             >
               <Route index element={<ContentOverview />} />
               <Route path="reviews" element={<ReviewsManagement />} />
-              <Route path="pages" element={<PagesContent />} />
+              <Route path="pages"   element={<PagesContent />} />
             </Route>
 
-            {/* MEDIA LIBRARY ROUTES */}
-            <Route
-              path="/admin/content/media"
+            <Route path="/admin/content/media"
               element={
-                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
                   <AdminLayout>
-                    <div className="p-8">
-                      <MediaLibrary />
-                    </div>
+                    <div className="p-8"><MediaLibrary /></div>
                   </AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            <Route
-              path="/admin/content/media/create"
+            <Route path="/admin/content/media/create"
               element={
-                <ProtectedRoute requiredRoles={["admin", "manager"]}>
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
                   <AdminLayout>
-                    <div className="p-8">
-                      <MediaLibrary />
-                    </div>
+                    <div className="p-8"><MediaLibrary /></div>
                   </AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* ADMIN SETTINGS */}
-            <Route
-              path="/admin/settings"
+            {/* Admin Settings — any authenticated user */}
+            <Route path="/admin/settings"
               element={
                 <ProtectedRoute>
-                  <AdminLayout>
-                    <AdminSettingsPage />
-                  </AdminLayout>
+                  <AdminLayout><AdminSettingsPage /></AdminLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* CLIENT SETTINGS */}
-            <Route
-              path="/client/settings"
+            {/* ══════════════════════════════════════════════════════════════
+                CLIENT ROUTES — client only
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/client/dashboard"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.CLIENT}>
+                  <ClientLayout><ClientDashboard /></ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/client/projects"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.CLIENT}>
+                  <ClientLayout><ClientProjects /></ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/client/projects/:id"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.CLIENT}>
+                  <ClientLayout><ProjectDetailPage /></ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/client/notifications"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.CLIENT}>
+                  <ClientLayout><ClientNotifications /></ClientLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Client Settings — any authenticated user */}
+            <Route path="/client/settings"
               element={
                 <ProtectedRoute>
-                  <ClientLayout>
-                    <ClientSettingsPage />
-                  </ClientLayout>
+                  <ClientLayout><ClientSettingsPage /></ClientLayout>
                 </ProtectedRoute>
               }
             />
 
-            {/* === PROJECT MANAGER ROUTES === */}
-            <Route
-              path="/pm/dashboard"
+            {/* ══════════════════════════════════════════════════════════════
+                PROJECT MANAGER ROUTES
+                Accessible by: admin (1), manager (2), project_manager (3)
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/pm/dashboard"
               element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <ProjectManagerDashboard />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/stages"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMStages />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/workers"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMWorkers />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/daily-progress"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMDailyProgress />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            {/* <Route
-              path="/project_manager/inspections"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMInspections />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            /> */}
-            <Route
-              path="/project_manager/materials"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMMaterials />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/financials"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMFinancials />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/issues"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMIssues />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/reports"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMReports />
-                  </ProjectManagerLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/project_manager/settings"
-              element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
-                  <ProjectManagerLayout>
-                    <PMSettings />
-                  </ProjectManagerLayout>
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><ProjectManagerDashboard /></ProjectManagerLayout>
                 </ProtectedRoute>
               }
             />
 
-            <Route
-              path="/project_manager/projects"
+            <Route path="/project_manager/stages"
               element={
-                <ProjectManagerLayout>
-                  <PMsProjectDetailPage />
-                </ProjectManagerLayout>
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMStages /></ProjectManagerLayout>
+                </ProtectedRoute>
               }
             />
 
-            <Route
-              path="/project_manager/projects/:id"
+            <Route path="/project_manager/workers"
               element={
-                <ProtectedRoute requiredRoles={["project_manager"]}>
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMWorkers /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/daily-progress"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMDailyProgress /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/materials"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMMaterials /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/financials"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMFinancials /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/issues"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMIssues /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/reports"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMReports /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/settings"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMSettings /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Projects list — no role restriction beyond auth */}
+            <Route path="/project_manager/projects"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
+                  <ProjectManagerLayout><PMsProjectDetailPage /></ProjectManagerLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/project_manager/projects/:id"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.PROJECT_MGMT}>
                   <ProjectManagerLayout>
                     <ProjectManagerProjectManagement />
                   </ProjectManagerLayout>
                 </ProtectedRoute>
               }
             />
-            <Route path="/policies" element={<PoliciesPage />} />
 
-       <Route
-         path="/policies"
-         element={
-           <ProtectedRoute allowedRoles={["admin", "manager", "worker", "supervisor"]}>
-             <StaffPoliciesPage />
-           </ProtectedRoute>
-         }
-       />
-
-            <Route
-              path="/finance/"
+            {/* ══════════════════════════════════════════════════════════════
+                STAFF POLICIES — all internal staff roles
+                Accessible by: admin, manager, project_manager, finance, surveyor
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/staff-policies"
               element={
-                <ProjectManagerLayout>
-                  <FinanceDetailPage />
-                </ProjectManagerLayout>
+                <ProtectedRoute requiredRoles={ROLES.STAFF}>
+                  <StaffPoliciesPage />
+                </ProtectedRoute>
               }
             />
 
-            {/* === 404 === */}
+            {/* ══════════════════════════════════════════════════════════════
+                404
+            ══════════════════════════════════════════════════════════════ */}
             <Route path="*" element={<NotFound />} />
+
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
