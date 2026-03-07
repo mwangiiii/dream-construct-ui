@@ -31,6 +31,7 @@ interface IncomeStatement {
   end_date: string;
   status: StatementStatus;
   notes: string;
+  project_id?: string | null;
   // Writable inputs
   gross_revenue: number;
   returns_and_allowances: number;
@@ -63,46 +64,44 @@ interface Props {
 const STATEMENT_STATUSES: StatementStatus[] = ["Draft", "Review", "Final", "Amended"];
 
 const STATUS_STYLE_IS: Record<StatementStatus, { accent: string; badge: string; dot: string; row: string }> = {
-  Draft: { accent: "text-slate-400", badge: "bg-slate-500/10 border-slate-500/30 text-slate-300", dot: "bg-slate-400", row: "hover:bg-slate-950/30" },
-  Review: { accent: "text-amber-400", badge: "bg-amber-500/10 border-amber-500/30 text-amber-300", dot: "bg-amber-400", row: "hover:bg-amber-950/30" },
-  Final: { accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", dot: "bg-emerald-400", row: "hover:bg-emerald-950/30" },
-  Amended: { accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300", dot: "bg-violet-400", row: "hover:bg-violet-950/30" },
+  Draft:   { accent: "text-slate-400",   badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",   dot: "bg-slate-400",   row: "hover:bg-slate-950/30"  },
+  Review:  { accent: "text-amber-400",   badge: "bg-amber-500/10 border-amber-500/30 text-amber-300",   dot: "bg-amber-400",   row: "hover:bg-amber-950/30"  },
+  Final:   { accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", dot: "bg-emerald-400", row: "hover:bg-emerald-950/30" },
+  Amended: { accent: "text-violet-400",  badge: "bg-violet-500/10 border-violet-500/30 text-violet-300", dot: "bg-violet-400",  row: "hover:bg-violet-950/30"  },
 };
 
 const PROJECT_STATUS_STYLE: Record<string, string> = {
-  planning: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  active: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  on_hold: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
   completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
-  new Intl.NumberFormat("en-KE", { 
-    style: "currency", 
-    currency: "KES", 
-    minimumFractionDigits: 2 
-  }).format(n);
+  new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", minimumFractionDigits: 2 }).format(n);
 
 const fmtC = (n: number) =>
-  new Intl.NumberFormat("en-KE", { 
-    notation: "compact", 
-    maximumFractionDigits: 1 
-  }).format(n);
+  new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+const fmtDateTime = (d: string | null | undefined) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+};
+
 /** Strip every GENERATED / server-managed column before any write */
 function toWritable(form: ISFormData): ISFormData {
   const {
-    period_label, start_date, end_date, status, notes,
+    period_label, start_date, end_date, status, notes, project_id,
     gross_revenue, returns_and_allowances, cost_of_goods_sold,
     operating_expenses, other_income, other_expenses, income_tax_expense,
   } = form;
   return {
-    period_label, start_date, end_date, status, notes,
+    period_label, start_date, end_date, status, notes, project_id: project_id ?? null,
     gross_revenue, returns_and_allowances, cost_of_goods_sold,
     operating_expenses, other_income, other_expenses, income_tax_expense,
   };
@@ -192,11 +191,13 @@ function SectionDivider({ label, dotColor, textColor }: { label: string; dotColo
 // ─── STATEMENT MODAL ──────────────────────────────────────────────────────────
 function StatementModal({
   initial,
+  projects,
   onSave,
   onClose,
   loading,
 }: {
   initial: ISFormData & { id?: number };
+  projects?: Project[];
   onSave: (d: ISFormData) => void;
   onClose: () => void;
   loading: boolean;
@@ -207,12 +208,11 @@ function StatementModal({
   const set = <K extends keyof ISFormData>(k: K, v: ISFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  // Live computed preview
-  const netRev = form.gross_revenue - form.returns_and_allowances;
-  const grossPnL = netRev - form.cost_of_goods_sold;
-  const opIncome = grossPnL - form.operating_expenses;
-  const beforeTax = opIncome + form.other_income - form.other_expenses;
-  const netInc = beforeTax - form.income_tax_expense;
+  const netRev    = (form.gross_revenue || 0) - (form.returns_and_allowances || 0);
+  const grossPnL  = netRev - (form.cost_of_goods_sold || 0);
+  const opIncome  = grossPnL - (form.operating_expenses || 0);
+  const beforeTax = opIncome + (form.other_income || 0) - (form.other_expenses || 0);
+  const netInc    = beforeTax - (form.income_tax_expense || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -242,6 +242,34 @@ function StatementModal({
 
         {/* Body */}
         <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+
+          {/* Project link (only shown in global/standalone context) */}
+          {projects && projects.length > 0 && (
+            <div className="col-span-2">
+              <Field label="Linked Project (optional)">
+                <div className="relative">
+                  <select
+                    value={form.project_id ?? ""}
+                    onChange={(e) => set("project_id", e.target.value || null)}
+                    className={inputCls + " pr-10"}
+                  >
+                    <option value="">— No project (standalone) —</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.project_number} · {p.title}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                      <path d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </Field>
+            </div>
+          )}
+
           {/* Identity */}
           <div className="col-span-2">
             <Field label="Period Label *">
@@ -267,9 +295,7 @@ function StatementModal({
                 className={inputCls + " pr-10"}
               >
                 {STATEMENT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
+                  <option key={s} value={s}>{s}</option>
                 ))}
               </select>
               <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -291,38 +317,26 @@ function StatementModal({
           {/* Revenue */}
           <SectionDivider label="Revenue" dotColor="bg-sky-400" textColor="text-sky-400" />
           <Field label="Gross Revenue (KES) *">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.gross_revenue}
-              onChange={(e) => set("gross_revenue", parseFloat(e.target.value) || 0)}
-              className={inputCls}
-            />
+            <input type="number" step="0.01" min="0"
+              value={form.gross_revenue || ""}
+              onChange={e => set("gross_revenue", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+              className={inputCls} />
           </Field>
           <Field label="Returns & Allowances (KES)">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.returns_and_allowances}
-              onChange={(e) => set("returns_and_allowances", parseFloat(e.target.value) || 0)}
-              className={inputCls}
-            />
+            <input type="number" step="0.01" min="0"
+              value={form.returns_and_allowances || ""}
+              onChange={e => set("returns_and_allowances", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+              className={inputCls} />
           </Field>
 
           {/* COGS */}
           <SectionDivider label="Cost of Goods Sold" dotColor="bg-rose-400" textColor="text-rose-400" />
           <div className="col-span-2">
             <Field label="Cost of Goods Sold (KES) *">
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.cost_of_goods_sold}
-                onChange={(e) => set("cost_of_goods_sold", parseFloat(e.target.value) || 0)}
-                className={inputCls}
-              />
+              <input type="number" step="0.01" min="0"
+                value={form.cost_of_goods_sold || ""}
+                onChange={e => set("cost_of_goods_sold", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+                className={inputCls} />
             </Field>
           </div>
 
@@ -330,51 +344,36 @@ function StatementModal({
           <SectionDivider label="Operating Expenses" dotColor="bg-orange-400" textColor="text-orange-400" />
           <div className="col-span-2">
             <Field label="Total Operating Expenses (KES)">
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.operating_expenses}
-                onChange={(e) => set("operating_expenses", parseFloat(e.target.value) || 0)}
-                className={inputCls}
-              />
+              <input type="number" step="0.01" min="0"
+                value={form.operating_expenses || ""}
+                onChange={e => set("operating_expenses", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+                className={inputCls} />
             </Field>
           </div>
 
           {/* Other Income / Expenses */}
           <SectionDivider label="Other Income / Expenses" dotColor="bg-emerald-400" textColor="text-emerald-400" />
           <Field label="Other Income (KES)">
-            <input
-              type="number"
-              step="0.01"
-              value={form.other_income}
-              onChange={(e) => set("other_income", parseFloat(e.target.value) || 0)}
-              className={inputCls}
-            />
+            <input type="number" step="0.01"
+              value={form.other_income || ""}
+              onChange={e => set("other_income", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+              className={inputCls} />
           </Field>
           <Field label="Other Expenses (KES)">
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.other_expenses}
-              onChange={(e) => set("other_expenses", parseFloat(e.target.value) || 0)}
-              className={inputCls}
-            />
+            <input type="number" step="0.01" min="0"
+              value={form.other_expenses || ""}
+              onChange={e => set("other_expenses", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+              className={inputCls} />
           </Field>
 
           {/* Tax */}
           <SectionDivider label="Tax" dotColor="bg-violet-400" textColor="text-violet-400" />
           <div className="col-span-2">
             <Field label="Income Tax Expense (KES)">
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.income_tax_expense}
-                onChange={(e) => set("income_tax_expense", parseFloat(e.target.value) || 0)}
-                className={inputCls}
-              />
+              <input type="number" step="0.01" min="0"
+                value={form.income_tax_expense || ""}
+                onChange={e => set("income_tax_expense", e.target.value === "" ? 0 : parseFloat(e.target.value))}
+                className={inputCls} />
             </Field>
           </div>
 
@@ -385,11 +384,11 @@ function StatementModal({
             </div>
             <div className="divide-y divide-white/6">
               {[
-                { label: "Net Revenue", value: netRev, color: "text-sky-300" },
+                { label: "Net Revenue",       value: netRev,    color: "text-sky-300" },
                 { label: "Gross Profit / Loss", value: grossPnL, color: grossPnL >= 0 ? "text-emerald-400" : "text-rose-400" },
-                { label: "Operating Income", value: opIncome, color: opIncome >= 0 ? "text-emerald-400" : "text-rose-400" },
+                { label: "Operating Income",  value: opIncome,  color: opIncome >= 0 ? "text-emerald-400" : "text-rose-400" },
                 { label: "Income Before Tax", value: beforeTax, color: beforeTax >= 0 ? "text-emerald-400" : "text-rose-400" },
-                { label: "Net Income", value: netInc, color: netInc >= 0 ? "text-emerald-400" : "text-rose-400", bold: true },
+                { label: "Net Income",        value: netInc,    color: netInc >= 0 ? "text-emerald-400" : "text-rose-400", bold: true },
               ].map((row) => (
                 <div key={row.label} className="flex items-center justify-between px-4 py-2">
                   <span className="text-xs text-muted-foreground">{row.label}</span>
@@ -514,8 +513,7 @@ function ProjectCard({ project, onSelect }: { project: Project; onSelect: (p: Pr
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
               <circle cx="12" cy="9" r="2.5" />
             </svg>
-            {project.site_city}
-            {project.site_country ? `, ${project.site_country}` : ""}
+            {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
           </span>
         )}
         {project.budget_numeric != null && (
@@ -565,10 +563,573 @@ function ProjectCard({ project, onSelect }: { project: Project; onSelect: (p: Pr
   );
 }
 
+// ─── GLOBAL INCOME STATEMENTS TABLE ──────────────────────────────────────────
+function GlobalIncomeStatementsTable({
+  projects,
+  canEdit,
+}: {
+  projects: Project[];
+  canEdit: boolean;
+}) {
+  const [statements, setStatements] = useState<IncomeStatement[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<StatementStatus | "All">("All");
+  const [filterProject, setFilterProject] = useState<string>("all");
+  const [modal, setModal] = useState<null | "create" | "edit">(null);
+  const [editing, setEditing] = useState<IncomeStatement | null>(null);
+  const [deleting, setDeleting] = useState<IncomeStatement | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<Record<StatementStatus, boolean>>(
+    Object.fromEntries(STATEMENT_STATUSES.map((s) => [s, true])) as Record<StatementStatus, boolean>
+  );
+  const { toasts, push } = useToast();
+
+  // Project lookup map
+  const projectMap = useMemo(
+    () => Object.fromEntries(projects.map((p) => [p.id, p])),
+    [projects]
+  );
+
+  const fetchStatements = useCallback(async () => {
+    setFetching(true);
+    try {
+      const data = await api.list();
+      setStatements(data);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load statements.", "error");
+    } finally {
+      setFetching(false);
+    }
+  }, [push]);
+
+  useEffect(() => { fetchStatements(); }, [fetchStatements]);
+
+  const handleCreate = async (form: ISFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      setStatements((p) => [row, ...p]);
+      push("Income statement added.");
+      setModal(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to add statement.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdate = async (form: ISFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const row = await api.update(editing.id, form);
+      setStatements((p) => p.map((s) => (s.id === editing.id ? row : s)));
+      push("Income statement updated.");
+      setModal(null);
+      setEditing(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update statement.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setStatements((p) => p.filter((s) => s.id !== deleting.id));
+      push("Income statement deleted.");
+      setDeleting(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete statement.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = useMemo(
+    () =>
+      statements.filter((s) => {
+        if (filterStatus !== "All" && s.status !== filterStatus) return false;
+        if (filterProject !== "all") {
+          if (filterProject === "standalone") {
+            if (s.project_id) return false;
+          } else {
+            if (s.project_id !== filterProject) return false;
+          }
+        }
+        if (search) {
+          const q = search.toLowerCase();
+          return (
+            s.period_label.toLowerCase().includes(q) ||
+            (s.notes ?? "").toLowerCase().includes(q) ||
+            (s.project_id ? (projectMap[s.project_id]?.title ?? "").toLowerCase().includes(q) : false)
+          );
+        }
+        return true;
+      }),
+    [statements, filterStatus, filterProject, search, projectMap]
+  );
+
+  const grouped = useMemo(() => {
+    const g: Partial<Record<StatementStatus, IncomeStatement[]>> = {};
+    STATEMENT_STATUSES.forEach((st) => {
+      const items = filtered.filter((s) => s.status === st);
+      if (items.length) g[st] = items;
+    });
+    return g;
+  }, [filtered]);
+
+  const grandRevenue  = statements.reduce((a, s) => a + Number(s.gross_revenue), 0);
+  const grandCOGS     = statements.reduce((a, s) => a + Number(s.cost_of_goods_sold), 0);
+  const grandOpEx     = statements.reduce((a, s) => a + Number(s.operating_expenses), 0);
+  const grandNetIncome = statements.reduce((a, s) => a + Number(s.net_income), 0);
+  const finalizedCount = statements.filter((s) => s.status === "Final").length;
+  const finalizedPct  = statements.length > 0 ? Math.round((finalizedCount / statements.length) * 100) : 0;
+  const standaloneCount = statements.filter((s) => !s.project_id).length;
+
+  const defaultForm: ISFormData = {
+    period_label: "", start_date: new Date().toISOString().slice(0, 10),
+    end_date: new Date().toISOString().slice(0, 10), status: "Draft", notes: "",
+    project_id: null, gross_revenue: 0, returns_and_allowances: 0,
+    cost_of_goods_sold: 0, operating_expenses: 0, other_income: 0,
+    other_expenses: 0, income_tax_expense: 0,
+  };
+
+  return (
+    <>
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
+                t.type === "success"
+                  ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
+                  : "bg-rose-950/80 border-rose-500/25 text-rose-300"
+              }`}
+            >
+              {t.msg}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {modal === "create" && (
+          <StatementModal
+            initial={defaultForm}
+            projects={projects}
+            onSave={handleCreate}
+            onClose={() => setModal(null)}
+            loading={saving}
+          />
+        )}
+        {modal === "edit" && editing && (
+          <StatementModal
+            initial={{ ...editing }}
+            projects={projects}
+            onSave={handleUpdate}
+            onClose={() => { setModal(null); setEditing(null); }}
+            loading={saving}
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm
+            statement={deleting}
+            onConfirm={handleDelete}
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
+        )}
+      </AnimatePresence>
+
+      <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-3xl font-bold">All Income Statements</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                {statements.length} statements across all projects · {standaloneCount} standalone
+              </p>
+            </div>
+            {canEdit && (
+              <button
+                onClick={() => setModal("create")}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg whitespace-nowrap"
+                style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New Statement
+              </button>
+            )}
+          </div>
+
+          {/* Summary pills */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+            {STATEMENT_STATUSES.map((st) => {
+              const s = STATUS_STYLE_IS[st];
+              const count = statements.filter((x) => x.status === st).length;
+              const net = statements.filter((x) => x.status === st).reduce((a, x) => a + Number(x.net_income), 0);
+              return (
+                <button
+                  key={st}
+                  onClick={() => setFilterStatus(filterStatus === st ? "All" : st)}
+                  className={`rounded-xl border p-3 text-left transition-all backdrop-blur-sm bg-white/5 ${
+                    filterStatus === st ? "border-white/25 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/18"
+                  }`}
+                >
+                  <div className={`text-[10px] uppercase tracking-widest font-semibold mb-1 ${s.accent}`}>{st}</div>
+                  <div className="text-xl font-bold text-foreground tabular-nums">{count}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                    {count > 0 ? (
+                      <span className={net >= 0 ? "text-emerald-400/80" : "text-rose-400/80"}>
+                        Net {fmtC(net)}
+                      </span>
+                    ) : "—"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Toolbar */}
+          <div className="flex flex-col sm:flex-row gap-3 mt-4">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+              </svg>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search period, notes or project…"
+                className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all"
+              />
+            </div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as StatementStatus | "All")}
+              className={inputCls + " px-4 py-2.5 w-auto"}
+            >
+              <option value="All">All Statuses</option>
+              {STATEMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select
+              value={filterProject}
+              onChange={(e) => setFilterProject(e.target.value)}
+              className={inputCls + " px-4 py-2.5 w-auto max-w-[200px]"}
+            >
+              <option value="all">All Projects</option>
+              <option value="standalone">Standalone only</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>
+              ))}
+            </select>
+            <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+              {filtered.length} / {statements.length}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {fetching ? (
+            <div className="flex items-center justify-center py-20 gap-3 text-muted-foreground text-sm">
+              <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+              Loading income statements…
+            </div>
+          ) : Object.keys(grouped).length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+              <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8" />
+              </svg>
+              <p className="text-sm">No income statements found.</p>
+              {canEdit && (
+                <button onClick={() => setModal("create")} className="text-xs text-primary hover:underline">
+                  Add first statement
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-white/8">
+              {STATEMENT_STATUSES.filter((st) => grouped[st]).map((stStatus) => {
+                const s = STATUS_STYLE_IS[stStatus];
+                const isOpen = expanded[stStatus];
+                const rows = grouped[stStatus]!;
+                const subtotalRevenue  = rows.reduce((a, r) => a + Number(r.gross_revenue), 0);
+                const subtotalNetRev   = rows.reduce((a, r) => a + Number(r.net_revenue), 0);
+                const subtotalGross    = rows.reduce((a, r) => a + Number(r.gross_profit), 0);
+                const subtotalOpIncome = rows.reduce((a, r) => a + Number(r.operating_income), 0);
+                const subtotalNet      = rows.reduce((a, r) => a + Number(r.net_income), 0);
+
+                return (
+                  <div key={stStatus}>
+                    <button
+                      onClick={() => setExpanded((p) => ({ ...p, [stStatus]: !p[stStatus] }))}
+                      className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                        <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{stStatus}</span>
+                        <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm font-semibold tabular-nums text-foreground hidden md:block">Rev {fmtC(subtotalRevenue)}</span>
+                        <span className={`text-sm font-semibold tabular-nums ${subtotalNet >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          Net {subtotalNet < 0 ? `(${fmtC(Math.abs(subtotalNet))})` : fmtC(subtotalNet)}
+                        </span>
+                        <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div
+                          key="rows"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22 }}
+                          style={{ overflow: "hidden" }}
+                        >
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
+                                  {[
+                                    "Project", "Period", "Dates",
+                                    "Gross Revenue", "Returns", "Net Revenue",
+                                    "COGS", "Gross Profit", "Op. Expenses",
+                                    "Op. Income", "Other Net", "Inc. Before Tax",
+                                    "Tax", "Net Income", "Last Updated",
+                                    ...(canEdit ? ["Actions"] : []),
+                                  ].map((h) => (
+                                    <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                                      {h}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((stmt, ri) => {
+                                  const netInc    = Number(stmt.net_income);
+                                  const grossProf = Number(stmt.gross_profit);
+                                  const opInc     = Number(stmt.operating_income);
+                                  const beforeTax = Number(stmt.income_before_tax);
+                                  const otherNet  = Number(stmt.other_income) - Number(stmt.other_expenses);
+                                  const linkedProject = stmt.project_id ? projectMap[stmt.project_id] : null;
+
+                                  return (
+                                    <motion.tr
+                                      key={stmt.id}
+                                      initial={{ opacity: 0, x: -6 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: ri * 0.02, duration: 0.16 }}
+                                      className={`border-b border-white/5 transition-colors ${s.row}`}
+                                    >
+                                      {/* Project */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        {linkedProject ? (
+                                          <div>
+                                            <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
+                                              {linkedProject.project_number}
+                                            </span>
+                                            <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[120px] truncate">{linkedProject.title}</div>
+                                          </div>
+                                        ) : (
+                                          <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">
+                                            Standalone
+                                          </span>
+                                        )}
+                                      </td>
+                                      {/* Period */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="font-semibold text-sm text-foreground">{stmt.period_label}</span>
+                                        {stmt.notes && <div className="text-[10px] text-muted-foreground truncate max-w-[140px]">{stmt.notes}</div>}
+                                      </td>
+                                      {/* Dates */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">
+                                        {fmtDate(stmt.start_date)}<br />{fmtDate(stmt.end_date)}
+                                      </td>
+                                      {/* Gross Revenue */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-sm font-semibold tabular-nums text-foreground font-mono">{fmt(Number(stmt.gross_revenue))}</span>
+                                      </td>
+                                      {/* Returns */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-xs tabular-nums text-muted-foreground font-mono">{fmt(Number(stmt.returns_and_allowances))}</span>
+                                      </td>
+                                      {/* Net Revenue */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-sm font-semibold tabular-nums text-sky-300 font-mono">{fmt(Number(stmt.net_revenue))}</span>
+                                      </td>
+                                      {/* COGS */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-xs tabular-nums text-rose-300 font-mono">{fmt(Number(stmt.cost_of_goods_sold))}</span>
+                                      </td>
+                                      {/* Gross Profit */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-sm font-bold tabular-nums font-mono ${grossProf >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                          {grossProf < 0 ? `(${fmt(Math.abs(grossProf))})` : fmt(grossProf)}
+                                        </span>
+                                      </td>
+                                      {/* Op Expenses */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-xs tabular-nums text-orange-300 font-mono">{fmt(Number(stmt.operating_expenses))}</span>
+                                      </td>
+                                      {/* Op Income */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-sm font-semibold tabular-nums font-mono ${opInc >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                          {opInc < 0 ? `(${fmt(Math.abs(opInc))})` : fmt(opInc)}
+                                        </span>
+                                      </td>
+                                      {/* Other Net */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-xs tabular-nums font-mono ${otherNet >= 0 ? "text-muted-foreground" : "text-rose-400/70"}`}>
+                                          {otherNet < 0 ? `(${fmt(Math.abs(otherNet))})` : fmt(otherNet)}
+                                        </span>
+                                      </td>
+                                      {/* Income Before Tax */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-xs tabular-nums font-mono ${beforeTax >= 0 ? "text-emerald-300" : "text-rose-400"}`}>
+                                          {beforeTax < 0 ? `(${fmt(Math.abs(beforeTax))})` : fmt(beforeTax)}
+                                        </span>
+                                      </td>
+                                      {/* Tax */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-xs tabular-nums text-violet-300 font-mono">{fmt(Number(stmt.income_tax_expense))}</span>
+                                      </td>
+                                      {/* Net Income */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-sm font-bold tabular-nums font-mono ${netInc >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                          {netInc < 0 ? `(${fmt(Math.abs(netInc))})` : fmt(netInc)}
+                                        </span>
+                                      </td>
+                                      {/* Last Updated */}
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="text-[10px] tabular-nums text-muted-foreground font-mono leading-relaxed">
+                                          {fmtDateTime(stmt.updated_at ?? stmt.created_at)}
+                                        </span>
+                                      </td>
+                                      {/* Actions */}
+                                      {canEdit && (
+                                        <td className="px-5 py-3.5 whitespace-nowrap">
+                                          <div className="flex items-center gap-1.5">
+                                            <button
+                                              onClick={() => { setEditing(stmt); setModal("edit"); }}
+                                              title="Edit"
+                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                              </svg>
+                                            </button>
+                                            <button
+                                              onClick={() => setDeleting(stmt)}
+                                              title="Delete"
+                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                                <polyline points="3 6 5 6 21 6" />
+                                                <path d="M19 6l-1 14H6L5 6" />
+                                                <path d="M10 11v6M14 11v6M9 6V4h6v2" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                        </td>
+                                      )}
+                                    </motion.tr>
+                                  );
+                                })}
+                              </tbody>
+                              {/* Sub-total footer */}
+                              <tfoot>
+                                <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+                                  <td colSpan={3} className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Subtotal — {stStatus}
+                                  </td>
+                                  <td className="px-5 py-2.5 text-sm font-bold tabular-nums text-foreground font-mono">{fmt(subtotalRevenue)}</td>
+                                  <td />
+                                  <td className="px-5 py-2.5 text-sm font-bold tabular-nums text-sky-300 font-mono">{fmt(subtotalNetRev)}</td>
+                                  <td />
+                                  <td className={`px-5 py-2.5 text-sm font-bold tabular-nums font-mono ${subtotalGross >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                    {subtotalGross < 0 ? `(${fmt(Math.abs(subtotalGross))})` : fmt(subtotalGross)}
+                                  </td>
+                                  <td />
+                                  <td className={`px-5 py-2.5 text-sm font-bold tabular-nums font-mono ${subtotalOpIncome >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                    {subtotalOpIncome < 0 ? `(${fmt(Math.abs(subtotalOpIncome))})` : fmt(subtotalOpIncome)}
+                                  </td>
+                                  <td colSpan={2} />
+                                  <td />
+                                  <td className={`px-5 py-2.5 text-sm font-bold tabular-nums font-mono ${subtotalNet >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                    {subtotalNet < 0 ? `(${fmt(Math.abs(subtotalNet))})` : fmt(subtotalNet)}
+                                  </td>
+                                  <td colSpan={canEdit ? 2 : 1} />
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+
+              {/* Grand total bar */}
+              {statements.length > 0 && (
+                <div className={`px-6 py-4 flex flex-wrap items-center gap-6 text-xs font-mono ${grandNetIncome >= 0 ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
+                  <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
+                  <span className="text-foreground">Revenue {fmt(grandRevenue)}</span>
+                  <span className="text-muted-foreground">−</span>
+                  <span className="text-rose-300">COGS {fmt(grandCOGS)}</span>
+                  <span className="text-muted-foreground">−</span>
+                  <span className="text-orange-300">OpEx {fmt(grandOpEx)}</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className={grandNetIncome >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                    Net {grandNetIncome < 0 ? `(${fmt(Math.abs(grandNetIncome))})` : fmt(grandNetIncome)}
+                  </span>
+                  <Badge className={`ml-auto ${grandNetIncome >= 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
+                    {statements.length} statements · {finalizedPct}% finalized
+                  </Badge>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!fetching && statements.length > 0 && (
+            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+              <span className="tabular-nums">
+                {statements.length} total · {finalizedCount} finalized · {standaloneCount} standalone
+              </span>
+              <button onClick={fetchStatements} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Refresh
+              </button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 // ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
 function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [totalStatements, setTotalStatements] = useState(0);
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -578,15 +1139,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
     setFetching(true);
     api
       .projects()
-      .then(async (data) => {
-        setProjects(data);
-
-        // Get total income statements (global count)
-        const { count, error } = await supabase
-          .from("income_statement")
-          .select("*", { count: "exact", head: true });
-        if (!error && count !== null) setTotalStatements(count);
-      })
+      .then((data) => setProjects(data))
       .catch((err: unknown) => push(err instanceof Error ? err.message : "Failed to load projects.", "error"))
       .finally(() => setFetching(false));
   }, [push]);
@@ -621,9 +1174,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           {toasts.map((t) => (
             <motion.div
               key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
+              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
                 t.type === "success"
                   ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
@@ -645,38 +1196,32 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Statement</span>
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
-            Select a project to view or manage its income statements by period.
+            Select a project to view its statements, or manage all statements below.
           </p>
         </motion.div>
 
-        {/* Summary cards */}
+        {/* Summary card */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
-          className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8"
+          className="grid grid-cols-1 sm:grid-cols-1 gap-4 mb-8"
         >
           <div className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
             <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">Total Projects</div>
             <div className="text-3xl font-bold text-foreground tabular-nums">{projects.length}</div>
             <div className="text-xs text-muted-foreground mt-1">in system</div>
           </div>
-          <div className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
-            <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">Total Income Statements</div>
-            <div className="text-3xl font-bold text-foreground tabular-nums">{totalStatements}</div>
-            <div className="text-xs text-muted-foreground mt-1">across the system</div>
-          </div>
         </motion.div>
 
         {/* Projects card */}
-        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-10">
           <CardHeader className="pb-4">
             <CardTitle className="text-3xl font-bold">Projects</CardTitle>
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                 </svg>
                 <input
                   value={search}
@@ -735,12 +1280,29 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             )}
           </CardContent>
         </Card>
+
+        {/* ── GLOBAL INCOME STATEMENTS TABLE ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.25 }}
+        >
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-1 h-6 rounded-full bg-gradient-to-b from-primary to-accent" />
+            <h2 className="text-2xl font-bold text-foreground">All Income Statements</h2>
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-xs text-muted-foreground">Across every project + standalone entries</span>
+          </div>
+          {!fetching && (
+            <GlobalIncomeStatementsTable projects={projects} canEdit={true} />
+          )}
+        </motion.div>
       </div>
     </div>
   );
 }
 
-// ─── STATEMENTS VIEW ──────────────────────────────────────────────────────────
+// ─── STATEMENTS VIEW (per-project) ───────────────────────────────────────────
 function StatementsView({ project, canEdit, onBack }: { project: Project; canEdit: boolean; onBack: () => void }) {
   const [statements, setStatements] = useState<IncomeStatement[]>([]);
   const [fetching, setFetching] = useState(false);
@@ -754,7 +1316,6 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
     Object.fromEntries(STATEMENT_STATUSES.map((s) => [s, true])) as Record<StatementStatus, boolean>
   );
   const { toasts, push } = useToast();
-  const currency = "KES";
 
   const fetchStatements = useCallback(async () => {
     setFetching(true);
@@ -769,14 +1330,12 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
     }
   }, [push]);
 
-  useEffect(() => {
-    fetchStatements();
-  }, [fetchStatements]);
+  useEffect(() => { fetchStatements(); }, [fetchStatements]);
 
   const handleCreate = async (form: ISFormData) => {
     setSaving(true);
     try {
-      const row = await api.create(form);
+      const row = await api.create({ ...form, project_id: project.id });
       setStatements((p) => [row, ...p]);
       push("Income statement added.");
       setModal(null);
@@ -818,7 +1377,6 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
     }
   };
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
   const filtered = useMemo(
     () =>
       statements.filter((s) => {
@@ -859,14 +1417,21 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
     [statements]
   );
 
-  const grandRevenue = statements.reduce((a, s) => a + Number(s.gross_revenue), 0);
-  const grandCOGS = statements.reduce((a, s) => a + Number(s.cost_of_goods_sold), 0);
-  const grandOpEx = statements.reduce((a, s) => a + Number(s.operating_expenses), 0);
+  const grandRevenue   = statements.reduce((a, s) => a + Number(s.gross_revenue), 0);
+  const grandCOGS      = statements.reduce((a, s) => a + Number(s.cost_of_goods_sold), 0);
+  const grandOpEx      = statements.reduce((a, s) => a + Number(s.operating_expenses), 0);
   const grandNetIncome = statements.reduce((a, s) => a + Number(s.net_income), 0);
   const finalizedCount = statements.filter((s) => s.status === "Final").length;
-  const finalizedPct = statements.length > 0 ? Math.round((finalizedCount / statements.length) * 100) : 0;
+  const finalizedPct   = statements.length > 0 ? Math.round((finalizedCount / statements.length) * 100) : 0;
+  const projectStatus  = project.status ?? "planning";
 
-  const projectStatus = project.status ?? "planning";
+  const defaultForm: ISFormData = {
+    period_label: "", start_date: new Date().toISOString().slice(0, 10),
+    end_date: new Date().toISOString().slice(0, 10), status: "Draft", notes: "",
+    project_id: project.id, gross_revenue: 0, returns_and_allowances: 0,
+    cost_of_goods_sold: 0, operating_expenses: 0, other_income: 0,
+    other_expenses: 0, income_tax_expense: 0,
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -876,9 +1441,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
           {toasts.map((t) => (
             <motion.div
               key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
+              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
                 t.type === "success"
                   ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
@@ -894,10 +1457,14 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
       {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <StatementModal initial={{ period_label: "", start_date: new Date().toISOString().slice(0, 10), end_date: new Date().toISOString().slice(0, 10), status: "Draft", notes: "", gross_revenue: 0, returns_and_allowances: 0, cost_of_goods_sold: 0, operating_expenses: 0, other_income: 0, other_expenses: 0, income_tax_expense: 0 }} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
+          <StatementModal initial={defaultForm} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
         )}
-        {modal === "edit" && editing && <StatementModal initial={{ ...editing }} onSave={handleUpdate} onClose={() => { setModal(null); setEditing(null); }} loading={saving} />}
-        {deleting && <DeleteConfirm statement={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />}
+        {modal === "edit" && editing && (
+          <StatementModal initial={{ ...editing }} onSave={handleUpdate} onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+        )}
+        {deleting && (
+          <DeleteConfirm statement={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+        )}
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-16">
@@ -927,8 +1494,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
               </h1>
               {project.site_city && (
                 <p className="text-xl text-muted-foreground mt-2">
-                  {project.site_city}
-                  {project.site_country ? `, ${project.site_country}` : ""}
+                  {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
                 </p>
               )}
             </div>
@@ -959,41 +1525,25 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                 <div className="text-xs text-muted-foreground mt-1 tabular-nums">
                   {totals.count > 0 ? (
                     <span className={totals.net_income >= 0 ? "text-emerald-400/80" : "text-rose-400/80"}>Net {fmtC(totals.net_income)}</span>
-                  ) : (
-                    "—"
-                  )}
+                  ) : "—"}
                 </div>
               </button>
             );
           })}
 
           {/* Finalized rate card */}
-          <div
-            className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
-              finalizedPct === 100
-                ? "bg-emerald-500/5 border-emerald-500/20"
-                : finalizedPct >= 50
-                  ? "bg-yellow-500/5 border-yellow-500/20"
-                  : "bg-rose-500/5 border-rose-500/20"
-            }`}
-          >
-            <div
-              className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${
-                finalizedPct === 100 ? "text-emerald-400" : finalizedPct >= 50 ? "text-yellow-400" : "text-rose-400"
-              }`}
-            >
-              Finalized
-            </div>
-            <div
-              className={`text-2xl font-bold tabular-nums ${
-                finalizedPct === 100 ? "text-emerald-400" : finalizedPct >= 50 ? "text-yellow-400" : "text-rose-400"
-              }`}
-            >
-              {finalizedPct}%
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {finalizedCount} / {statements.length} statements
-            </div>
+          <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
+            finalizedPct === 100 ? "bg-emerald-500/5 border-emerald-500/20"
+            : finalizedPct >= 50 ? "bg-yellow-500/5 border-yellow-500/20"
+            : "bg-rose-500/5 border-rose-500/20"
+          }`}>
+            <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${
+              finalizedPct === 100 ? "text-emerald-400" : finalizedPct >= 50 ? "text-yellow-400" : "text-rose-400"
+            }`}>Finalized</div>
+            <div className={`text-2xl font-bold tabular-nums ${
+              finalizedPct === 100 ? "text-emerald-400" : finalizedPct >= 50 ? "text-yellow-400" : "text-rose-400"
+            }`}>{finalizedPct}%</div>
+            <div className="text-xs text-muted-foreground mt-1">{finalizedCount} / {statements.length} statements</div>
           </div>
         </motion.div>
 
@@ -1020,8 +1570,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                 </svg>
                 <input
                   value={search}
@@ -1036,11 +1585,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                 className={inputCls + " px-4 py-2.5 w-auto"}
               >
                 <option value="All">All Statuses</option>
-                {STATEMENT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {STATEMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
               <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
                 {filtered.length} / {statements.length} shown
@@ -1072,15 +1617,14 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                   const s = STATUS_STYLE_IS[stStatus];
                   const isOpen = expanded[stStatus];
                   const rows = grouped[stStatus]!;
-                  const subtotalRevenue = rows.reduce((a, r) => a + Number(r.gross_revenue), 0);
-                  const subtotalNetRev = rows.reduce((a, r) => a + Number(r.net_revenue), 0);
-                  const subtotalGross = rows.reduce((a, r) => a + Number(r.gross_profit), 0);
+                  const subtotalRevenue  = rows.reduce((a, r) => a + Number(r.gross_revenue), 0);
+                  const subtotalNetRev   = rows.reduce((a, r) => a + Number(r.net_revenue), 0);
+                  const subtotalGross    = rows.reduce((a, r) => a + Number(r.gross_profit), 0);
                   const subtotalOpIncome = rows.reduce((a, r) => a + Number(r.operating_income), 0);
-                  const subtotalNet = rows.reduce((a, r) => a + Number(r.net_income), 0);
+                  const subtotalNet      = rows.reduce((a, r) => a + Number(r.net_income), 0);
 
                   return (
                     <div key={stStatus}>
-                      {/* Group header toggle */}
                       <button
                         onClick={() => setExpanded((p) => ({ ...p, [stStatus]: !p[stStatus] }))}
                         className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
@@ -1101,7 +1645,6 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                         </div>
                       </button>
 
-                      {/* Rows */}
                       <AnimatePresence initial={false}>
                         {isOpen && (
                           <motion.div
@@ -1117,19 +1660,10 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                 <thead>
                                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                                     {[
-                                      "Period",
-                                      "Dates",
-                                      "Gross Revenue",
-                                      "Returns",
-                                      "Net Revenue",
-                                      "COGS",
-                                      "Gross Profit",
-                                      "Op. Expenses",
-                                      "Op. Income",
-                                      "Other Net",
-                                      "Inc. Before Tax",
-                                      "Tax",
-                                      "Net Income",
+                                      "Period", "Dates", "Gross Revenue", "Returns", "Net Revenue",
+                                      "COGS", "Gross Profit", "Op. Expenses", "Op. Income",
+                                      "Other Net", "Inc. Before Tax", "Tax", "Net Income",
+                                      "Last Updated",
                                       ...(canEdit ? ["Actions"] : []),
                                     ].map((h) => (
                                       <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
@@ -1140,11 +1674,11 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                 </thead>
                                 <tbody>
                                   {rows.map((stmt, ri) => {
-                                    const netInc = Number(stmt.net_income);
+                                    const netInc    = Number(stmt.net_income);
                                     const grossProf = Number(stmt.gross_profit);
-                                    const opInc = Number(stmt.operating_income);
+                                    const opInc     = Number(stmt.operating_income);
                                     const beforeTax = Number(stmt.income_before_tax);
-                                    const otherNet = Number(stmt.other_income) - Number(stmt.other_expenses);
+                                    const otherNet  = Number(stmt.other_income) - Number(stmt.other_expenses);
 
                                     return (
                                       <motion.tr
@@ -1159,9 +1693,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                           {stmt.notes && <div className="text-[10px] text-muted-foreground truncate max-w-[160px]">{stmt.notes}</div>}
                                         </td>
                                         <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">
-                                          {fmtDate(stmt.start_date)}
-                                          <br />
-                                          {fmtDate(stmt.end_date)}
+                                          {fmtDate(stmt.start_date)}<br />{fmtDate(stmt.end_date)}
                                         </td>
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <span className="text-sm font-semibold tabular-nums text-foreground font-mono">{fmt(Number(stmt.gross_revenue))}</span>
@@ -1206,14 +1738,17 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                             {netInc < 0 ? `(${fmt(Math.abs(netInc))})` : fmt(netInc)}
                                           </span>
                                         </td>
+                                        {/* Last Updated */}
+                                        <td className="px-5 py-3.5 whitespace-nowrap">
+                                          <span className="text-[10px] tabular-nums text-muted-foreground font-mono leading-relaxed">
+                                            {fmtDateTime(stmt.updated_at ?? stmt.created_at)}
+                                          </span>
+                                        </td>
                                         {canEdit && (
                                           <td className="px-5 py-3.5 whitespace-nowrap">
                                             <div className="flex items-center gap-1.5">
                                               <button
-                                                onClick={() => {
-                                                  setEditing(stmt);
-                                                  setModal("edit");
-                                                }}
+                                                onClick={() => { setEditing(stmt); setModal("edit"); }}
                                                 title="Edit"
                                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
                                               >
@@ -1230,8 +1765,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                                   <polyline points="3 6 5 6 21 6" />
                                                   <path d="M19 6l-1 14H6L5 6" />
-                                                  <path d="M10 11v6M14 11v6" />
-                                                  <path d="M9 6V4h6v2" />
+                                                  <path d="M10 11v6M14 11v6M9 6V4h6v2" />
                                                 </svg>
                                               </button>
                                             </div>
@@ -1242,7 +1776,6 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                   })}
                                 </tbody>
 
-                                {/* Sub-total footer */}
                                 <tfoot>
                                   <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
                                     <td colSpan={2} className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1264,7 +1797,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                                     <td className={`px-5 py-2.5 text-sm font-bold tabular-nums font-mono ${subtotalNet >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                                       {subtotalNet < 0 ? `(${fmt(Math.abs(subtotalNet))})` : fmt(subtotalNet)}
                                     </td>
-                                    {canEdit && <td />}
+                                    <td colSpan={canEdit ? 2 : 1} />
                                   </tr>
                                 </tfoot>
                               </table>
@@ -1276,7 +1809,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
                   );
                 })}
 
-                {/* Grand total summary bar */}
+                {/* Grand total */}
                 {statements.length > 0 && (
                   <div className={`px-6 py-4 flex flex-wrap items-center gap-6 text-xs font-mono ${grandNetIncome >= 0 ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
                     <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
@@ -1297,16 +1830,12 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
               </div>
             )}
 
-            {/* Footer */}
             {!fetching && statements.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
-                <span className="tabular-nums">
-                  {statements.length} total statements · {finalizedCount} finalized
-                </span>
+                <span className="tabular-nums">{statements.length} total statements · {finalizedCount} finalized</span>
                 <button onClick={fetchStatements} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="M23 4v6h-6" />
-                    <path d="M1 20v-6h6" />
+                    <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                   </svg>
                   Refresh
@@ -1331,9 +1860,7 @@ export default function IncomeStatementPage({ projectId, canEdit = true }: Props
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
       .eq("id", projectId)
       .single()
-      .then(({ data }) => {
-        if (data) setSelectedProject(data as Project);
-      })
+      .then(({ data }) => { if (data) setSelectedProject(data as Project); })
       .catch(console.error);
   }, [projectId]);
 

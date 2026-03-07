@@ -675,7 +675,10 @@ function EntryModal({
             <SectionLabel label="Gross Amount & VAT" dotColor="bg-amber-400" textColor="text-amber-400" sub="Kenya VAT standard 16%" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Gross Amount (KES) *" hint="Tax-inclusive figure">
-                <input type="number" step="0.01" min="0" value={form.gross_amount || ""} onChange={(e) => set("gross_amount", parseFloat(e.target.value) || 0)} placeholder="0.00" className={inputCls + " font-bold"} />
+                <input type="number" step="0.01" min="0" value={form.gross_amount === 0 ? (form.gross_amount === "" ? "" : "0") : form.gross_amount || ""} onChange={(e) => {
+                  const val = e.target.value;
+                  set("gross_amount", val === "" ? "" : parseFloat(val));
+                }} placeholder="0.00" className={inputCls + " font-bold"} />
               </Field>
               <Field label="VAT Rate (%)" hint="Standard 16% or exempt 0%">
                 <div className="flex gap-1 h-10 rounded-xl bg-white/5 border border-white/10 p-1">

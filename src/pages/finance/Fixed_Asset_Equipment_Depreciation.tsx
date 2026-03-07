@@ -339,8 +339,8 @@ function AssetModal({
               type="number"
               step="0.01"
               min="0"
-              value={form.cost}
-              onChange={(e) => set("cost", parseFloat(e.target.value) || 0)}
+              value={form.cost === 0 ? (form.cost === "" ? "" : "0") : form.cost || ""}
+              onChange={e => set("cost", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
             />
           </Field>
@@ -349,8 +349,8 @@ function AssetModal({
               type="number"
               step="0.01"
               min="0"
-              value={form.salvage_value}
-              onChange={(e) => set("salvage_value", parseFloat(e.target.value) || 0)}
+              value={form.salvage_value === 0 ? (form.salvage_value === "" ? "" : "0") : form.salvage_value || ""}
+              onChange={e => set("salvage_value", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
             />
           </Field>
@@ -390,8 +390,8 @@ function AssetModal({
             <input
               type="number"
               min="1"
-              value={form.useful_life_years}
-              onChange={(e) => set("useful_life_years", parseInt(e.target.value) || 1)}
+              value={form.useful_life_years === 0 ? (form.useful_life_years === "" ? "" : "0") : form.useful_life_years || ""}
+              onChange={e => set("useful_life_years", e.target.value === "" ? "" : parseInt(e.target.value))}
               className={inputCls}
             />
           </Field>
@@ -406,8 +406,8 @@ function AssetModal({
             <input
               type="number"
               min="0"
-              value={form.years}
-              onChange={(e) => set("years", parseInt(e.target.value) || 0)}
+              value={form.years === 0 ? (form.years === "" ? "" : "0") : form.years || ""}
+              onChange={e => set("years", e.target.value === "" ? "" : parseInt(e.target.value))}
               className={inputCls}
             />
           </Field>
@@ -417,8 +417,8 @@ function AssetModal({
               type="number"
               step="0.01"
               min="0"
-              value={form.previous_depreciation}
-              onChange={(e) => set("previous_depreciation", parseFloat(e.target.value) || 0)}
+              value={form.previous_depreciation === 0 ? (form.previous_depreciation === "" ? "" : "0") : form.previous_depreciation || ""}
+              onChange={e => set("previous_depreciation", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
             />
           </Field>
@@ -427,8 +427,8 @@ function AssetModal({
               type="number"
               step="0.01"
               min="0"
-              value={form.annual_depreciation}
-              onChange={(e) => set("annual_depreciation", parseFloat(e.target.value) || 0)}
+              value={form.annual_depreciation === 0 ? (form.annual_depreciation === "" ? "" : "0") : form.annual_depreciation || ""}
+              onChange={e => set("annual_depreciation", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
             />
           </Field>

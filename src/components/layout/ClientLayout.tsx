@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
+import { ScrollText } from "lucide-react";
+
 import {
   LayoutDashboard,
   Users,
@@ -56,6 +58,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     // { icon: Briefcase, label: "Notification Center", path: "/client/notifications" },
     // { icon: FileText, label: "Content", path: "" },
     { icon: Settings, label: "Settings", path: "/client/settings" },
+    // { icon: ScrollText, label: "Policies", path: "policies" },
   ];
 
   // Determine sidebar width and margin classes

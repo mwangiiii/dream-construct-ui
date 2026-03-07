@@ -239,20 +239,20 @@ function EntryModal({ initial, onSave, onClose, loading }: {
             </Field>
           </div>
           <Field label="Added Cost (KES) *">
-            <input type="number" step="0.01" min="0" value={form.added_cost}
-              onChange={(e) => setField("added_cost", parseFloat(e.target.value) || 0)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={form.added_cost === 0 ? (form.added_cost === "" ? "" : "0") : form.added_cost || ""}
+              onChange={e => setField("added_cost", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
           </Field>
           <Field label="New Timeline">
             <input type="date" value={form.new_timeline ?? ""}
               onChange={(e) => setField("new_timeline", e.target.value || null)} className={inputCls} />
           </Field>
           <Field label="Initial Budget (KES) *">
-            <input type="number" step="0.01" min="0" value={form.initial_budget}
-              onChange={(e) => setField("initial_budget", parseFloat(e.target.value) || 0)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={form.initial_budget === 0 ? (form.initial_budget === "" ? "" : "0") : form.initial_budget || ""}
+              onChange={e => setField("initial_budget", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
           </Field>
           <Field label="New Budget (KES) *">
-            <input type="number" step="0.01" min="0" value={form.new_budget}
-              onChange={(e) => setField("new_budget", parseFloat(e.target.value) || 0)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={form.new_budget === 0 ? (form.new_budget === "" ? "" : "0") : form.new_budget || ""}
+              onChange={e => setField("new_budget", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
           </Field>
 
           {/* Live budget impact preview */}

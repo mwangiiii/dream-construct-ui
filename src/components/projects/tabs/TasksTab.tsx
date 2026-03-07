@@ -34,7 +34,7 @@ interface TasksTabProps {
   projectId: string;
   tasks: (Task & {
     assigned_worker?: { id: string; full_name: string; role: string } | null;
-  })[];  // ← Updated to reflect enriched worker data
+  })[];
   milestones: Milestone[];
   workers: Worker[];
   canEdit: boolean;
@@ -120,7 +120,14 @@ const getDaysRemainingColor = (days: number | null): string => {
   return "text-green-400";
 };
 
-export default function TasksTab({ projectId, tasks, milestones, workers, canEdit, onUpdate }: TasksTabProps) {
+export default function TasksTab({
+  projectId,
+  tasks = [],          // ← default to empty array
+  milestones = [],     // ← default to empty array
+  workers = [],        // ← default to empty array
+  canEdit,
+  onUpdate,
+}: TasksTabProps) {
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [expandedMilestones, setExpandedMilestones] = useState<Set<string>>(new Set());
@@ -230,9 +237,9 @@ export default function TasksTab({ projectId, tasks, milestones, workers, canEdi
   };
 
   const handleCreateTask = async () => {
-  console.log("Form state right before send:", createForm);
-  console.log("Assigned_to raw value:", createForm.assigned_to);
-  console.log("Assigned_to after || null:", createForm.assigned_to || null);
+    console.log("Form state right before send:", createForm);
+    console.log("Assigned_to raw value:", createForm.assigned_to);
+    console.log("Assigned_to after || null:", createForm.assigned_to || null);
     if (!createForm.title.trim()) return showToast("Task title is required", "warning");
     if (!createForm.milestone_id) return showToast("Please select a milestone", "warning");
 
@@ -269,7 +276,7 @@ export default function TasksTab({ projectId, tasks, milestones, workers, canEdi
 
     setLoading(true);
     try {
-      const { assigned_worker, ...dbFields } = editForm as any; // ← updated from assigned_user
+      const { assigned_worker, ...dbFields } = editForm as any;
 
       const cleanedData = {
         ...dbFields,

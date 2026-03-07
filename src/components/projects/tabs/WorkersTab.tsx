@@ -59,6 +59,8 @@ interface Worker {
   card_holder_name: string | null;
   cheque_payable_to: string | null;
   payment_notes: string | null;
+  quality_score: number | null;
+  notes: string | null;
   created_at: string;
   updated_at: string | null;
   milestone?: { id: string; title: string } | null;
@@ -244,6 +246,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     card_holder_name: '',
     cheque_payable_to: '',
     payment_notes: '',
+    quality_score: '' as string,
+    notes: '',
   });
 
   // Attendance state
@@ -353,7 +357,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           *,
           milestone:project_milestones(id, title)
         `)
-        .eq('project_id', projectId)
+        .eq('project_id', projectId)  // ← Added filter to only get workers for this project
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -465,6 +469,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       card_holder_name: '',
       cheque_payable_to: '',
       payment_notes: '',
+      quality_score: '',
+      notes: '',
     });
     setEditingWorker(null);
   };
@@ -490,6 +496,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       card_holder_name: worker.card_holder_name || '',
       cheque_payable_to: worker.cheque_payable_to || '',
       payment_notes: worker.payment_notes || '',
+      quality_score: worker.quality_score != null ? String(worker.quality_score) : '',
+      notes: worker.notes || '',
     });
     setShowAddWorker(true);
   };
@@ -506,11 +514,22 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       return;
     }
 
+    // Safety check: ensure projectId exists
     if (!projectId) {
       showToast('No project selected – cannot save worker', 'error');
       return;
     }
 
+    // Validate quality score if provided
+    if (workerForm.quality_score !== '') {
+      const qs = Number(workerForm.quality_score);
+      if (isNaN(qs) || qs < 0 || qs > 100) {
+        showToast('Quality score must be a number between 0 and 100', 'warning');
+        return;
+      }
+    }
+
+    // Validate payment method specific fields
     if (workerForm.payment_method === 'bank_transfer') {
       if (!workerForm.bank_name || !workerForm.bank_account_number || !workerForm.bank_account_name) {
         showToast('Bank details are required for bank transfer', 'warning');
@@ -530,6 +549,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         showToast('Card details are required for card payment', 'warning');
         return;
       }
+      // Validate last 4 digits
       if (workerForm.card_number_last4.length !== 4 || !/^\d{4}$/.test(workerForm.card_number_last4)) {
         showToast('Card number must be exactly 4 digits', 'warning');
         return;
@@ -562,11 +582,14 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         card_holder_name: workerForm.payment_method === 'card' ? workerForm.card_holder_name : null,
         cheque_payable_to: workerForm.payment_method === 'cheque' ? workerForm.cheque_payable_to : null,
         payment_notes: workerForm.payment_notes || null,
+        quality_score: workerForm.quality_score !== '' ? Number(workerForm.quality_score) : null,
+        notes: workerForm.notes || null,
         status: 'active',
-        project_id: projectId,
+        project_id: projectId,  // ← CRITICAL FIX: link worker to current project
       };
 
       if (editingWorker) {
+        // Update existing worker
         const { error } = await supabase
           .from('workers')
           .update(workerData)
@@ -579,6 +602,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
 
         showToast('Worker updated successfully!', 'success');
       } else {
+        // Add new worker
         const { error } = await supabase
           .from('workers')
           .insert([workerData]);
@@ -798,6 +822,13 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
+  const getQualityColor = (score: number | null) => {
+    if (score == null) return 'text-muted-foreground';
+    if (score >= 80) return 'text-green-400';
+    if (score >= 50) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
   const getPaymentIcon = (method: string) => {
     switch (method) {
       case 'cash': return Wallet;
@@ -869,6 +900,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           <StatCard icon={Users} title="Total Workers" value={stats.total_workers} color="text-primary" />
           <StatCard icon={UserCheck} title="Present Today" value={stats.present_today} color="text-green-600" />
           <StatCard icon={UserX} title="Absent Today" value={stats.absent_today} color="text-red-600" />
+          {/* <StatCard icon={TrendingUp} title="Performance" value={`${stats.avg_performance}%`} color="text-blue-600" /> */}
         </div>
 
         {/* Tab Navigation */}
@@ -878,6 +910,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
               { id: 'workers' as TabType, label: 'Workers List', icon: Users },
               { id: 'attendance' as TabType, label: 'Daily Attendance', icon: Clock },
               { id: 'assignments' as TabType, label: 'Task Assignments', icon: CheckCircle },
+              // { id: 'performance' as TabType, label: 'Performance', icon: TrendingUp },
             ].map((tab) => {
               const Icon = tab.icon;
               return (
@@ -949,6 +982,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Phone</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Milestone</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Payment</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Quality</th>
+                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Notes</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
                           {canEdit && <th className="py-4 px-6 text-center font-semibold text-muted-foreground">Actions</th>}
                         </tr>
@@ -970,6 +1005,14 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                   <PaymentIcon className="w-4 h-4 text-primary" />
                                   <span className="text-sm capitalize">{worker.payment_method.replace('_', ' ')}</span>
                                 </div>
+                              </td>
+                              <td className="py-4 px-6">
+                                <span className={`font-bold text-sm ${getQualityColor(worker.quality_score)}`}>
+                                  {worker.quality_score != null ? `${worker.quality_score}/100` : '-'}
+                                </span>
+                              </td>
+                              <td className="py-4 px-6 text-sm text-muted-foreground max-w-xs truncate">
+                                {worker.notes || '-'}
                               </td>
                               <td className="py-4 px-6">
                                 <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(worker.status || 'active')}`}>
@@ -1287,7 +1330,9 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                         <tr>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Task</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Quality Score</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Completed</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Notes</th>
                           {canEdit && <th className="px-4 py-3 text-left font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
@@ -1302,7 +1347,59 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                   {a.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                 </span>
                               </td>
+                              <td className="px-4 py-3 text-blue-600 font-bold whitespace-nowrap">
+                                {canEdit ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={a.quality_score ?? ''}
+                                    onChange={async e => {
+                                      const val = e.target.value === '' ? null : Number(e.target.value);
+                                      setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, quality_score: val } : ass));
+                                      try {
+                                        const { error } = await supabase
+                                          .from('worker_assignments')
+                                          .update({ quality_score: val, updated_at: new Date().toISOString() })
+                                          .eq('id', a.id);
+                                        if (error) showToast('Failed to update quality score', 'error');
+                                        else showToast('Quality score updated!', 'success');
+                                      } catch (err) {
+                                        showToast('Failed to update quality score', 'error');
+                                      }
+                                    }}
+                                    className="w-20 px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-blue-600 font-bold focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                                  />
+                                ) : (
+                                  a.quality_score != null ? `${a.quality_score}/100` : '—'
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-green-600 font-bold whitespace-nowrap">{a.status === 'completed' ? 'Yes' : 'No'}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                {canEdit ? (
+                                  <input
+                                    type="text"
+                                    value={a.notes ?? ''}
+                                    onChange={e => {
+                                      setAssignments(prev => prev.map(ass => ass.id === a.id ? { ...ass, notes: e.target.value } : ass));
+                                    }}
+                                    onBlur={async () => {
+                                      try {
+                                        const { error } = await supabase
+                                          .from('worker_assignments')
+                                          .update({ notes: a.notes, updated_at: new Date().toISOString() })
+                                          .eq('id', a.id);
+                                        if (error) showToast('Failed to update notes', 'error');
+                                      } catch (err) {
+                                        showToast('Failed to update notes', 'error');
+                                      }
+                                    }}
+                                    className="w-full px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl"
+                                  />
+                                ) : (
+                                  a.notes || '—'
+                                )}
+                              </td>
                               {canEdit && (
                                 <td className="px-4 py-3 whitespace-nowrap flex gap-2">
                                   <button
@@ -1449,6 +1546,60 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     </div>
                   </div>
 
+                  {/* Rating Section */}
+                  <div className="border-t border-white/10 pt-6">
+                    <h4 className="text-lg font-semibold mb-4 flex items-center gap-2 text-primary">
+                      <TrendingUp className="w-5 h-5" />
+                      Worker Rating
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="mb-2">Quality Score (0–100)</Label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={workerForm.quality_score}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, quality_score: e.target.value }))}
+                          placeholder="e.g. 85"
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Overall quality rating for this worker</p>
+                      </div>
+                      <div className="sm:col-span-1">
+                        {workerForm.quality_score !== '' && (
+                          <div className="mt-6 flex items-center gap-3">
+                            <div className="flex-1 bg-white/10 rounded-full h-3">
+                              <div
+                                className={`h-3 rounded-full transition-all duration-500 ${
+                                  Number(workerForm.quality_score) >= 80
+                                    ? 'bg-green-500'
+                                    : Number(workerForm.quality_score) >= 50
+                                    ? 'bg-yellow-500'
+                                    : 'bg-red-500'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(0, Number(workerForm.quality_score)))}%` }}
+                              />
+                            </div>
+                            <span className={`font-bold text-sm ${getQualityColor(Number(workerForm.quality_score))}`}>
+                              {workerForm.quality_score}/100
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="mb-2">Worker Notes</Label>
+                        <textarea
+                          rows={3}
+                          value={workerForm.notes}
+                          onChange={(e) => setWorkerForm(prev => ({ ...prev, notes: e.target.value }))}
+                          placeholder="Any notes about this worker's performance, behaviour, skills, etc."
+                          className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 resize-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Payment Information Section */}
                   <div className="border-t border-white/10 pt-6">
                     <h4 className="text-lg font-semibold mb-4 flex items-center gap-2 text-primary">
@@ -1464,6 +1615,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           onValueChange={(value: any) => setWorkerForm(prev => ({ 
                             ...prev, 
                             payment_method: value,
+                            // Clear other payment fields when changing method
                             bank_name: '',
                             bank_account_number: '',
                             bank_account_name: '',
@@ -1753,6 +1905,44 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                       <div className="col-span-2">
                         <p className="text-muted-foreground">Milestone</p>
                         <p className="font-semibold">{viewingWorker.milestone?.title || 'Not assigned'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Rating Info */}
+                  <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary">
+                      <TrendingUp className="w-5 h-5" />
+                      Worker Rating
+                    </h4>
+                    <div className="space-y-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground mb-1">Quality Score</p>
+                        {viewingWorker.quality_score != null ? (
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 bg-white/10 rounded-full h-3">
+                              <div
+                                className={`h-3 rounded-full transition-all duration-500 ${
+                                  viewingWorker.quality_score >= 80
+                                    ? 'bg-green-500'
+                                    : viewingWorker.quality_score >= 50
+                                    ? 'bg-yellow-500'
+                                    : 'bg-red-500'
+                                }`}
+                                style={{ width: `${viewingWorker.quality_score}%` }}
+                              />
+                            </div>
+                            <span className={`font-bold ${getQualityColor(viewingWorker.quality_score)}`}>
+                              {viewingWorker.quality_score}/100
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="font-semibold text-muted-foreground">Not rated</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Notes</p>
+                        <p className="font-semibold">{viewingWorker.notes || '-'}</p>
                       </div>
                     </div>
                   </div>

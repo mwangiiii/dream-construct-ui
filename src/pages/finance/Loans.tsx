@@ -29,8 +29,7 @@ type PaymentStatus = "Paid" | "Partially Paid" | "Due" | "Overdue" | "Waived";
 type WithholdingApplicable = "Yes" | "No";
 interface Loan {
   id: number;
-  project_id: string;
-  // Facility details
+  project_id: string | null;
   facility_ref: string;
   lender_name: string;
   loan_type: LoanType;
@@ -38,34 +37,29 @@ interface Loan {
   loan_start_date: string;
   tenure_months: number;
   repayment_frequency: RepayFrequency;
-  // Principal & Rate
   principal_approved_kes: number;
-  interest_rate_pa: number; // % p.a.
+  interest_rate_pa: number;
   interest_type: InterestType;
-  // Period schedule
   opening_balance: number;
   installment_due: number;
   principal_portion: number;
   interest_portion: number;
-  // Kenyan tax fields
-  withholding_tax_applicable: WithholdingApplicable; // KRA WHT on interest: 15% residents / 15% NR banks
-  withholding_tax_rate: number; // e.g. 15
-  withholding_tax_amount: number; // COMPUTED: interest_portion * wht_rate / 100
-  net_interest_payable: number; // COMPUTED: interest_portion - withholding_tax_amount
-  interest_deductible_ita: WithholdingApplicable; // s.15(1) ITA – is interest deductible?
-  thin_cap_flag: boolean; // Thin-cap alert: debt/equity > 3:1 (s.16(2) ITA)
-  // Fees
+  withholding_tax_applicable: WithholdingApplicable;
+  withholding_tax_rate: number;
+  withholding_tax_amount: number;
+  net_interest_payable: number;
+  interest_deductible_ita: WithholdingApplicable;
+  thin_cap_flag: boolean;
   fees_and_charges: number;
-  total_due: number; // COMPUTED: principal + net_interest + fees
-  // Payment
+  total_due: number;
   due_date: string;
   amount_paid: number;
   payment_date: string | null;
-  closing_balance: number; // COMPUTED: opening - principal_portion
+  closing_balance: number;
   payment_status: PaymentStatus;
   days_in_arrears: number;
   next_due_date: string | null;
-  date_period: string; // e.g. 2026-Q1
+  date_period: string;
   notes: string | null;
   created_at?: string;
   updated_at?: string;
@@ -82,9 +76,7 @@ const INTEREST_TYPES: InterestType[] = ["Fixed","Variable","CBR-Linked"];
 const REPAY_FREQS: RepayFrequency[] = ["Monthly","Quarterly","Semi-Annual","Annual","Bullet"];
 const PAYMENT_STATUSES: PaymentStatus[] = ["Paid","Partially Paid","Due","Overdue","Waived"];
 
-// Kenya WHT rates (Income Tax Act Cap.470):
 const KE_WHT_RESIDENT = 15;
-const KE_WHT_NR_BANK = 15;
 const KE_THIN_CAP_RATIO = 3;
 
 const STATUS_STYLE: Record<string, string> = {
@@ -104,54 +96,71 @@ const PAYMENT_STATUS_STYLE: Record<PaymentStatus, string> = {
 };
 
 const LOAN_TYPE_STYLE: Record<LoanType, { dot: string; accent: string; badge: string; row: string }> = {
-  "Term Loan": { dot: "bg-violet-400", accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300", row: "hover:bg-violet-950/30" },
-  "Asset Finance": { dot: "bg-amber-400", accent: "text-amber-400", badge: "bg-amber-500/10 border-amber-500/30 text-amber-300", row: "hover:bg-amber-950/30" },
-  "Overdraft": { dot: "bg-rose-400", accent: "text-rose-400", badge: "bg-rose-500/10 border-rose-500/30 text-rose-300", row: "hover:bg-rose-950/30" },
-  "Revolving Credit": { dot: "bg-cyan-400", accent: "text-cyan-400", badge: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300", row: "hover:bg-cyan-950/30" },
-  "Mortgage": { dot: "bg-orange-400", accent: "text-orange-400", badge: "bg-orange-500/10 border-orange-500/30 text-orange-300", row: "hover:bg-orange-950/30" },
-  "Invoice Discounting": { dot: "bg-pink-400", accent: "text-pink-400", badge: "bg-pink-500/10 border-pink-500/30 text-pink-300", row: "hover:bg-pink-950/30" },
-  "Other": { dot: "bg-slate-400", accent: "text-slate-400", badge: "bg-slate-500/10 border-slate-500/30 text-slate-300", row: "hover:bg-slate-950/30" },
+  "Term Loan":          { dot: "bg-violet-400", accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300",   row: "hover:bg-violet-950/30" },
+  "Asset Finance":      { dot: "bg-amber-400",  accent: "text-amber-400",  badge: "bg-amber-500/10 border-amber-500/30 text-amber-300",       row: "hover:bg-amber-950/30"  },
+  "Overdraft":          { dot: "bg-rose-400",   accent: "text-rose-400",   badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",           row: "hover:bg-rose-950/30"   },
+  "Revolving Credit":   { dot: "bg-cyan-400",   accent: "text-cyan-400",   badge: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300",           row: "hover:bg-cyan-950/30"   },
+  "Mortgage":           { dot: "bg-orange-400", accent: "text-orange-400", badge: "bg-orange-500/10 border-orange-500/30 text-orange-300",     row: "hover:bg-orange-950/30" },
+  "Invoice Discounting":{ dot: "bg-pink-400",   accent: "text-pink-400",   badge: "bg-pink-500/10 border-pink-500/30 text-pink-300",           row: "hover:bg-pink-950/30"   },
+  "Other":              { dot: "bg-slate-400",  accent: "text-slate-400",  badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",         row: "hover:bg-slate-950/30"  },
 };
 
-// ─── KENYA TAX COMPUTATIONS ───────────────────────────────────────────────────
+// ─── GENERATED COLUMNS — never send to DB ─────────────────────────────────────
+const GENERATED_COLS = [
+  "withholding_tax_amount",
+  "net_interest_payable",
+  "total_due",
+  "closing_balance",
+] as const;
+
+function stripGenerated(body: Partial<LoanFormData>): Partial<LoanFormData> {
+  const clean = { ...body };
+  for (const col of GENERATED_COLS) {
+    delete (clean as any)[col];
+  }
+  return clean;
+}
+
+// ─── KENYA TAX COMPUTATIONS (UI preview only) ─────────────────────────────────
 function computeWHT(interestPortion: number, applicable: WithholdingApplicable, rate: number): number {
   if (applicable !== "Yes") return 0;
   return parseFloat(((interestPortion * rate) / 100).toFixed(2));
 }
-
 function computeNetInterest(interestPortion: number, whtAmount: number): number {
   return parseFloat((interestPortion - whtAmount).toFixed(2));
 }
-
 function computeTotalDue(principal: number, netInterest: number, fees: number): number {
-  return parseFloat((principal + netInterest + fees).toFixed(2));
+  return parseFloat(((Number(principal)||0) + (Number(netInterest)||0) + (Number(fees)||0)).toFixed(2));
 }
-
 function computeClosingBalance(opening: number, principal: number): number {
   return parseFloat(Math.max(0, opening - principal).toFixed(2));
 }
 
-function thinCapFlag(principalApproved: number, equity: number): boolean {
-  if (equity <= 0) return false;
-  return principalApproved / equity > KE_THIN_CAP_RATIO;
-}
-
-// ─── DERIVED FORM HELPERS ─────────────────────────────────────────────────────
 function deriveComputedFields(f: LoanFormData): LoanFormData {
-  const wht = computeWHT(f.interest_portion, f.withholding_tax_applicable, f.withholding_tax_rate);
-  const netInt = computeNetInterest(f.interest_portion, wht);
-  const totalDue = computeTotalDue(f.principal_portion, netInt, f.fees_and_charges);
-  const closing = computeClosingBalance(f.opening_balance, f.principal_portion);
+  const interestPortion   = Number(f.interest_portion)   || 0;
+  const principalPortion  = Number(f.principal_portion)  || 0;
+  const fees              = Number(f.fees_and_charges)   || 0;
+  const opening           = Number(f.opening_balance)    || 0;
+  const whtRate           = Number(f.withholding_tax_rate) || 0;
+  const wht     = computeWHT(interestPortion, f.withholding_tax_applicable, whtRate);
+  const netInt  = computeNetInterest(interestPortion, wht);
+  const totalDue= computeTotalDue(principalPortion, netInt, fees);
+  const closing = computeClosingBalance(opening, principalPortion);
   return {
     ...f,
-    withholding_tax_amount: wht,
-    net_interest_payable: netInt,
-    total_due: totalDue,
-    closing_balance: closing,
+    interest_portion:        interestPortion,
+    principal_portion:       principalPortion,
+    fees_and_charges:        fees,
+    opening_balance:         opening,
+    withholding_tax_rate:    whtRate,
+    withholding_tax_amount:  wht,
+    net_interest_payable:    netInt,
+    total_due:               totalDue,
+    closing_balance:         closing,
   };
 }
 
-const makeEmptyForm = (projectId: string): LoanFormData => ({
+const makeEmptyForm = (projectId: string | null): LoanFormData => ({
   project_id: projectId,
   facility_ref: "",
   lender_name: "",
@@ -187,9 +196,9 @@ const makeEmptyForm = (projectId: string): LoanFormData => ({
 });
 
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
-const fmtKES = (n: number) => `KES ${new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2 }).format(n)}`;
-const fmtPct = (n: number) => `${n}%`;
-const fmtC = (n: number) => new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+const fmtKES  = (n: number) => `KES ${new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2 }).format(n)}`;
+const fmtPct  = (n: number) => `${n}%`;
+const fmtC    = (n: number) => new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 const fmtDate = (d: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
@@ -197,13 +206,6 @@ const fmtDate = (d: string | null) =>
 function throwSb(error: { message?: string } | null, ctx: string): never {
   throw new Error(error?.message ?? `Supabase error during ${ctx}`);
 }
-
-const generatedLoanFields = [
-  "withholding_tax_amount",
-  "net_interest_payable",
-  "total_due",
-  "closing_balance",
-] as const;
 
 const api = {
   async projects(): Promise<Project[]> {
@@ -234,31 +236,33 @@ const api = {
     return (data ?? []) as Loan[];
   },
 
-  async create(body: LoanFormData): Promise<Loan> {
-    // Remove generated columns before insert
-    const cleanBody = { ...body };
-    for (const field of generatedLoanFields) {
-      delete cleanBody[field as keyof LoanFormData];
-    }
+  async listAll(): Promise<Loan[]> {
+    const { data, error } = await supabase
+      .from("loans")
+      .select("*")
+      .order("loan_start_date", { ascending: false });
+    if (error) throwSb(error, "listAll");
+    return (data ?? []) as Loan[];
+  },
 
-    const { data, error } = await supabase.from("loans").insert([cleanBody]).select().single();
+  async create(body: LoanFormData): Promise<Loan> {
+    const clean = stripGenerated(body);
+    const { data, error } = await supabase
+      .from("loans")
+      .insert([clean])
+      .select("*")
+      .single();
     if (error) throwSb(error, "create");
     return data as Loan;
   },
 
   async update(id: number, body: LoanFormData): Promise<Loan> {
-    // Remove generated columns and id before update
-    const cleanBody = { ...body };
-    for (const field of generatedLoanFields) {
-      delete cleanBody[field as keyof LoanFormData];
-    }
-    delete cleanBody.id;
-
+    const clean = stripGenerated(body);
     const { data, error } = await supabase
       .from("loans")
-      .update({ ...cleanBody, updated_at: new Date().toISOString() })
+      .update({ ...clean, updated_at: new Date().toISOString() })
       .eq("id", id)
-      .select()
+      .select("*")
       .single();
     if (error) throwSb(error, "update");
     return data as Loan;
@@ -317,22 +321,23 @@ function SelectField({ label, hint, value, onChange, options }: {
 }
 
 // ─── LOAN MODAL ───────────────────────────────────────────────────────────────
-function LoanModal({ initial, onSave, onClose, loading }: {
+function LoanModal({ initial, onSave, onClose, loading, projects }: {
   initial: LoanFormData & { id?: number };
   onSave: (d: LoanFormData) => void;
   onClose: () => void;
   loading: boolean;
+  projects?: Project[];
 }) {
   const [form, setForm] = useState<LoanFormData>(deriveComputedFields({ ...initial }));
   const isEdit = Boolean(initial.id);
-  const set = <K extends keyof LoanFormData>(k: K, v: LoanFormData[K]) =>
-    setForm(p => deriveComputedFields({ ...p, [k]: v }));
+  const set = <K extends keyof LoanFormData>(k: K, v: LoanFormData[K] | "") =>
+    setForm(p => deriveComputedFields({ ...p, [k]: v } as any));
   const [tab, setTab] = useState<"facility" | "schedule" | "tax" | "payment">("facility");
   const tabs: { key: typeof tab; label: string }[] = [
     { key: "facility", label: "Facility" },
     { key: "schedule", label: "Schedule" },
-    { key: "tax", label: "Tax / KRA" },
-    { key: "payment", label: "Payment" },
+    { key: "tax",      label: "Tax / KRA" },
+    { key: "payment",  label: "Payment" },
   ];
 
   return (
@@ -373,9 +378,37 @@ function LoanModal({ initial, onSave, onClose, loading }: {
         </div>
 
         <div className="px-6 py-5 max-h-[58vh] overflow-y-auto">
-          {/* ── TAB: Facility ─────────────────────────────────────────────── */}
+
+          {/* ── TAB: Facility ───────────────────────────────────────────── */}
           {tab === "facility" && (
             <div className="grid grid-cols-2 gap-4">
+              {/* Project picker — only shown in global / standalone context */}
+              {projects && (
+                <div className="col-span-2">
+                  <Field label="Project (optional)" hint="Leave unlinked for standalone loans not tied to a project">
+                    <div className="relative">
+                      <select
+                        value={form.project_id ?? ""}
+                        onChange={e => set("project_id", e.target.value || null)}
+                        className={inputCls + " appearance-none pr-10 font-medium text-sm"}
+                      >
+                        <option value="">— No project (standalone) —</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id} className="bg-background text-foreground">
+                            {p.project_number} — {p.title}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path d="m6 9 6 6 6-6"/>
+                        </svg>
+                      </span>
+                    </div>
+                  </Field>
+                </div>
+              )}
+
               <Field label="Facility Reference *">
                 <input value={form.facility_ref} onChange={e => set("facility_ref", e.target.value)}
                   placeholder="e.g. FAC-001" className={inputCls} />
@@ -395,18 +428,22 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                   onChange={e => set("loan_start_date", e.target.value)} className={inputCls} />
               </Field>
               <Field label="Tenure (Months) *">
-                <input type="number" min="1" value={form.tenure_months}
-                  onChange={e => set("tenure_months", parseInt(e.target.value) || 1)} className={inputCls} />
+                <input type="number" min="1" value={form.tenure_months === 0 ? "" : form.tenure_months}
+                  onChange={e => set("tenure_months", e.target.value === "" ? "" : parseInt(e.target.value))} className={inputCls} />
               </Field>
               <SelectField label="Repayment Frequency *" value={form.repayment_frequency}
                 onChange={v => set("repayment_frequency", v as RepayFrequency)} options={REPAY_FREQS} />
               <Field label="Principal Approved (KES) *">
-                <input type="number" step="0.01" min="0" value={form.principal_approved_kes}
-                  onChange={e => set("principal_approved_kes", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.principal_approved_kes === 0 ? "" : form.principal_approved_kes}
+                  onChange={e => set("principal_approved_kes", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Interest Rate % P.A. *">
-                <input type="number" step="0.01" min="0" value={form.interest_rate_pa}
-                  onChange={e => set("interest_rate_pa", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.interest_rate_pa === 0 ? "" : form.interest_rate_pa}
+                  onChange={e => set("interest_rate_pa", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <SelectField label="Interest Type *" value={form.interest_type}
                 onChange={v => set("interest_type", v as InterestType)} options={INTEREST_TYPES} />
@@ -419,28 +456,38 @@ function LoanModal({ initial, onSave, onClose, loading }: {
             </div>
           )}
 
-          {/* ── TAB: Schedule ─────────────────────────────────────────────── */}
+          {/* ── TAB: Schedule ───────────────────────────────────────────── */}
           {tab === "schedule" && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Opening Balance (KES)">
-                <input type="number" step="0.01" min="0" value={form.opening_balance}
-                  onChange={e => set("opening_balance", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.opening_balance === 0 ? "" : form.opening_balance}
+                  onChange={e => set("opening_balance", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Installment Due (KES)">
-                <input type="number" step="0.01" min="0" value={form.installment_due}
-                  onChange={e => set("installment_due", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.installment_due === 0 ? "" : form.installment_due}
+                  onChange={e => set("installment_due", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Principal Portion (KES)">
-                <input type="number" step="0.01" min="0" value={form.principal_portion}
-                  onChange={e => set("principal_portion", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.principal_portion === 0 ? "" : form.principal_portion}
+                  onChange={e => set("principal_portion", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Interest Portion (KES)">
-                <input type="number" step="0.01" min="0" value={form.interest_portion}
-                  onChange={e => set("interest_portion", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.interest_portion === 0 ? "" : form.interest_portion}
+                  onChange={e => set("interest_portion", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Fees & Charges (KES)">
-                <input type="number" step="0.01" min="0" value={form.fees_and_charges}
-                  onChange={e => set("fees_and_charges", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.fees_and_charges === 0 ? "" : form.fees_and_charges}
+                  onChange={e => set("fees_and_charges", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Due Date *">
                 <input type="date" value={form.due_date}
@@ -452,12 +499,12 @@ function LoanModal({ initial, onSave, onClose, loading }: {
               </Field>
               <div />
               {/* Computed preview boxes */}
-              <div className="col-span-2 grid grid-cols-3 gap-3 mt-2">
+              <div className="col-span-2 grid grid-cols-4 gap-3 mt-2">
                 {[
-                  { label: "WHT Amount", value: fmtKES(form.withholding_tax_amount), color: "text-amber-400" },
-                  { label: "Net Interest", value: fmtKES(form.net_interest_payable), color: "text-sky-400" },
-                  { label: "Total Due", value: fmtKES(form.total_due), color: "text-emerald-400" },
-                  { label: "Closing Balance", value: fmtKES(form.closing_balance), color: "text-primary" },
+                  { label: "WHT Amount",      value: fmtKES(form.withholding_tax_amount), color: "text-amber-400"  },
+                  { label: "Net Interest",     value: fmtKES(form.net_interest_payable),  color: "text-sky-400"    },
+                  { label: "Total Due",        value: fmtKES(form.total_due),             color: "text-emerald-400"},
+                  { label: "Closing Balance",  value: fmtKES(form.closing_balance),       color: "text-primary"    },
                 ].map(box => (
                   <div key={box.label} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{box.label}</div>
@@ -469,18 +516,18 @@ function LoanModal({ initial, onSave, onClose, loading }: {
             </div>
           )}
 
-          {/* ── TAB: Tax / KRA ────────────────────────────────────────────── */}
+          {/* ── TAB: Tax / KRA ──────────────────────────────────────────── */}
           {tab === "tax" && (
             <div className="grid grid-cols-2 gap-4">
-              {/* KRA notice banner */}
               <div className="col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
                 <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                 </svg>
                 <div className="text-[11px] text-amber-300/90 leading-relaxed">
-                  <strong>Kenya ITA Cap.470 — Withholding Tax on Interest (s.35):</strong> 15% on interest paid to resident persons &amp;
-                  non-resident banks. WHT is deducted by the borrower and remitted to KRA by the 20th of the following month (iTax).
-                  Interest deductibility governed by s.15(1)(a); thin-capitalisation disallowance under s.16(2) where debt/equity &gt; 3:1.
+                  <strong>Kenya ITA Cap.470 — Withholding Tax on Interest (s.35):</strong> 15% on interest paid to resident
+                  persons &amp; non-resident banks. WHT is deducted by the borrower and remitted to KRA by the 20th of the
+                  following month (iTax). Interest deductibility governed by s.15(1)(a); thin-capitalisation disallowance
+                  under s.16(2) where debt/equity &gt; 3:1.
                 </div>
               </div>
               <SelectField
@@ -490,13 +537,10 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                 onChange={v => set("withholding_tax_applicable", v as WithholdingApplicable)}
                 options={["Yes", "No"]}
               />
-              <Field
-                label="WHT Rate (%)"
-                hint="Resident: 15% | Non-Resident Bank: 15% (ITA s.35)"
-              >
+              <Field label="WHT Rate (%)" hint="Resident: 15% | Non-Resident Bank: 15% (ITA s.35)">
                 <input type="number" step="0.01" min="0" max="30"
-                  value={form.withholding_tax_rate}
-                  onChange={e => set("withholding_tax_rate", parseFloat(e.target.value) || 0)}
+                  value={form.withholding_tax_rate === 0 ? "" : form.withholding_tax_rate}
+                  onChange={e => set("withholding_tax_rate", e.target.value === "" ? "" : parseFloat(e.target.value))}
                   className={inputCls}
                   disabled={form.withholding_tax_applicable === "No"}
                 />
@@ -508,10 +552,7 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                 onChange={v => set("interest_deductible_ita", v as WithholdingApplicable)}
                 options={["Yes", "No"]}
               />
-              <Field
-                label="Thin-Cap Flag (ITA s.16(2))"
-                hint="Flag if total debt/equity > 3:1 — excess interest disallowed"
-              >
+              <Field label="Thin-Cap Flag (ITA s.16(2))" hint="Flag if total debt/equity > 3:1 — excess interest disallowed">
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10">
                   <input type="checkbox" id="thin_cap"
                     checked={form.thin_cap_flag}
@@ -559,12 +600,14 @@ function LoanModal({ initial, onSave, onClose, loading }: {
             </div>
           )}
 
-          {/* ── TAB: Payment ──────────────────────────────────────────────── */}
+          {/* ── TAB: Payment ────────────────────────────────────────────── */}
           {tab === "payment" && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Amount Paid (KES)">
-                <input type="number" step="0.01" min="0" value={form.amount_paid}
-                  onChange={e => set("amount_paid", parseFloat(e.target.value) || 0)} className={inputCls} />
+                <input type="number" step="0.01" min="0"
+                  value={form.amount_paid === 0 ? "" : form.amount_paid}
+                  onChange={e => set("amount_paid", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                  className={inputCls} />
               </Field>
               <Field label="Payment Date">
                 <input type="date" value={form.payment_date ?? ""}
@@ -573,8 +616,10 @@ function LoanModal({ initial, onSave, onClose, loading }: {
               <SelectField label="Payment Status *" value={form.payment_status}
                 onChange={v => set("payment_status", v as PaymentStatus)} options={PAYMENT_STATUSES} />
               <Field label="Days in Arrears">
-                <input type="number" min="0" value={form.days_in_arrears}
-                  onChange={e => set("days_in_arrears", parseInt(e.target.value) || 0)} className={inputCls} />
+                <input type="number" min="0"
+                  value={form.days_in_arrears === 0 ? "" : form.days_in_arrears}
+                  onChange={e => set("days_in_arrears", e.target.value === "" ? "" : parseInt(e.target.value))}
+                  className={inputCls} />
               </Field>
               <div className="col-span-2">
                 <Field label="Notes">
@@ -583,7 +628,6 @@ function LoanModal({ initial, onSave, onClose, loading }: {
                     className={inputCls + " resize-none"} />
                 </Field>
               </div>
-              {/* Payment summary */}
               <div className="col-span-2 grid grid-cols-2 gap-3 mt-1">
                 <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Variance (Due vs Paid)</div>
@@ -605,7 +649,7 @@ function LoanModal({ initial, onSave, onClose, loading }: {
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-white/10">
           <div className="flex gap-1">
-            {tabs.map((t, i) => (
+            {tabs.map(t => (
               <span key={t.key} className={`w-1.5 h-1.5 rounded-full transition-all ${tab === t.key ? "bg-primary" : "bg-white/20"}`} />
             ))}
           </div>
@@ -613,9 +657,19 @@ function LoanModal({ initial, onSave, onClose, loading }: {
             <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
               Cancel
             </button>
-            <button onClick={() => onSave(form)} disabled={loading}
+            <button
+              onClick={() => {
+                const cleaned = { ...form };
+                (["tenure_months","principal_approved_kes","interest_rate_pa","opening_balance",
+                  "installment_due","principal_portion","interest_portion","fees_and_charges",
+                  "withholding_tax_rate","amount_paid","days_in_arrears"] as (keyof LoanFormData)[])
+                  .forEach(key => { if ((cleaned as any)[key] === "") (cleaned as any)[key] = 0; });
+                onSave(cleaned);
+              }}
+              disabled={loading}
               className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
-              style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+              style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+            >
               {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               {isEdit ? "Save Changes" : "Add Loan"}
             </button>
@@ -667,11 +721,494 @@ function DeleteConfirm({ loan, onConfirm, onClose, loading }: {
   );
 }
 
+// ─── LOANS TABLE (shared rendering) ──────────────────────────────────────────
+function LoansTable({
+  loans, filtered, grouped, totals, expanded, setExpanded,
+  canEdit, fetching, search, filterType, filterStatus,
+  setSearch, setFilterType, setFilterStatus,
+  onEdit, onDelete, onCreate,
+  emptyLabel = "No loan records found.",
+}: {
+  loans: Loan[];
+  filtered: Loan[];
+  grouped: Partial<Record<LoanType, Loan[]>>;
+  totals: {
+    principal: number; totalDue: number; amtPaid: number;
+    closing: number; wht: number; arrears: number; thinCap: number;
+  };
+  expanded: Record<string, boolean>;
+  setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  canEdit: boolean;
+  fetching: boolean;
+  search: string;
+  filterType: LoanType | "All";
+  filterStatus: PaymentStatus | "All";
+  setSearch: (v: string) => void;
+  setFilterType: (v: LoanType | "All") => void;
+  setFilterStatus: (v: PaymentStatus | "All") => void;
+  onEdit: (l: Loan) => void;
+  onDelete: (l: Loan) => void;
+  onCreate: () => void;
+  emptyLabel?: string;
+}) {
+  return (
+    <>
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 mt-5 px-6 pb-4">
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by facility ref, lender, purpose or period…"
+            className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
+        </div>
+        <select value={filterType} onChange={e => setFilterType(e.target.value as LoanType | "All")}
+          className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
+          <option value="All">All Types</option>
+          {LOAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as PaymentStatus | "All")}
+          className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
+          <option value="All">All Statuses</option>
+          {PAYMENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+          {filtered.length} / {loans.length} shown
+        </div>
+      </div>
+
+      <CardContent className="p-0">
+        {fetching ? (
+          <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+            <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+            Loading loans…
+          </div>
+        ) : Object.keys(grouped).length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+            <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+            <p className="text-sm">{emptyLabel}</p>
+            {(search || filterType !== "All" || filterStatus !== "All") && (
+              <button onClick={() => { setSearch(""); setFilterType("All"); setFilterStatus("All"); }}
+                className="text-xs text-primary hover:underline">Clear filters</button>
+            )}
+            {canEdit && !search && filterType === "All" && filterStatus === "All" && (
+              <button onClick={onCreate} className="text-xs text-primary hover:underline">Add first loan</button>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-white/8">
+            {LOAN_TYPES.filter(lt => grouped[lt]).map(lt => {
+              const s    = LOAN_TYPE_STYLE[lt];
+              const rows = grouped[lt]!;
+              const isOpen      = expanded[lt] ?? true;
+              const grpPrincipal= rows.reduce((a, l) => a + Number(l.principal_approved_kes), 0);
+              const grpDue      = rows.reduce((a, l) => a + Number(l.total_due), 0);
+              const grpPaid     = rows.reduce((a, l) => a + Number(l.amount_paid), 0);
+              const grpWHT      = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
+              return (
+                <div key={lt}>
+                  {/* Group header */}
+                  <button
+                    onClick={() => setExpanded(p => ({ ...p, [lt]: !p[lt] }))}
+                    className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                      <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{lt}</span>
+                      <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
+                    </div>
+                    <div className="flex items-center gap-5">
+                      <span className="text-xs font-mono tabular-nums text-muted-foreground hidden sm:block">
+                        Principal {fmtKES(grpPrincipal)}
+                      </span>
+                      {grpWHT > 0 && (
+                        <span className="text-xs font-mono tabular-nums text-amber-400 hidden md:block">
+                          WHT {fmtKES(grpWHT)}
+                        </span>
+                      )}
+                      <span className="text-sm font-bold tabular-nums font-mono text-primary">{fmtKES(grpDue)}</span>
+                      <svg
+                        className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                        fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path d="m6 9 6 6 6-6"/>
+                      </svg>
+                    </div>
+                  </button>
+
+                  <AnimatePresence initial={false}>
+                    {isOpen && (
+                      <motion.div key={`lt-${lt}`}
+                        initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }}
+                        style={{ overflow: "hidden" }}>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
+                                {[
+                                  "Facility Ref","Lender","Purpose","Period",
+                                  "Interest Rate","Tenure",
+                                  "Opening Bal.","Principal","Interest",
+                                  "WHT (15%)","Net Interest","Fees",
+                                  "Total Due","Paid","Closing Bal.",
+                                  "Due Date","Status","Arrears",
+                                  ...(canEdit ? ["Actions"] : []),
+                                ].map(h => (
+                                  <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((loan, ri) => {
+                                const ss = PAYMENT_STATUS_STYLE[loan.payment_status];
+                                return (
+                                  <motion.tr key={loan.id}
+                                    initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: ri * 0.02, duration: 0.16 }}
+                                    className={`border-b border-white/5 transition-colors ${s.row}`}
+                                  >
+                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                      <span className="font-mono text-xs font-semibold text-primary">{loan.facility_ref}</span>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">{loan.lender_name}</td>
+                                    <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[120px]">
+                                      <span className="line-clamp-1">{loan.purpose}</span>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                      <span className="font-mono text-xs text-muted-foreground">{loan.date_period}</span>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap text-xs text-foreground font-mono">
+                                      {fmtPct(loan.interest_rate_pa)}
+                                      <span className="text-[10px] text-muted-foreground ml-1">{loan.interest_type}</span>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground text-center">{loan.tenure_months}m</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.opening_balance))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.principal_portion))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.interest_portion))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                      {Number(loan.withholding_tax_amount) > 0 ? (
+                                        <span className="font-mono text-xs text-amber-400">{fmtKES(Number(loan.withholding_tax_amount))}</span>
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground">—</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-sky-400">{fmtKES(Number(loan.net_interest_payable))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-muted-foreground">{fmtKES(Number(loan.fees_and_charges))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                      <span className="font-mono text-sm font-bold text-foreground">{fmtKES(Number(loan.total_due))}</span>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-emerald-400">{fmtKES(Number(loan.amount_paid))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-primary">{fmtKES(Number(loan.closing_balance))}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(loan.due_date)}</td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap">
+                                      <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold ${ss}`}>
+                                        {loan.payment_status}
+                                      </Badge>
+                                    </td>
+                                    <td className="px-4 py-3.5 whitespace-nowrap text-center">
+                                      {loan.days_in_arrears > 0 ? (
+                                        <span className="text-xs font-mono text-rose-400 font-bold">{loan.days_in_arrears}d</span>
+                                      ) : (
+                                        <span className="text-xs text-emerald-400">—</span>
+                                      )}
+                                    </td>
+                                    {canEdit && (
+                                      <td className="px-4 py-3.5 whitespace-nowrap">
+                                        <div className="flex items-center gap-1.5">
+                                          <button onClick={() => onEdit(loan)} title="Edit"
+                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                            </svg>
+                                          </button>
+                                          <button onClick={() => onDelete(loan)} title="Delete"
+                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                              <polyline points="3 6 5 6 21 6"/>
+                                              <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      </td>
+                                    )}
+                                  </motion.tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+                                <td colSpan={6} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{lt} Total</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l)=>a+Number(l.opening_balance),0))}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l)=>a+Number(l.principal_portion),0))}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l)=>a+Number(l.interest_portion),0))}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">{fmtKES(grpWHT)}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-sky-400">{fmtKES(rows.reduce((a,l)=>a+Number(l.net_interest_payable),0))}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-muted-foreground">{fmtKES(rows.reduce((a,l)=>a+Number(l.fees_and_charges),0))}</td>
+                                <td className="px-4 py-2.5 font-mono text-sm font-bold text-foreground">{fmtKES(grpDue)}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-emerald-400">{fmtKES(grpPaid)}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs font-bold text-primary">{fmtKES(rows.reduce((a,l)=>a+Number(l.closing_balance),0))}</td>
+                                <td colSpan={canEdit ? 4 : 3} />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+
+            {/* Grand total bar */}
+            {loans.length > 0 && (
+              <div className="px-6 py-4 flex flex-wrap items-center gap-5 text-xs font-mono bg-primary/5 border-t border-primary/10">
+                <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
+                <span className="text-foreground">Principal {fmtKES(totals.principal)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-amber-400">WHT {fmtKES(totals.wht)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-foreground">Due {fmtKES(totals.totalDue)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-emerald-400">Paid {fmtKES(totals.amtPaid)}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-sky-400">Outstanding {fmtKES(totals.closing)}</span>
+                <Badge className="ml-auto bg-primary/10 border-primary/20 text-primary">
+                  {loans.length} loan{loans.length !== 1 ? "s" : ""}
+                  {totals.arrears > 0 && ` · ${totals.arrears} in arrears`}
+                </Badge>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </>
+  );
+}
+
+// ─── GLOBAL LOANS TABLE ───────────────────────────────────────────────────────
+function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
+  const [loans, setLoans]         = useState<Loan[]>([]);
+  const [projects, setProjects]   = useState<Project[]>([]);
+  const [fetching, setFetching]   = useState(true);
+  const [search, setSearch]       = useState("");
+  const [filterType, setFilterType]     = useState<LoanType | "All">("All");
+  const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
+  const [expanded, setExpanded]   = useState<Record<string, boolean>>({});
+  const [modal, setModal]         = useState<null | "create" | "edit">(null);
+  const [editing, setEditing]     = useState<Loan | null>(null);
+  const [deleting, setDeleting]   = useState<Loan | null>(null);
+  const [saving, setSaving]       = useState(false);
+  const { toasts, push }          = useToast();
+
+  const fetchLoans = useCallback(async () => {
+    setFetching(true);
+    try {
+      const data = await api.listAll();
+      setLoans(data ?? []);
+      // Auto-expand all groups
+      const types = [...new Set((data ?? []).map(l => l.loan_type))];
+      setExpanded(Object.fromEntries(types.map(t => [t, true])));
+    } catch (err: any) {
+      push(err.message || "Failed to load loans", "error");
+    } finally {
+      setFetching(false);
+    }
+  }, [push]);
+
+  // Also fetch projects so the modal can show a project picker
+  useEffect(() => {
+    fetchLoans();
+    api.projects().then(setProjects).catch(() => {});
+  }, [fetchLoans]);
+
+  const filtered = useMemo(() =>
+    loans.filter(l => {
+      if (filterType !== "All" && l.loan_type !== filterType) return false;
+      if (filterStatus !== "All" && l.payment_status !== filterStatus) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        return (
+          l.facility_ref?.toLowerCase().includes(s) ||
+          l.lender_name?.toLowerCase().includes(s) ||
+          l.purpose?.toLowerCase().includes(s) ||
+          l.date_period?.toLowerCase().includes(s)
+        );
+      }
+      return true;
+    }),
+    [loans, filterType, filterStatus, search]
+  );
+
+  const grouped = useMemo(() => {
+    const byType: Partial<Record<LoanType, Loan[]>> = {};
+    filtered.forEach(l => {
+      if (!byType[l.loan_type]) byType[l.loan_type] = [];
+      byType[l.loan_type]!.push(l);
+    });
+    return byType;
+  }, [filtered]);
+
+  const totals = useMemo(() => ({
+    principal: loans.reduce((a, l) => a + Number(l.principal_approved_kes), 0),
+    totalDue:  loans.reduce((a, l) => a + Number(l.total_due), 0),
+    amtPaid:   loans.reduce((a, l) => a + Number(l.amount_paid), 0),
+    closing:   loans.reduce((a, l) => a + Number(l.closing_balance), 0),
+    wht:       loans.reduce((a, l) => a + Number(l.withholding_tax_amount), 0),
+    arrears:   loans.filter(l => l.days_in_arrears > 0).length,
+    thinCap:   loans.filter(l => l.thin_cap_flag).length,
+  }), [loans]);
+
+  const handleCreate = async (form: LoanFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create({ ...form, project_id: form.project_id || null });
+      setLoans(p => [row, ...p]);
+      push("Loan added successfully.");
+      setModal(null);
+    } catch (err: any) {
+      push(err.message || "Failed to add loan", "error");
+    } finally { setSaving(false); }
+  };
+
+  const handleUpdate = async (form: LoanFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const row = await api.update(editing.id, form);
+      setLoans(p => p.map(l => l.id === editing.id ? row : l));
+      push("Loan updated successfully.");
+      setModal(null); setEditing(null);
+    } catch (err: any) {
+      push(err.message || "Failed to update loan", "error");
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setLoans(p => p.filter(l => l.id !== deleting.id));
+      push("Loan deleted.");
+      setDeleting(null);
+    } catch (err: any) {
+      push(err.message || "Failed to delete loan", "error");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mt-12">
+      <CardHeader className="pb-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <CardTitle className="text-2xl font-bold">All Loans — Global View</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Every loan across all projects, plus standalone loans not linked to any project.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={fetchLoans}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+              Refresh
+            </button>
+            {canEdit && (
+              <button onClick={() => setModal("create")}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
+                style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                New Loan
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* KRA banner */}
+        {totals.wht > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-4 text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              </svg>
+              <span className="text-amber-300 font-semibold font-sans text-[11px] uppercase tracking-wider">KRA Obligations</span>
+            </div>
+            <span className="text-amber-300">WHT to Remit: <strong>{fmtKES(totals.wht)}</strong></span>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-foreground">Total Due: <strong>{fmtKES(totals.totalDue)}</strong></span>
+            {totals.thinCap > 0 && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-rose-300">⚠ {totals.thinCap} facility{totals.thinCap > 1 ? "ies" : "y"} flagged for thin-cap review</span>
+              </>
+            )}
+          </div>
+        )}
+      </CardHeader>
+
+      <LoansTable
+        loans={loans} filtered={filtered} grouped={grouped} totals={totals}
+        expanded={expanded} setExpanded={setExpanded}
+        canEdit={canEdit} fetching={fetching}
+        search={search} filterType={filterType} filterStatus={filterStatus}
+        setSearch={setSearch} setFilterType={setFilterType} setFilterStatus={setFilterStatus}
+        onEdit={loan => { setEditing(loan); setModal("edit"); }}
+        onDelete={setDeleting}
+        onCreate={() => setModal("create")}
+        emptyLabel="No loans found across any project."
+      />
+
+      {/* Footer count */}
+      {!fetching && loans.length > 0 && (
+        <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+          <span className="tabular-nums">{loans.length} total loan record{loans.length !== 1 ? "s" : ""}</span>
+        </div>
+      )}
+
+      {/* Modals */}
+      <AnimatePresence>
+        {modal === "create" && (
+          <LoanModal
+            initial={makeEmptyForm(null)}
+            onSave={handleCreate}
+            onClose={() => setModal(null)}
+            loading={saving}
+            projects={projects}
+          />
+        )}
+        {modal === "edit" && editing && (
+          <LoanModal
+            initial={(({ id: _id, created_at: _ca, updated_at: _ua, ...rest }) => rest)(editing)}
+            onSave={handleUpdate}
+            onClose={() => { setModal(null); setEditing(null); }}
+            loading={saving}
+            projects={projects}
+          />
+        )}
+      </AnimatePresence>
+      {deleting && (
+        <DeleteConfirm loan={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+      )}
+    </Card>
+  );
+}
+
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
 function ProjectCard({ project, onSelect, loanCount }: {
   project: Project; onSelect: (p: Project) => void; loanCount: number;
 }) {
-  const status = project.status ?? "planning";
+  const status    = project.status ?? "planning";
   const statusCls = STATUS_STYLE[status] ?? STATUS_STYLE.planning;
   return (
     <motion.button
@@ -752,12 +1289,12 @@ function ProjectCard({ project, onSelect, loanCount }: {
 
 // ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
 function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [fetching, setFetching] = useState(true);
-  const [search, setSearch] = useState("");
-  const [statusFilter,setStatusFilter]= useState("all");
-  const [loanCounts, setLoanCounts] = useState<Record<string, number>>({});
-  const { toasts, push } = useToast();
+  const [projects, setProjects]         = useState<Project[]>([]);
+  const [fetching, setFetching]         = useState(true);
+  const [search, setSearch]             = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [loanCounts, setLoanCounts]     = useState<Record<string, number>>({});
+  const { toasts, push }                = useToast();
 
   useEffect(() => {
     setFetching(true);
@@ -824,9 +1361,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects", value: projects.length, sub: "in system" },
-            { label: "Projects with Loans", value: Object.keys(loanCounts).length, sub: "have loan records" },
-            { label: "Total Loan Records", value: totalLoans, sub: "across all projects"},
+            { label: "Total Projects",       value: projects.length,                       sub: "in system" },
+            { label: "Projects with Loans",  value: Object.keys(loanCounts).length,        sub: "have loan records" },
+            { label: "Total Loan Records",   value: totalLoans,                            sub: "across all projects" },
           ].map(c => (
             <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -874,11 +1411,16 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                   <path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6"/>
                 </svg>
                 <p className="text-sm">No projects found.</p>
-                {search && <button onClick={() => { setSearch(""); setStatusFilter("all"); }} className="text-xs text-primary hover:underline">Clear filters</button>}
+                {search && (
+                  <button onClick={() => { setSearch(""); setStatusFilter("all"); }}
+                    className="text-xs text-primary hover:underline">Clear filters</button>
+                )}
               </div>
             ) : (
               <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filtered.map(p => <ProjectCard key={p.id} project={p} onSelect={onSelect} loanCount={loanCounts[p.id] ?? 0} />)}
+                {filtered.map(p => (
+                  <ProjectCard key={p.id} project={p} onSelect={onSelect} loanCount={loanCounts[p.id] ?? 0} />
+                ))}
               </div>
             )}
             {!fetching && projects.length > 0 && (
@@ -893,21 +1435,21 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   );
 }
 
-// ─── LOANS VIEW ───────────────────────────────────────────────────────────────
+// ─── LOANS VIEW (per-project) ─────────────────────────────────────────────────
 function LoansView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
 }) {
-  const [loans, setLoans] = useState<Loan[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState<LoanType | "All">("All");
+  const [loans, setLoans]               = useState<Loan[]>([]);
+  const [fetching, setFetching]         = useState(false);
+  const [search, setSearch]             = useState("");
+  const [filterType, setFilterType]     = useState<LoanType | "All">("All");
   const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [modal, setModal] = useState<null | "create" | "edit">(null);
-  const [editing, setEditing] = useState<Loan | null>(null);
-  const [deleting, setDeleting] = useState<Loan | null>(null);
-  const [saving, setSaving] = useState(false);
-  const { toasts, push } = useToast();
+  const [expanded, setExpanded]         = useState<Record<string, boolean>>({});
+  const [modal, setModal]               = useState<null | "create" | "edit">(null);
+  const [editing, setEditing]           = useState<Loan | null>(null);
+  const [deleting, setDeleting]         = useState<Loan | null>(null);
+  const [saving, setSaving]             = useState(false);
+  const { toasts, push }                = useToast();
 
   const fetchLoans = useCallback(async () => {
     setFetching(true); setLoans([]);
@@ -953,7 +1495,6 @@ function LoansView({ project, canEdit, onBack }: {
     finally { setSaving(false); }
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────────
   const filtered = useMemo(() =>
     loans.filter(l => {
       if (filterType !== "All" && l.loan_type !== filterType) return false;
@@ -982,14 +1523,14 @@ function LoansView({ project, canEdit, onBack }: {
 
   const totals = useMemo(() => ({
     principal: loans.reduce((s, l) => s + Number(l.principal_approved_kes), 0),
-    opening: loans.reduce((s, l) => s + Number(l.opening_balance), 0),
-    closing: loans.reduce((s, l) => s + Number(l.closing_balance), 0),
-    totalDue: loans.reduce((s, l) => s + Number(l.total_due), 0),
-    amtPaid: loans.reduce((s, l) => s + Number(l.amount_paid), 0),
-    wht: loans.reduce((s, l) => s + Number(l.withholding_tax_amount), 0),
-    netInt: loans.reduce((s, l) => s + Number(l.net_interest_payable), 0),
-    arrears: loans.filter(l => l.days_in_arrears > 0).length,
-    thinCap: loans.filter(l => l.thin_cap_flag).length,
+    opening:   loans.reduce((s, l) => s + Number(l.opening_balance), 0),
+    closing:   loans.reduce((s, l) => s + Number(l.closing_balance), 0),
+    totalDue:  loans.reduce((s, l) => s + Number(l.total_due), 0),
+    amtPaid:   loans.reduce((s, l) => s + Number(l.amount_paid), 0),
+    wht:       loans.reduce((s, l) => s + Number(l.withholding_tax_amount), 0),
+    netInt:    loans.reduce((s, l) => s + Number(l.net_interest_payable), 0),
+    arrears:   loans.filter(l => l.days_in_arrears > 0).length,
+    thinCap:   loans.filter(l => l.thin_cap_flag).length,
   }), [loans]);
 
   const status = project.status ?? "planning";
@@ -1088,10 +1629,10 @@ function LoansView({ project, canEdit, onBack }: {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
           className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Principal", value: fmtKES(totals.principal), color: "text-foreground", sub: `${loans.length} facilities` },
-            { label: "Total Due", value: fmtKES(totals.totalDue), color: "text-primary", sub: "this period" },
-            { label: "Total Paid", value: fmtKES(totals.amtPaid), color: "text-emerald-400", sub: `${loans.filter(l => l.payment_status === "Paid").length} settled` },
-            { label: "Closing Balance", value: fmtKES(totals.closing), color: "text-sky-400", sub: "outstanding debt" },
+            { label: "Total Principal", value: fmtKES(totals.principal), color: "text-foreground",  sub: `${loans.length} facilities` },
+            { label: "Total Due",       value: fmtKES(totals.totalDue),  color: "text-primary",     sub: "this period" },
+            { label: "Total Paid",      value: fmtKES(totals.amtPaid),   color: "text-emerald-400", sub: `${loans.filter(l => l.payment_status === "Paid").length} settled` },
+            { label: "Closing Balance", value: fmtKES(totals.closing),   color: "text-sky-400",     sub: "outstanding debt" },
           ].map(c => (
             <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -1105,9 +1646,9 @@ function LoansView({ project, canEdit, onBack }: {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.13 }}
           className="flex flex-wrap gap-2 mb-8">
           {LOAN_TYPES.filter(lt => loans.some(l => l.loan_type === lt)).map(lt => {
-            const s = LOAN_TYPE_STYLE[lt];
-            const count = loans.filter(l => l.loan_type === lt).length;
-            const isActive = filterType === lt;
+            const s       = LOAN_TYPE_STYLE[lt];
+            const count   = loans.filter(l => l.loan_type === lt).length;
+            const isActive= filterType === lt;
             return (
               <button key={lt} onClick={() => setFilterType(isActive ? "All" : lt)}
                 className={`rounded-2xl border px-4 py-3 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 min-w-[8rem] ${
@@ -1126,7 +1667,7 @@ function LoansView({ project, canEdit, onBack }: {
 
         {/* Main card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
-          <CardHeader className="pb-4">
+          <CardHeader className="pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <CardTitle className="text-3xl font-bold">Loan Schedule</CardTitle>
               {canEdit && (
@@ -1140,254 +1681,31 @@ function LoansView({ project, canEdit, onBack }: {
                 </button>
               )}
             </div>
-
-            {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row gap-3 mt-5">
-              <div className="relative flex-1">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-                </svg>
-                <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Search by facility ref, lender, purpose or period…"
-                  className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
-              </div>
-              <select value={filterType} onChange={e => setFilterType(e.target.value as LoanType | "All")}
-                className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
-                <option value="All">All Types</option>
-                {LOAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as PaymentStatus | "All")}
-                className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
-                <option value="All">All Statuses</option>
-                {PAYMENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
-                {filtered.length} / {loans.length} shown
-              </div>
-            </div>
           </CardHeader>
 
-          <CardContent className="p-0">
-            {fetching ? (
-              <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
-                <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-                Loading loans…
-              </div>
-            ) : Object.keys(grouped).length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
-                <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          <LoansTable
+            loans={loans} filtered={filtered} grouped={grouped} totals={totals}
+            expanded={expanded} setExpanded={setExpanded}
+            canEdit={canEdit} fetching={fetching}
+            search={search} filterType={filterType} filterStatus={filterStatus}
+            setSearch={setSearch} setFilterType={setFilterType} setFilterStatus={setFilterStatus}
+            onEdit={loan => { setEditing(loan); setModal("edit"); }}
+            onDelete={setDeleting}
+            onCreate={() => setModal("create")}
+          />
+
+          {!fetching && loans.length > 0 && (
+            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+              <span className="tabular-nums">{loans.length} total loan record{loans.length !== 1 ? "s" : ""}</span>
+              <button onClick={fetchLoans} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                 </svg>
-                <p className="text-sm">No loan records found.</p>
-                {(search || filterType !== "All" || filterStatus !== "All") && (
-                  <button onClick={() => { setSearch(""); setFilterType("All"); setFilterStatus("All"); }}
-                    className="text-xs text-primary hover:underline">Clear filters</button>
-                )}
-                {canEdit && !search && filterType === "All" && filterStatus === "All" && (
-                  <button onClick={() => setModal("create")} className="text-xs text-primary hover:underline">Add first loan</button>
-                )}
-              </div>
-            ) : (
-              <div className="divide-y divide-white/8">
-                {LOAN_TYPES.filter(lt => grouped[lt]).map(lt => {
-                  const s = LOAN_TYPE_STYLE[lt];
-                  const rows = grouped[lt]!;
-                  const isOpen = expanded[lt] ?? true;
-                  const grpPrincipal = rows.reduce((a, l) => a + Number(l.principal_approved_kes), 0);
-                  const grpDue = rows.reduce((a, l) => a + Number(l.total_due), 0);
-                  const grpPaid = rows.reduce((a, l) => a + Number(l.amount_paid), 0);
-                  const grpWHT = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
-                  return (
-                    <div key={lt}>
-                      {/* Group header */}
-                      <button onClick={() => setExpanded(p => ({ ...p, [lt]: !p[lt] }))}
-                        className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left">
-                        <div className="flex items-center gap-3">
-                          <span className={`w-2 h-2 rounded-full ${s.dot}`} />
-                          <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{lt}</span>
-                          <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
-                        </div>
-                        <div className="flex items-center gap-5">
-                          <span className="text-xs font-mono tabular-nums text-muted-foreground hidden sm:block">
-                            Principal {fmtKES(grpPrincipal)}
-                          </span>
-                          {grpWHT > 0 && (
-                            <span className="text-xs font-mono tabular-nums text-amber-400 hidden md:block">
-                              WHT {fmtKES(grpWHT)}
-                            </span>
-                          )}
-                          <span className="text-sm font-bold tabular-nums font-mono text-primary">{fmtKES(grpDue)}</span>
-                          <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                            <path d="m6 9 6 6 6-6"/>
-                          </svg>
-                        </div>
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {isOpen && (
-                          <motion.div key={`lt-${lt}`}
-                            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }}
-                            style={{ overflow: "hidden" }}>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
-                                    {[
-                                      "Facility Ref", "Lender", "Purpose", "Period",
-                                      "Interest Rate", "Tenure",
-                                      "Opening Bal.", "Principal", "Interest",
-                                      "WHT (15%)", "Net Interest", "Fees",
-                                      "Total Due", "Paid", "Closing Bal.",
-                                      "Due Date", "Status", "Arrears",
-                                      ...(canEdit ? ["Actions"] : []),
-                                    ].map(h => (
-                                      <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
-                                        {h}
-                                      </th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {rows.map((loan, ri) => {
-                                    const ss = PAYMENT_STATUS_STYLE[loan.payment_status];
-                                    return (
-                                      <motion.tr key={loan.id}
-                                        initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                        className={`border-b border-white/5 transition-colors ${s.row}`}
-                                      >
-                                        <td className="px-4 py-3.5 whitespace-nowrap">
-                                          <span className="font-mono text-xs font-semibold text-primary">{loan.facility_ref}</span>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">{loan.lender_name}</td>
-                                        <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[120px]">
-                                          <span className="line-clamp-1">{loan.purpose}</span>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap">
-                                          <span className="font-mono text-xs text-muted-foreground">{loan.date_period}</span>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-foreground font-mono">
-                                          {fmtPct(loan.interest_rate_pa)}
-                                          <span className="text-[10px] text-muted-foreground ml-1">{loan.interest_type}</span>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground text-center">{loan.tenure_months}m</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.opening_balance))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.principal_portion))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(loan.interest_portion))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap">
-                                          {Number(loan.withholding_tax_amount) > 0 ? (
-                                            <span className="font-mono text-xs text-amber-400">{fmtKES(Number(loan.withholding_tax_amount))}</span>
-                                          ) : (
-                                            <span className="text-xs text-muted-foreground">—</span>
-                                          )}
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-sky-400">{fmtKES(Number(loan.net_interest_payable))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-muted-foreground">{fmtKES(Number(loan.fees_and_charges))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap">
-                                          <span className="font-mono text-sm font-bold text-foreground">{fmtKES(Number(loan.total_due))}</span>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-emerald-400">{fmtKES(Number(loan.amount_paid))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-primary">{fmtKES(Number(loan.closing_balance))}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(loan.due_date)}</td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap">
-                                          <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold ${ss}`}>
-                                            {loan.payment_status}
-                                          </Badge>
-                                        </td>
-                                        <td className="px-4 py-3.5 whitespace-nowrap text-center">
-                                          {loan.days_in_arrears > 0 ? (
-                                            <span className="text-xs font-mono text-rose-400 font-bold">{loan.days_in_arrears}d</span>
-                                          ) : (
-                                            <span className="text-xs text-emerald-400">—</span>
-                                          )}
-                                        </td>
-                                        {canEdit && (
-                                          <td className="px-4 py-3.5 whitespace-nowrap">
-                                            <div className="flex items-center gap-1.5">
-                                              <button onClick={() => { setEditing(loan); setModal("edit"); }} title="Edit"
-                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                                </svg>
-                                              </button>
-                                              <button onClick={() => setDeleting(loan)} title="Delete"
-                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                                  <polyline points="3 6 5 6 21 6"/>
-                                                  <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                                                </svg>
-                                              </button>
-                                            </div>
-                                          </td>
-                                        )}
-                                      </motion.tr>
-                                    );
-                                  })}
-                                </tbody>
-                                {/* Subtotal footer */}
-                                <tfoot>
-                                  <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                    <td colSpan={6} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{lt} Total</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l) => a+Number(l.opening_balance),0))}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l) => a+Number(l.principal_portion),0))}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(rows.reduce((a,l) => a+Number(l.interest_portion),0))}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">{fmtKES(grpWHT)}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-sky-400">{fmtKES(rows.reduce((a,l) => a+Number(l.net_interest_payable),0))}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-muted-foreground">{fmtKES(rows.reduce((a,l) => a+Number(l.fees_and_charges),0))}</td>
-                                    <td className="px-4 py-2.5 font-mono text-sm font-bold text-foreground">{fmtKES(grpDue)}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-emerald-400">{fmtKES(grpPaid)}</td>
-                                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-primary">{fmtKES(rows.reduce((a,l) => a+Number(l.closing_balance),0))}</td>
-                                    <td colSpan={canEdit ? 4 : 3} />
-                                  </tr>
-                                </tfoot>
-                              </table>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
-
-                {/* Grand total bar */}
-                {loans.length > 0 && (
-                  <div className="px-6 py-4 flex flex-wrap items-center gap-5 text-xs font-mono bg-primary/5 border-t border-primary/10">
-                    <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
-                    <span className="text-foreground">Principal {fmtKES(totals.principal)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-amber-400">WHT {fmtKES(totals.wht)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-foreground">Due {fmtKES(totals.totalDue)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-emerald-400">Paid {fmtKES(totals.amtPaid)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-sky-400">Outstanding {fmtKES(totals.closing)}</span>
-                    <Badge className="ml-auto bg-primary/10 border-primary/20 text-primary">
-                      {loans.length} loan{loans.length !== 1 ? "s" : ""}
-                      {totals.arrears > 0 && ` · ${totals.arrears} in arrears`}
-                    </Badge>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!fetching && loans.length > 0 && (
-              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
-                <span className="tabular-nums">{loans.length} total loan record{loans.length !== 1 ? "s" : ""}</span>
-                <button onClick={fetchLoans} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                  </svg>
-                  Refresh
-                </button>
-              </div>
-            )}
-          </CardContent>
+                Refresh
+              </button>
+            </div>
+          )}
         </Card>
       </div>
     </div>
@@ -1403,27 +1721,36 @@ export default function LoansPage({ projectId, canEdit = true }: Props) {
     supabase
       .from("projects")
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
-      .eq("id", projectId).single()
+      .eq("id", projectId)
+      .single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); })
       .catch(console.error);
   }, [projectId]);
 
   return (
-    <AnimatePresence mode="wait">
-      {selectedProject ? (
-        <motion.div key={selectedProject.id}
-          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
-          <LoansView project={selectedProject} canEdit={canEdit}
-            onBack={() => { if (!projectId) setSelectedProject(null); }} />
-        </motion.div>
-      ) : (
-        <motion.div key="picker"
-          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
-          <ProjectPickerView onSelect={setSelectedProject} />
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <>
+      <AnimatePresence mode="wait">
+        {selectedProject ? (
+          <motion.div key={selectedProject.id}
+            initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
+            <LoansView
+              project={selectedProject}
+              canEdit={canEdit}
+              onBack={() => { if (!projectId) setSelectedProject(null); }}
+            />
+          </motion.div>
+        ) : (
+          <motion.div key="picker"
+            initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
+            <ProjectPickerView onSelect={setSelectedProject} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Global loans table — always visible below, shows ALL loans */}
+      <GlobalLoansTable canEdit={canEdit} />
+    </>
   );
 }

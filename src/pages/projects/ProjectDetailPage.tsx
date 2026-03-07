@@ -543,7 +543,7 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
               </div>
-              {canEdit && (
+              {/* {canEdit && (
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -553,7 +553,7 @@ export default function ProjectDetailPage() {
                   <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
                   Edit Project
                 </motion.button>
-              )}
+              )} */}
             </div>
           </motion.div>
 

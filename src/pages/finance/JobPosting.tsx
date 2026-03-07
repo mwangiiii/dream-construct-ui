@@ -4,179 +4,217 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
+
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL as string,
+  import.meta.env.VITE_SUPABASE_ANON_KEY as string
+);
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
-interface Project {
-  id:                       string;
-  project_number:           string;
-  title:                    string;
-  description:              string | null;
-  status:                   string | null;
-  progress_percent:         number | null;
-  budget_numeric:           number | null;
-  currency:                 string | null;
-  site_address:             string | null;
-  site_city:                string | null;
-  site_country:             string | null;
-  start_date:               string | null;
-  expected_completion_date: string | null;
-  created_at:               string;
+interface Props {
+  projectId?: string;
+  canEdit?: boolean;
 }
 
-interface Milestone {
-  id:          string;
-  project_id:  string;
-  title:       string;
-  description: string | null;
+interface Project {
+  id: string;
+  project_number: string;
+  title: string;
+  description?: string;
+  status?: string;
+  progress_percent?: number;
+  budget_numeric?: number;
+  currency?: string;
+  site_address?: string;
+  site_city?: string;
+  site_country?: string;
+  start_date?: string;
+  expected_completion_date?: string;
+  created_at?: string;
 }
 
 type JobPhase =
-  | "Foundation" | "Superstructure" | "Formwork" | "Roofing"
-  | "Finishing"  | "Electrical"     | "Plumbing" | "Glazing" | "Other";
+  | "Mobilization"
+  | "Excavation"
+  | "Foundation"
+  | "Superstructure"
+  | "Roofing"
+  | "Finishes"
+  | "Handover";
 
 interface JobPosting {
-  id:                    number;
-  project_id:            string;
-  phase:                 JobPhase;
-  stage:                 string;
-  description:           string;
-  account_code:          string;
-  etims_code:            string;
-  budgeted_amount_paid:  number;
-  actual_amount_used:    number;
-  profit_loss:           number; // GENERATED ALWAYS AS (budgeted - actual) STORED
-  amount:                number;
-  created_at?:           string;
-  updated_at?:           string;
+  id: string;
+  project_id: string;
+  phase: JobPhase;
+  stage: string;
+  description: string;
+  account_code: string;
+  etims_code: string;
+  budgeted_amount_paid: number | string;
+  actual_amount_used: number | string;
+  profit_loss: number | string;
+  amount: number | string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface Milestone {
+  id: string;
+  title: string;
 }
 
 type FormData = Omit<JobPosting, "id" | "profit_loss" | "created_at" | "updated_at">;
 
-interface Props {
-  projectId?: string;
-  canEdit?:   boolean;
-}
-
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const PHASES: JobPhase[] = [
-  "Foundation", "Superstructure", "Formwork", "Roofing",
-  "Finishing", "Electrical", "Plumbing", "Glazing", "Other",
+  "Mobilization",
+  "Excavation",
+  "Foundation",
+  "Superstructure",
+  "Roofing",
+  "Finishes",
+  "Handover",
 ];
 
-const PHASE_STYLE: Record<JobPhase, { accent: string; badge: string; dot: string; row: string; bar: string }> = {
-  Foundation:     { accent: "text-amber-400",   badge: "bg-amber-500/10   border-amber-500/30   text-amber-300",   dot: "bg-amber-400",   row: "hover:bg-amber-950/30",   bar: "bg-amber-400"   },
-  Superstructure: { accent: "text-violet-400",  badge: "bg-violet-500/10  border-violet-500/30  text-violet-300",  dot: "bg-violet-400",  row: "hover:bg-violet-950/30",  bar: "bg-violet-400"  },
-  Formwork:       { accent: "text-orange-400",  badge: "bg-orange-500/10  border-orange-500/30  text-orange-300",  dot: "bg-orange-400",  row: "hover:bg-orange-950/30",  bar: "bg-orange-400"  },
-  Roofing:        { accent: "text-sky-400",     badge: "bg-sky-500/10     border-sky-500/30     text-sky-300",     dot: "bg-sky-400",     row: "hover:bg-sky-950/30",     bar: "bg-sky-400"     },
-  Finishing:      { accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", dot: "bg-emerald-400", row: "hover:bg-emerald-950/30", bar: "bg-emerald-400" },
-  Electrical:     { accent: "text-yellow-400",  badge: "bg-yellow-500/10  border-yellow-500/30  text-yellow-300",  dot: "bg-yellow-400",  row: "hover:bg-yellow-950/30",  bar: "bg-yellow-400"  },
-  Plumbing:       { accent: "text-cyan-400",    badge: "bg-cyan-500/10    border-cyan-500/30    text-cyan-300",    dot: "bg-cyan-400",    row: "hover:bg-cyan-950/30",    bar: "bg-cyan-400"    },
-  Glazing:        { accent: "text-pink-400",    badge: "bg-pink-500/10    border-pink-500/30    text-pink-300",    dot: "bg-pink-400",    row: "hover:bg-pink-950/30",    bar: "bg-pink-400"    },
-  Other:          { accent: "text-slate-400",   badge: "bg-slate-500/10   border-slate-500/30   text-slate-300",   dot: "bg-slate-400",   row: "hover:bg-slate-950/30",   bar: "bg-slate-400"   },
+// Alias used by JobCostingView
+const JOB_COSTING_PHASES = PHASES;
+
+const PHASE_STYLE: Record<JobPhase, { dot: string; accent: string; badge: string; row: string }> = {
+  Mobilization:   { dot: "bg-violet-400",  accent: "text-violet-400",  badge: "bg-violet-500/10 border-violet-500/20 text-violet-300",  row: "hover:bg-violet-500/5"  },
+  Excavation:     { dot: "bg-amber-400",   accent: "text-amber-400",   badge: "bg-amber-500/10 border-amber-500/20 text-amber-300",     row: "hover:bg-amber-500/5"   },
+  Foundation:     { dot: "bg-orange-400",  accent: "text-orange-400",  badge: "bg-orange-500/10 border-orange-500/20 text-orange-300",  row: "hover:bg-orange-500/5"  },
+  Superstructure: { dot: "bg-sky-400",     accent: "text-sky-400",     badge: "bg-sky-500/10 border-sky-500/20 text-sky-300",           row: "hover:bg-sky-500/5"     },
+  Roofing:        { dot: "bg-teal-400",    accent: "text-teal-400",    badge: "bg-teal-500/10 border-teal-500/20 text-teal-300",        row: "hover:bg-teal-500/5"    },
+  Finishes:       { dot: "bg-pink-400",    accent: "text-pink-400",    badge: "bg-pink-500/10 border-pink-500/20 text-pink-300",        row: "hover:bg-pink-500/5"    },
+  Handover:       { dot: "bg-emerald-400", accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/20 text-emerald-300", row: "hover:bg-emerald-500/5" },
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
-  completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
-  cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+  planning:    "bg-blue-500/10 border-blue-500/20 text-blue-300",
+  active:      "bg-emerald-500/10 border-emerald-500/20 text-emerald-300",
+  on_hold:     "bg-amber-500/10 border-amber-500/20 text-amber-300",
+  completed:   "bg-violet-500/10 border-violet-500/20 text-violet-300",
+  cancelled:   "bg-rose-500/10 border-rose-500/20 text-rose-300",
 };
 
-const makeEmptyForm = (projectId: string): FormData => ({
-  project_id:           projectId,
-  phase:                "Foundation",
-  stage:                "",
-  description:          "",
-  account_code:         "",
-  etims_code:           "",
-  budgeted_amount_paid: 0,
-  actual_amount_used:   0,
-  amount:               0,
-});
+const inputCls =
+  "w-full px-3 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all";
 
-const fmt     = (n: number, currency = "USD") =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(n);
-const fmtC    = (n: number) =>
-  new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-const fmtSign = (n: number) => `${n >= 0 ? "+" : ""}${fmt(n)}`;
-const fmtDate = (d: string | null) =>
-  d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+const fmt = (n: number, prefix = "KES") =>
+  `${prefix} ${n.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtC = (n: number) => {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return n.toFixed(0);
+};
+
+const fmtSign = (n: number) =>
+  `${n >= 0 ? "+" : ""}${fmt(n)}`;
+
+const fmtDate = (s: string) =>
+  new Date(s).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" });
+
+const makeEmptyForm = (project_id: string): FormData => ({
+  project_id,
+  phase: "Mobilization",
+  stage: "",
+  description: "",
+  account_code: "",
+  etims_code: "",
+  budgeted_amount_paid: 0,
+  actual_amount_used: 0,
+  amount: 0,
+});
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
-function throwSb(error: { message?: string } | null, ctx: string): never {
-  throw new Error(error?.message ?? `Supabase error during ${ctx}`);
-}
-
 const api = {
-  async projects(): Promise<Project[]> {
+  projects: async (): Promise<Project[]> => {
     const { data, error } = await supabase
       .from("projects")
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
       .order("created_at", { ascending: false });
-    if (error) throwSb(error, "projects");
+    if (error) throw new Error(error.message);
     return (data ?? []) as Project[];
   },
-  async list(projectId: string): Promise<JobPosting[]> {
+
+  postingCounts: async (ids: string[]): Promise<Record<string, number>> => {
     const { data, error } = await supabase
-      .from("job_posting")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("phase",  { ascending: true })
-      .order("stage",  { ascending: true });
-    if (error) throwSb(error, "list");
-    return (data ?? []) as JobPosting[];
-  },
-  async postingCounts(ids: string[]): Promise<Record<string, number>> {
-    const { data } = await supabase
-      .from("job_posting")
+      .from("job_postings")
       .select("project_id")
       .in("project_id", ids);
-    const tally: Record<string, number> = {};
+    if (error) throw new Error(error.message);
+    const counts: Record<string, number> = {};
     (data ?? []).forEach((r: { project_id: string }) => {
-      tally[r.project_id] = (tally[r.project_id] ?? 0) + 1;
+      counts[r.project_id] = (counts[r.project_id] ?? 0) + 1;
     });
-    return tally;
+    return counts;
   },
-  async milestones(projectId: string): Promise<Milestone[]> {
+
+  milestones: async (projectId: string): Promise<Milestone[]> => {
     const { data, error } = await supabase
       .from("project_milestones")
-      .select("id,project_id,title,description")
+      .select("id,title")
       .eq("project_id", projectId)
-      .order("title", { ascending: true });
-    if (error) throwSb(error, "milestones");
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
     return (data ?? []) as Milestone[];
   },
-  async create(body: FormData): Promise<JobPosting> {
-    const { data, error } = await supabase.from("job_posting").insert([body]).select().single();
-    if (error) throwSb(error, "create");
-    return data as JobPosting;
-  },
-  async update(id: number, body: FormData): Promise<JobPosting> {
-    const { profit_loss, created_at, updated_at, id: _id, ...safe } =
-      body as FormData & Partial<JobPosting>;
-    void profit_loss; void created_at; void updated_at; void _id;
+
+  list: async (projectId: string): Promise<JobPosting[]> => {
     const { data, error } = await supabase
-      .from("job_posting")
-      .update({ ...safe, updated_at: new Date().toISOString() })
-      .eq("id", id).select().single();
-    if (error) throwSb(error, "update");
+      .from("job_postings")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("phase")
+      .order("stage");
+    if (error) throw new Error(error.message);
+    return (data ?? []) as JobPosting[];
+  },
+
+  create: async (form: FormData): Promise<JobPosting> => {
+    const pl = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
+    const { data, error } = await supabase
+      .from("job_postings")
+      .insert({ ...form, profit_loss: pl })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
     return data as JobPosting;
   },
-  async remove(id: number): Promise<void> {
-    const { error } = await supabase.from("job_posting").delete().eq("id", id);
-    if (error) throwSb(error, "delete");
+
+  update: async (id: string, form: FormData): Promise<JobPosting> => {
+    const pl = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
+    const { data, error } = await supabase
+      .from("job_postings")
+      .update({ ...form, profit_loss: pl })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data as JobPosting;
+  },
+
+  remove: async (id: string): Promise<void> => {
+    const { error } = await supabase.from("job_postings").delete().eq("id", id);
+    if (error) throw new Error(error.message);
   },
 };
 
-// ─── TOAST ────────────────────────────────────────────────────────────────────
+// ─── TOAST HOOK ───────────────────────────────────────────────────────────────
+
+interface Toast { id: number; msg: string; type: "success" | "error" }
 
 function useToast() {
-  const [toasts, setToasts] = useState<{ id: number; msg: string; type: "success" | "error" }[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const push = useCallback((msg: string, type: "success" | "error" = "success") => {
     const id = Date.now();
     setToasts(p => [...p, { id, msg, type }]);
@@ -185,15 +223,12 @@ function useToast() {
   return { toasts, push };
 }
 
-// ─── SHARED ───────────────────────────────────────────────────────────────────
-
-const inputCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
+// ─── FIELD WRAPPER ────────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</label>
+      <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</label>
       {children}
     </div>
   );
@@ -204,53 +239,55 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function PostingModal({
   initial, onSave, onClose, loading, milestones,
 }: {
-  initial:    FormData & { id?: number };
-  onSave:     (d: FormData) => void;
-  onClose:    () => void;
-  loading:    boolean;
+  initial: FormData;
+  onSave: (f: FormData) => void;
+  onClose: () => void;
+  loading: boolean;
   milestones: Milestone[];
 }) {
-  const [form, setForm] = useState<FormData>({ ...initial });
-  const isEdit = Boolean(initial.id);
-  const set = <K extends keyof FormData>(k: K, v: FormData[K]) => setForm(p => ({ ...p, [k]: v }));
+  const [form, setForm] = useState<FormData>(initial);
+  const isEdit = "id" in initial;
 
-  const livePL = form.budgeted_amount_paid - form.actual_amount_used;
-  const pct    = form.budgeted_amount_paid > 0
-    ? Math.min(200, Math.round((form.actual_amount_used / form.budgeted_amount_paid) * 100))
+  const set = <K extends keyof FormData>(k: K, v: FormData[K]) =>
+    setForm(p => ({ ...p, [k]: v }));
+
+  const livePL = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
+  const pct = Number(form.budgeted_amount_paid) > 0
+    ? Math.min(200, Math.round((Number(form.actual_amount_used) / Number(form.budgeted_amount_paid)) * 100))
     : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-2xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white/10"
-        initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1,    y: 0  }}
-        exit={{   opacity: 0, scale: 0.96,  y: 8  }}
-        transition={{ duration: 0.2 }}
+        className="relative w-full max-w-2xl rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl bg-background/90 my-8"
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }} transition={{ duration: 0.2 }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-base font-semibold text-foreground tracking-tight">
-            {isEdit ? "Edit Job Posting" : "New Job Posting"}
-          </h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
+          <h2 className="text-lg font-bold text-foreground">{isEdit ? "Edit Job Posting" : "New Job Posting"}</h2>
+          <button onClick={onClose} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+        {/* Body */}
+        <div className="p-6 grid grid-cols-2 gap-4">
 
           {/* Phase */}
           <Field label="Phase *">
             <div className="relative">
-              <select value={form.phase} onChange={e => set("phase", e.target.value as JobPhase)}
-                className={inputCls + " appearance-none pr-10 font-medium tracking-wide text-sm"}>
-                {PHASES.map(p => (
-                  <option key={p} value={p} className="bg-background text-foreground font-medium">{p}</option>
+              <select
+                value={form.phase}
+                onChange={e => set("phase", e.target.value as JobPhase)}
+                className={inputCls + " appearance-none pr-10"}
+              >
+                {PHASES.map(ph => (
+                  <option key={ph} value={ph} className="bg-background">{ph}</option>
                 ))}
               </select>
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -261,7 +298,7 @@ function PostingModal({
             </div>
           </Field>
 
-          {/* Stage / Milestone — dropdown populated from project milestones */}
+          {/* Stage / Milestone */}
           <Field label="Stage / Milestone *">
             {milestones.length > 0 ? (
               <div className="relative">
@@ -301,11 +338,11 @@ function PostingModal({
             )}
           </Field>
 
-          {/* Description — BEFORE Account Code */}
+          {/* Description */}
           <div className="col-span-2">
             <Field label="Description">
               <input value={form.description} onChange={e => set("description", e.target.value)}
-                placeholder="Describe the job posting…" className={inputCls} />
+                placeholder="Describe the job costing…" className={inputCls} />
             </Field>
           </div>
 
@@ -322,21 +359,21 @@ function PostingModal({
           </Field>
 
           {/* Budgeted Amount */}
-          <Field label="Budgeted Amount (USD) *">
+          <Field label="Budgeted Amount (Kshs) *">
             <input type="number" step="0.01" min="0" value={form.budgeted_amount_paid}
-              onChange={e => set("budgeted_amount_paid", parseFloat(e.target.value) || 0)} className={inputCls} />
+              onChange={e => set("budgeted_amount_paid", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
           </Field>
 
           {/* Actual Amount */}
-          <Field label="Actual Amount Used (USD) *">
+          <Field label="Actual Amount Used (Kshs) *">
             <input type="number" step="0.01" min="0" value={form.actual_amount_used}
-              onChange={e => set("actual_amount_used", parseFloat(e.target.value) || 0)} className={inputCls} />
+              onChange={e => set("actual_amount_used", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
           </Field>
 
           {/* Amount */}
-          <Field label="Amount (USD)">
+          <Field label="Amount (Kshs)">
             <input type="number" step="0.01" min="0" value={form.amount}
-              onChange={e => set("amount", parseFloat(e.target.value) || 0)} className={inputCls} />
+              onChange={e => set("amount", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
           </Field>
 
           {/* Live P&L preview */}
@@ -366,11 +403,14 @@ function PostingModal({
               />
             </div>
             {pct > 100 && (
-              <p className="text-[10px] text-rose-400 mt-1">⚠ Over budget by {fmt(form.actual_amount_used - form.budgeted_amount_paid)}</p>
+              <p className="text-[10px] text-rose-400 mt-1">
+                ⚠ Over budget by {fmt(Number(form.actual_amount_used) - Number(form.budgeted_amount_paid))}
+              </p>
             )}
           </div>
         </div>
 
+        {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
           <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
             Cancel
@@ -407,7 +447,7 @@ function DeleteConfirm({ posting, onConfirm, onClose, loading }: {
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-foreground mb-1">Delete Job Posting</h3>
+            <h3 className="font-semibold text-foreground mb-1">Delete Job costing</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Permanently delete{" "}
               <span className="text-foreground font-medium">{posting.stage}</span>{" "}
@@ -491,7 +531,7 @@ function ProjectCard({ project, onSelect, postingCount }: {
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
             </svg>
-            {fmt(project.budget_numeric, project.currency?.trim() || "USD")}
+            {fmt(project.budget_numeric, "Kshs")}
           </span>
         )}
         {project.expected_completion_date && (
@@ -525,7 +565,7 @@ function ProjectCard({ project, onSelect, postingCount }: {
 
       {/* CTA hint */}
       <div className="flex items-center gap-1 text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-        <span>Open Job Postings</span>
+        <span>Open Job Costings</span>
         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
           <path d="m9 18 6-6-6-6"/>
         </svg>
@@ -610,7 +650,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             </span>
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
-            Select a project to view or manage its job postings.
+            Select a project to view or manage its job costings.
           </p>
         </motion.div>
 
@@ -618,9 +658,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects",         value: projects.length,                          sub: "in system"            },
-            { label: "Projects with Postings", value: Object.keys(postingCounts).length,        sub: "have job postings"    },
-            { label: "Total Job Postings",     value: totalPostings,                            sub: "across all projects"  },
+            { label: "Total Projects",         value: projects.length,                   sub: "in system"           },
+            { label: "Projects with Costings", value: Object.keys(postingCounts).length, sub: "have job costings"   },
+            { label: "Total Job Costings",     value: totalPostings,                     sub: "across all projects" },
           ].map(card => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{card.label}</div>
@@ -688,7 +728,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             {!fetching && projects.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">
-                  {projects.length} total projects · {Object.keys(postingCounts).length} with job postings
+                  {projects.length} total projects · {Object.keys(postingCounts).length} with job ostings
                 </span>
               </div>
             )}
@@ -719,7 +759,6 @@ function PostingsView({ project, canEdit, onBack }: {
 
   const { toasts, push } = useToast();
 
-  // Fetch milestones for this project (same pattern as TasksTab)
   useEffect(() => {
     api.milestones(project.id)
       .then(setMilestones)
@@ -815,10 +854,7 @@ function PostingsView({ project, canEdit, onBack }: {
     ) as Record<JobPhase, { count: number; budgeted: number; actual: number; pl: number }>,
   [postings]);
 
-  const status    = project.status ?? "planning";
-  const utilPct   = grandTotals.budgeted > 0
-    ? Math.min(200, Math.round((grandTotals.actual / grandTotals.budgeted) * 100))
-    : 0;
+  const status  = project.status ?? "planning";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -880,7 +916,7 @@ function PostingsView({ project, canEdit, onBack }: {
             All Projects
           </button>
 
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Job Posting</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Job Costing</p>
 
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
@@ -952,7 +988,7 @@ function PostingsView({ project, canEdit, onBack }: {
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <CardTitle className="text-3xl font-bold">Job Postings</CardTitle>
+              <CardTitle className="text-3xl font-bold">Job Costings</CardTitle>
               {canEdit && (
                 <button onClick={() => setModal("create")}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
@@ -976,13 +1012,20 @@ function PostingsView({ project, canEdit, onBack }: {
                   placeholder="Search by stage, description, account code or eTIMS…"
                   className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
               </div>
-              <select value={filterPhase} onChange={e => setFilterPhase(e.target.value as JobPhase | "All")}
-                className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
-                <option value="All" className="bg-background">All Phases</option>
-                {PHASES.map(ph => (
-                  <option key={ph} value={ph} className="bg-background">{ph}</option>
-                ))}
-              </select>
+              <div className="relative">
+                <select value={filterPhase} onChange={e => setFilterPhase(e.target.value as JobPhase | "All")}
+                  className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
+                  <option value="All" className="bg-background">All Phases</option>
+                  {PHASES.map(ph => (
+                    <option key={ph} value={ph} className="bg-background">{ph}</option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </div>
               <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
                 {filtered.length} / {postings.length} shown
               </div>
@@ -993,14 +1036,14 @@ function PostingsView({ project, canEdit, onBack }: {
             {fetching ? (
               <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-                Loading job postings…
+                Loading job costings…
               </div>
             ) : Object.keys(grouped).length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
                 </svg>
-                <p className="text-sm">No job postings found for this project.</p>
+                <p className="text-sm">No job costings found for this project.</p>
                 {(search || filterPhase !== "All") && (
                   <button onClick={() => { setSearch(""); setFilterPhase("All"); }}
                     className="text-xs text-primary hover:underline">Clear filters</button>
@@ -1014,18 +1057,18 @@ function PostingsView({ project, canEdit, onBack }: {
               <div className="divide-y divide-white/8">
 
                 {PHASES.filter(ph => grouped[ph]).map(ph => {
-                  const s     = PHASE_STYLE[ph];
-                  const rows  = grouped[ph]!;
+                  const s      = PHASE_STYLE[ph];
+                  const rows   = grouped[ph]!;
                   const isOpen = expanded[ph];
-                  const phB   = rows.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0);
-                  const phA   = rows.reduce((s, p) => s + Number(p.actual_amount_used),   0);
-                  const phPL  = rows.reduce((s, p) => s + Number(p.profit_loss),          0);
+                  const phB    = rows.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0);
+                  const phA    = rows.reduce((s, p) => s + Number(p.actual_amount_used),   0);
+                  const phPL   = rows.reduce((s, p) => s + Number(p.profit_loss),          0);
 
                   return (
                     <div key={ph}>
                       {/* Phase group header */}
                       <button
-                        onClick={() => setExpanded(p => ({ ...p, [ph]: !p[ph] }))}
+                        onClick={() => setExpanded(prev => ({ ...prev, [ph]: !prev[ph] }))}
                         className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
@@ -1097,7 +1140,7 @@ function PostingsView({ project, canEdit, onBack }: {
                                         <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
                                           {posting.stage}
                                         </td>
-                                        {/* Description — BEFORE Account Code */}
+                                        {/* Description */}
                                         <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[180px]">
                                           <span className="line-clamp-1">{posting.description || "—"}</span>
                                         </td>
@@ -1225,7 +1268,7 @@ function PostingsView({ project, canEdit, onBack }: {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 
-export default function JobPostingPage({ projectId, canEdit = true }: Props) {
+export default function JobCostingPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -1261,3 +1304,6 @@ export default function JobPostingPage({ projectId, canEdit = true }: Props) {
     </AnimatePresence>
   );
 }
+
+// Suppress unused import warning for JOB_COSTING_PHASES alias
+void JOB_COSTING_PHASES;

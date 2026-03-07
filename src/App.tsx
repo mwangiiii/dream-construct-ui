@@ -17,6 +17,8 @@ import JobPostingPage from "./pages/finance/JobPosting";
 import PayrollChecklistPage from "./pages/finance/Payroll_checkList";
 import MediaGalleryPage from "./pages/MediaGalleryPage";
 import FinanceDashboardPage from "./pages/finance/FinanceDashboardPage";
+import PoliciesPage      from "./pages/PoliciesPage";
+import StaffPoliciesPage from "./pages/Staffpoliciespage";
 
 // src/App.tsx
 import { useEffect, useState, useRef } from "react";
@@ -714,6 +716,16 @@ const App = () => {
                 </ProtectedRoute>
               }
             />
+            <Route path="/policies" element={<PoliciesPage />} />
+
+       <Route
+         path="/policies"
+         element={
+           <ProtectedRoute allowedRoles={["admin", "manager", "worker", "supervisor"]}>
+             <StaffPoliciesPage />
+           </ProtectedRoute>
+         }
+       />
 
             <Route
               path="/finance/"

@@ -1,13 +1,31 @@
-import React, { useState, useEffect } from "react";
-import { 
-  Award, TrendingUp, CheckCircle, Clock, XCircle, Plus, Edit2, Trash2, Save, X, 
-  Send, DollarSign, Package, Truck, Building2, AlertCircle, Check, Mail, ChevronDown, ChevronUp,
-  Tag, List
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Award, TrendingUp, CheckCircle, Clock, XCircle, Plus, Edit2, Trash2, Save, X,
+  Send, DollarSign, Package, Truck, Building2, AlertCircle, Check, Mail,
+  ChevronDown, ChevronUp, Tag, Search, Sparkles, ShoppingCart, Zap,
+  ChevronRight, ArrowRight, ShoppingBag, Layers, Star, Hash
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser } from "@/lib/auth";
+
+// ─────────────────────────────────────────────────────────────
+// MIGRATION REQUIRED – run once in Supabase SQL editor:
+//
+//   CREATE TABLE IF NOT EXISTS public.company_price_catalog (
+//     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+//     company_id  uuid NOT NULL REFERENCES tender_companies(id) ON DELETE CASCADE,
+//     item_name   text NOT NULL,
+//     unit        text NOT NULL DEFAULT 'units',
+//     price       numeric NOT NULL DEFAULT 0,
+//     created_at  timestamptz NOT NULL DEFAULT now(),
+//     updated_at  timestamptz NOT NULL DEFAULT now(),
+//     UNIQUE (company_id, item_name)
+//   );
+//   CREATE INDEX IF NOT EXISTS idx_catalog_company ON public.company_price_catalog(company_id);
+//   CREATE INDEX IF NOT EXISTS idx_catalog_item    ON public.company_price_catalog(item_name);
+// ─────────────────────────────────────────────────────────────
 
 interface FinancialsProps {
   projectId: string;
@@ -77,27 +95,19 @@ type TenderCompany = {
   address: string;
 };
 
-// New type for company material prices
-type CompanyMaterialPrice = {
+type CatalogItem = {
   id: string;
   company_id: string;
-  material_name: string;
-  price_per_unit: number;
+  item_name: string;
   unit: string;
-  delivery_price: number;
-  delivery_option: string;
-  notes: string;
-  created_at?: string;
-  updated_at?: string;
+  price: number;
 };
 
 type CompanyPrice = {
   company_id: string;
   company_name: string;
   price_per_unit: number;
-  delivery_price?: number;
-  delivery_option?: string;
-  price_id?: string;
+  unit: string;
 };
 
 type EmailModalData = {
@@ -107,16 +117,407 @@ type EmailModalData = {
   itemIdx: number;
 };
 
+// New: step-based form state
+type FormStep = 'company' | 'product' | 'details';
+
 const materialUnits = ["kg", "tonnes", "pieces", "meters", "liters", "bags", "boxes", "units", "m²", "m³"];
 const deliveryOptions = ["Pickup", "Standard Delivery", "Express Delivery", "Drop-off"];
 
+// ═══════════════════════════════════════════════════════════
+// STEP INDICATOR
+// ═══════════════════════════════════════════════════════════
+const StepIndicator = ({ currentStep }: { currentStep: FormStep }) => {
+  const steps: { key: FormStep; label: string; icon: React.ReactNode }[] = [
+    { key: 'company', label: 'Supplier', icon: <Building2 className="w-4 h-4" /> },
+    { key: 'product', label: 'Product', icon: <ShoppingBag className="w-4 h-4" /> },
+    { key: 'details', label: 'Details', icon: <Layers className="w-4 h-4" /> },
+  ];
+  const stepIndex = { company: 0, product: 1, details: 2 };
+
+  return (
+    <div className="flex items-center gap-0 mb-6">
+      {steps.map((s, i) => {
+        const done = stepIndex[currentStep] > i;
+        const active = currentStep === s.key;
+        return (
+          <React.Fragment key={s.key}>
+            <div className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all",
+              active ? "bg-primary text-background shadow-lg shadow-primary/30 scale-105" :
+              done ? "bg-green-500/20 text-green-400" :
+              "bg-white/5 text-muted-foreground"
+            )}>
+              {done ? <Check className="w-3.5 h-3.5" /> : s.icon}
+              <span className="hidden sm:inline">{s.label}</span>
+            </div>
+            {i < steps.length - 1 && (
+              <div className={cn("flex-1 h-px mx-1 max-w-[32px]", done ? "bg-green-500/40" : "bg-white/10")} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// COMPANY PICKER STEP
+// ═══════════════════════════════════════════════════════════
+const CompanyPickerStep = ({
+  companies, catalog, selectedId, onSelect
+}: {
+  companies: TenderCompany[];
+  catalog: CatalogItem[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) => {
+  const [search, setSearch] = useState("");
+  const filtered = companies.filter(c =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search supplier…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full pl-9 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition"
+          autoFocus
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <Building2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p className="text-sm">No suppliers found</p>
+          <p className="text-xs mt-1">Add companies in Manage Companies first</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
+          {filtered.map((company, i) => {
+            const itemCount = catalog.filter(c => c.company_id === company.id).length;
+            const isSelected = selectedId === company.id;
+            return (
+              <motion.button
+                key={company.id}
+                type="button"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+                onClick={() => onSelect(company.id)}
+                className={cn(
+                  "flex items-start gap-3 p-3 rounded-xl border text-left transition-all group",
+                  isSelected
+                    ? "border-primary bg-primary/10 shadow-lg shadow-primary/10"
+                    : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                )}
+              >
+                <div className={cn(
+                  "w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-sm",
+                  isSelected ? "bg-primary text-background" : "bg-white/10 text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary"
+                )}>
+                  {company.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm truncate">{company.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {itemCount > 0 ? (
+                      <span className="text-primary font-medium">{itemCount} products</span>
+                    ) : (
+                      <span className="text-amber-400">No catalog items</span>
+                    )}
+                  </p>
+                </div>
+                {isSelected && <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />}
+              </motion.button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// PRODUCT PICKER STEP
+// ═══════════════════════════════════════════════════════════
+const ProductPickerStep = ({
+  companyName, items, selectedItemName, onSelect
+}: {
+  companyName: string;
+  items: CatalogItem[];
+  selectedItemName: string;
+  onSelect: (item: CatalogItem) => void;
+}) => {
+  const [search, setSearch] = useState("");
+  const filtered = items.filter(i =>
+    i.item_name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-xl">
+        <Building2 className="w-4 h-4 text-primary" />
+        <span className="text-sm font-semibold text-primary">{companyName}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="text-center py-10 text-muted-foreground">
+          <ShoppingBag className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p className="font-semibold">No catalog items for this supplier</p>
+          <p className="text-xs mt-1">Add items in Manage Companies → select company → Pricing Catalog</p>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search products…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition"
+              autoFocus
+            />
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-4">No products match your search</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1.5 max-h-64 overflow-y-auto pr-1">
+              {filtered.map((item, i) => {
+                const isSelected = selectedItemName === item.item_name;
+                return (
+                  <motion.button
+                    key={item.id}
+                    type="button"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.03 }}
+                    onClick={() => onSelect(item)}
+                    className={cn(
+                      "flex items-center justify-between px-4 py-3 rounded-xl border text-left transition-all group",
+                      isSelected
+                        ? "border-primary bg-primary/10 shadow-lg shadow-primary/10"
+                        : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center",
+                        isSelected ? "bg-primary/20" : "bg-white/10 group-hover:bg-primary/10"
+                      )}>
+                        <Package className={cn("w-4 h-4", isSelected ? "text-primary" : "text-muted-foreground")} />
+                      </div>
+                      <div>
+                        <p className={cn("font-semibold text-sm", isSelected && "text-primary")}>{item.item_name}</p>
+                        <p className="text-xs text-muted-foreground">per {item.unit}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={cn("font-bold text-sm", isSelected ? "text-primary" : "text-foreground")}>
+                        KSH {item.price.toLocaleString()}
+                      </span>
+                      {isSelected
+                        ? <Check className="w-4 h-4 text-primary" />
+                        : <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary/60 transition" />
+                      }
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// DETAILS STEP
+// ═══════════════════════════════════════════════════════════
+const DetailsStep = ({
+  form, onFormChange, loading, companyName, allCompanies, allCatalog, onCompanyChange
+}: {
+  form: any;
+  onFormChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void;
+  loading: boolean;
+  companyName: string;
+  allCompanies: TenderCompany[];
+  allCatalog: CatalogItem[];
+  onCompanyChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+}) => {
+  const qty = Number(form.material_quantity) || 0;
+  const ppu = Number(form.price_per_unit) || 0;
+  const total = qty * ppu;
+  const delivery = Number(form.delivery_price) || 0;
+  const grandTotal = total + delivery;
+
+  return (
+    <div className="space-y-4">
+      {/* Selected product summary banner */}
+      <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 rounded-xl">
+        <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
+          <ShoppingBag className="w-5 h-5 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-sm">{form.material_name}</p>
+          <p className="text-xs text-muted-foreground">{companyName} · KSH {ppu.toLocaleString()}/{form.material_unit}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted-foreground">Unit Price</p>
+          <p className="font-bold text-primary text-sm">KSH {ppu.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Quantity */}
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Quantity *</label>
+          <div className="flex gap-2">
+            <input
+              name="material_quantity"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.material_quantity}
+              onChange={onFormChange}
+              placeholder="0"
+              className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-base font-semibold"
+              required
+              disabled={loading}
+            />
+            <div className="px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl text-primary font-bold text-sm flex items-center whitespace-nowrap">
+              {form.material_unit}
+            </div>
+          </div>
+        </div>
+
+        {/* Price per unit (editable override) */}
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">
+            Price / Unit (KSH) *
+            <span className="ml-2 text-green-400 normal-case font-normal text-xs flex items-center gap-1 inline-flex">
+              <Zap className="w-3 h-3" /> auto-filled
+            </span>
+          </label>
+          <input
+            name="price_per_unit"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.price_per_unit}
+            onChange={onFormChange}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-base font-semibold"
+            required
+            disabled={loading}
+          />
+        </div>
+      </div>
+
+      {/* Live calculation card */}
+      {qty > 0 && ppu > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="grid grid-cols-3 gap-2"
+        >
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p className="text-xs text-muted-foreground mb-1">Materials</p>
+            <p className="font-bold text-sm">KSH {total.toLocaleString()}</p>
+          </div>
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p className="text-xs text-muted-foreground mb-1">Delivery</p>
+            <p className="font-bold text-sm">KSH {delivery.toLocaleString()}</p>
+          </div>
+          <div className="p-3 rounded-xl bg-primary/10 border border-primary/30 text-center">
+            <p className="text-xs text-primary mb-1">Grand Total</p>
+            <p className="font-bold text-primary text-sm">KSH {grandTotal.toLocaleString()}</p>
+          </div>
+        </motion.div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Expected delivery date */}
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Expected Delivery</label>
+          <input
+            name="expected_delivery_date"
+            type="date"
+            value={form.expected_delivery_date}
+            onChange={onFormChange}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-sm"
+            disabled={loading}
+          />
+        </div>
+
+        {/* Delivery option */}
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Delivery Option</label>
+          <select
+            name="delivery_option"
+            value={form.delivery_option}
+            onChange={onFormChange}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-sm"
+            disabled={loading}
+          >
+            {deliveryOptions.map(o => <option key={o} value={o} className="bg-background">{o}</option>)}
+          </select>
+        </div>
+
+        {/* Delivery price */}
+        <div>
+          <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Delivery Price (KSH)</label>
+          <input
+            name="delivery_price"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.delivery_price}
+            onChange={onFormChange}
+            placeholder="0"
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-sm font-medium"
+            disabled={loading}
+          />
+        </div>
+      </div>
+
+      {/* Remarks */}
+      <div>
+        <label className="block text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">Remarks</label>
+        <textarea
+          name="remarks"
+          value={form.remarks}
+          onChange={onFormChange}
+          rows={2}
+          placeholder="Any additional notes…"
+          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition text-sm resize-none"
+          disabled={loading}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════
 const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [financials, setFinancials] = useState<Record<string, Financial[]>>({});
   const [tenderCompanies, setTenderCompanies] = useState<TenderCompany[]>([]);
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [expandedMilestones, setExpandedMilestones] = useState<Set<string>>(new Set());
   const [showFormForMilestone, setShowFormForMilestone] = useState<string | null>(null);
+
+  // ── Wizard form state ──────────────────────────────────────
+  const [formStep, setFormStep] = useState<FormStep>('company');
   const [form, setForm] = useState({
     milestone_id: "",
     material_name: "",
@@ -129,54 +530,44 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     delivery_price: "",
     remarks: ""
   });
+
   const [editIdx, setEditIdx] = useState(-1);
   const [editId, setEditId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ milestoneId: string; idx: number } | null>(null);
+
+  // Price comparison modal
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [selectedMaterial, setSelectedMaterial] = useState<string>("");
   const [companyPrices, setCompanyPrices] = useState<CompanyPrice[]>([]);
+
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  
-  // Email Modal States
+
+  // Email
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailModalData, setEmailModalData] = useState<EmailModalData | null>(null);
-  const [emailForm, setEmailForm] = useState({
-    to: "",
-    subject: "",
-    body: ""
-  });
+  const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "" });
   const [sendingEmail, setSendingEmail] = useState(false);
-  
-  // Tender Company CRUD states
+
+  // Company modal
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showCompanyForm, setShowCompanyForm] = useState(false);
-  const [companyForm, setCompanyForm] = useState({
-    id: "",
-    name: "",
-    contact_email: "",
-    contact_phone: "",
-    address: ""
-  });
+  const [companyForm, setCompanyForm] = useState({ id: "", name: "", contact_email: "", contact_phone: "", address: "" });
   const [editingCompany, setEditingCompany] = useState(false);
   const [confirmDeleteCompany, setConfirmDeleteCompany] = useState<string | null>(null);
 
-  // Company Material Prices states
-  const [showPricesForCompany, setShowPricesForCompany] = useState<string | null>(null);
-  const [companyMaterialPrices, setCompanyMaterialPrices] = useState<Record<string, CompanyMaterialPrice[]>>({});
-  const [showPriceForm, setShowPriceForm] = useState(false);
-  const [editingPrice, setEditingPrice] = useState<CompanyMaterialPrice | null>(null);
-  const [priceForm, setPriceForm] = useState({
-    material_name: "",
-    price_per_unit: "",
-    unit: materialUnits[0],
-    delivery_price: "",
-    delivery_option: deliveryOptions[0],
-    notes: ""
-  });
-  const [confirmDeletePrice, setConfirmDeletePrice] = useState<string | null>(null);
+  // Catalog / pricing panel
+  const [activeCatalogCompanyId, setActiveCatalogCompanyId] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogForm, setCatalogForm] = useState({ item_name: "", unit: materialUnits[0], price: "" });
+  const [editingCatalogItem, setEditingCatalogItem] = useState<CatalogItem | null>(null);
+  const [confirmDeleteCatalog, setConfirmDeleteCatalog] = useState<CatalogItem | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
+  // ══════════════════════════════════════════════════════════
+  // Init
+  // ══════════════════════════════════════════════════════════
   useEffect(() => {
     initializeData();
   }, [projectId]);
@@ -186,14 +577,12 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       fetchMilestones(),
       fetchFinancials(),
       fetchTenderCompanies(),
-      fetchCurrentUser()
+      fetchCurrentUser(),
+      fetchCatalog(),
     ]);
   };
 
-  const fetchCurrentUser = async () => {
-    const user = await getCurrentUser();
-    setCurrentUser(user);
-  };
+  const fetchCurrentUser = async () => setCurrentUser(await getCurrentUser());
 
   const fetchMilestones = async () => {
     setLoading(true);
@@ -202,11 +591,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .select("*")
       .eq("project_id", projectId)
       .order("sort_order", { ascending: true });
-    
     if (!error && data) {
       setMilestones(data);
-      const firstThree = new Set(data.slice(0, 3).map(m => m.id));
-      setExpandedMilestones(firstThree);
+      setExpandedMilestones(new Set(data.slice(0, 3).map((m: Milestone) => m.id)));
     }
     setLoading(false);
   };
@@ -215,20 +602,16 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     const { data, error } = await supabase
       .from("project_financials")
-      .select(`
-        *,
-        tender_company:tender_companies(id, name, contact_email, contact_phone)
-      `)
+      .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`)
       .eq("project_id", projectId)
       .order("created_at", { ascending: true });
-    
     if (!error && data) {
-      const grouped = data.reduce((acc, item) => {
-        const milestoneId = item.milestone_id || "unassigned";
-        if (!acc[milestoneId]) acc[milestoneId] = [];
-        acc[milestoneId].push(item);
+      const grouped = data.reduce((acc: Record<string, Financial[]>, item: Financial) => {
+        const key = item.milestone_id || "unassigned";
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(item);
         return acc;
-      }, {} as Record<string, Financial[]>);
+      }, {});
       setFinancials(grouped);
     }
     setLoading(false);
@@ -240,252 +623,133 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .select("*")
       .eq("is_active", true)
       .order("name", { ascending: true });
-    
     if (!error && data) setTenderCompanies(data);
   };
 
-  // ─── Company Material Prices ───────────────────────────────────────────────
-
-  const fetchCompanyMaterialPrices = async (companyId: string) => {
+  const fetchCatalog = async () => {
     const { data, error } = await supabase
-      .from("company_material_prices")
+      .from("company_price_catalog")
       .select("*")
-      .eq("company_id", companyId)
-      .order("material_name", { ascending: true });
-    
-    if (!error && data) {
-      setCompanyMaterialPrices(prev => ({ ...prev, [companyId]: data }));
-    }
-    return data || [];
+      .order("item_name", { ascending: true });
+    if (!error && data) setCatalog(data as CatalogItem[]);
   };
 
-  const handleOpenCompanyPrices = async (companyId: string) => {
-    setShowPricesForCompany(companyId);
-    await fetchCompanyMaterialPrices(companyId);
+  // ══════════════════════════════════════════════════════════
+  // Catalog helpers
+  // ══════════════════════════════════════════════════════════
+  const catalogForCompany = (companyId: string) =>
+    catalog.filter(c => c.company_id === companyId);
+
+  const getPricesForItem = (itemName: string): CompanyPrice[] => {
+    if (!itemName.trim()) return [];
+    const norm = itemName.trim().toLowerCase();
+    return catalog
+      .filter(c => c.item_name.toLowerCase() === norm)
+      .map(c => ({
+        company_id: c.company_id,
+        company_name: tenderCompanies.find(t => t.id === c.company_id)?.name || "Unknown",
+        price_per_unit: c.price,
+        unit: c.unit,
+      }))
+      .sort((a, b) => a.price_per_unit - b.price_per_unit);
   };
 
-  const openPriceForm = (price?: CompanyMaterialPrice) => {
-    if (price) {
-      setEditingPrice(price);
-      setPriceForm({
-        material_name: price.material_name,
-        price_per_unit: price.price_per_unit.toString(),
-        unit: price.unit,
-        delivery_price: price.delivery_price.toString(),
-        delivery_option: price.delivery_option,
-        notes: price.notes || ""
-      });
-    } else {
-      setEditingPrice(null);
-      setPriceForm({
-        material_name: "",
-        price_per_unit: "",
-        unit: materialUnits[0],
-        delivery_price: "",
-        delivery_option: deliveryOptions[0],
-        notes: ""
-      });
-    }
-    setShowPriceForm(true);
-  };
-
-  const closePriceForm = () => {
-    setShowPriceForm(false);
-    setEditingPrice(null);
-    setPriceForm({
+  // ══════════════════════════════════════════════════════════
+  // Wizard step handlers
+  // ══════════════════════════════════════════════════════════
+  const handleCompanySelect = (companyId: string) => {
+    setForm(prev => ({
+      ...prev,
+      tender_company_id: companyId,
+      // reset product when changing company
       material_name: "",
       price_per_unit: "",
-      unit: materialUnits[0],
-      delivery_price: "",
-      delivery_option: deliveryOptions[0],
-      notes: ""
+      material_unit: materialUnits[0],
+    }));
+    setFormStep('product');
+  };
+
+  const handleProductSelect = (item: CatalogItem) => {
+    setForm(prev => ({
+      ...prev,
+      material_name: item.item_name,
+      price_per_unit: item.price.toString(),
+      material_unit: item.unit,
+    }));
+    setFormStep('details');
+  };
+
+  // When editing, jump straight to details with all fields pre-filled
+  const handleEdit = (milestoneId: string, idx: number) => {
+    const f = (financials[milestoneId] || [])[idx];
+    setEditIdx(idx);
+    setEditId(f.id);
+    setForm({
+      milestone_id: milestoneId,
+      material_name: f.material_name,
+      material_quantity: f.material_quantity.toString(),
+      material_unit: f.material_unit,
+      tender_company_id: f.tender_company_id || "",
+      price_per_unit: f.price_per_unit.toString(),
+      expected_delivery_date: f.expected_delivery_date || "",
+      delivery_option: f.delivery_option,
+      delivery_price: f.delivery_price.toString(),
+      remarks: f.remarks,
     });
-  };
-
-  const handlePriceFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setPriceForm(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleAddPrice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!showPricesForCompany || !priceForm.material_name.trim()) return;
-
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("company_material_prices")
-      .insert([{
-        company_id: showPricesForCompany,
-        material_name: priceForm.material_name.trim(),
-        price_per_unit: Number(priceForm.price_per_unit) || 0,
-        unit: priceForm.unit,
-        delivery_price: Number(priceForm.delivery_price) || 0,
-        delivery_option: priceForm.delivery_option,
-        notes: priceForm.notes
-      }])
-      .select();
-
-    if (!error && data) {
-      setCompanyMaterialPrices(prev => ({
-        ...prev,
-        [showPricesForCompany]: [...(prev[showPricesForCompany] || []), data[0]]
-      }));
-      closePriceForm();
-      setSuccessMessage("Price added successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } else {
-      alert("Error adding price: " + error?.message);
-    }
-    setLoading(false);
-  };
-
-  const handleUpdatePrice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPrice || !showPricesForCompany) return;
-
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("company_material_prices")
-      .update({
-        material_name: priceForm.material_name.trim(),
-        price_per_unit: Number(priceForm.price_per_unit) || 0,
-        unit: priceForm.unit,
-        delivery_price: Number(priceForm.delivery_price) || 0,
-        delivery_option: priceForm.delivery_option,
-        notes: priceForm.notes
-      })
-      .eq("id", editingPrice.id)
-      .select();
-
-    if (!error && data) {
-      setCompanyMaterialPrices(prev => ({
-        ...prev,
-        [showPricesForCompany]: (prev[showPricesForCompany] || []).map(p =>
-          p.id === editingPrice.id ? data[0] : p
-        )
-      }));
-      closePriceForm();
-      setSuccessMessage("Price updated successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } else {
-      alert("Error updating price: " + error?.message);
-    }
-    setLoading(false);
-  };
-
-  const deletePrice = async (priceId: string) => {
-    if (!showPricesForCompany) return;
-    setLoading(true);
-    const { error } = await supabase
-      .from("company_material_prices")
-      .delete()
-      .eq("id", priceId);
-
-    if (!error) {
-      setCompanyMaterialPrices(prev => ({
-        ...prev,
-        [showPricesForCompany]: (prev[showPricesForCompany] || []).filter(p => p.id !== priceId)
-      }));
-      setSuccessMessage("Price deleted successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } else {
-      alert("Error deleting price: " + error.message);
-    }
-    setLoading(false);
-    setConfirmDeletePrice(null);
-  };
-
-  // ─── Auto-fill price when company + material name is set ──────────────────
-
-  const autoFillPriceFromCompany = async (companyId: string, materialName: string) => {
-    if (!companyId || !materialName.trim()) return;
-
-    const { data } = await supabase
-      .from("company_material_prices")
-      .select("*")
-      .eq("company_id", companyId)
-      .ilike("material_name", materialName.trim())
-      .maybeSingle();
-
-    if (data) {
-      setForm(prev => ({
-        ...prev,
-        price_per_unit: data.price_per_unit.toString(),
-        material_unit: data.unit || prev.material_unit,
-        delivery_price: data.delivery_price.toString(),
-        delivery_option: data.delivery_option || prev.delivery_option
-      }));
-    }
-  };
-
-  // ─── Form Handlers ─────────────────────────────────────────────────────────
-
-  const handleChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setForm(prev => {
-      const updated = { ...prev, [name]: value };
-      return updated;
-    });
-
-    // Auto-fill price when company changes
-    if (name === "tender_company_id" && value) {
-      await autoFillPriceFromCompany(value, form.material_name);
-    }
-
-    // Auto-fill price when material name changes (on blur is better, but onChange also works)
-    if (name === "material_name" && form.tender_company_id) {
-      await autoFillPriceFromCompany(form.tender_company_id, value);
-    }
-  };
-
-  const handleMaterialNameBlur = async () => {
-    if (form.tender_company_id && form.material_name.trim()) {
-      await autoFillPriceFromCompany(form.tender_company_id, form.material_name);
-    }
-  };
-
-  const calculateTotalPrice = () => {
-    const quantity = Number(form.material_quantity) || 0;
-    const pricePerUnit = Number(form.price_per_unit) || 0;
-    return quantity * pricePerUnit;
-  };
-
-  const toggleMilestone = (milestoneId: string) => {
-    setExpandedMilestones(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(milestoneId)) newSet.delete(milestoneId);
-      else newSet.add(milestoneId);
-      return newSet;
-    });
-  };
-
-  const openAddForm = (milestoneId: string) => {
-    resetForm();
-    setForm(prev => ({ ...prev, milestone_id: milestoneId }));
+    setFormStep('details'); // editing goes straight to details
     setShowFormForMilestone(milestoneId);
     setExpandedMilestones(prev => new Set([...prev, milestoneId]));
   };
 
+  // ══════════════════════════════════════════════════════════
+  // Roles
+  // ══════════════════════════════════════════════════════════
   const isAdmin = currentUser?.roles?.some((r: any) => r.role_name === "admin");
-  const isQuantitySurveyor = currentUser?.roles?.some((r: any) => 
+  const isQuantitySurveyor = currentUser?.roles?.some((r: any) =>
     ["admin", "surveyor", "manager", "project_manager"].includes(r.role_name)
   );
-  const isFinanceTeam = currentUser?.roles?.some((r: any) => 
+  const isFinanceTeam = currentUser?.roles?.some((r: any) =>
     ["admin", "finance", "manager", "project_manager"].includes(r.role_name)
   );
   const isClient = currentUser?.roles?.some((r: any) => r.role_name === "client");
   const canEdit = !isClient && (isQuantitySurveyor || isFinanceTeam || isAdmin);
-  const canDelete = currentUser?.roles?.some((r: any) => 
+  const canDelete = currentUser?.roles?.some((r: any) =>
     ["admin", "project_manager", "manager"].includes(r.role_name)
   );
+
+  // ══════════════════════════════════════════════════════════
+  // Main form handlers
+  // ══════════════════════════════════════════════════════════
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const calculateTotalPrice = (qty?: string, ppu?: string) => {
+    const q = Number(qty ?? form.material_quantity) || 0;
+    const p = Number(ppu ?? form.price_per_unit) || 0;
+    return q * p;
+  };
+
+  const toggleMilestone = (id: string) =>
+    setExpandedMilestones(prev => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
+
+  const openAddForm = (milestoneId: string) => {
+    resetForm();
+    setForm(prev => ({ ...prev, milestone_id: milestoneId }));
+    setFormStep('company');
+    setShowFormForMilestone(milestoneId);
+    setExpandedMilestones(prev => new Set([...prev, milestoneId]));
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.milestone_id || !form.material_name.trim()) {
-      alert("Please fill in all required fields");
+      alert("Please complete all steps");
       return;
     }
     setLoading(true);
@@ -495,8 +759,8 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .insert([{
         project_id: projectId,
         milestone_id: form.milestone_id,
-        category: 'Materials',
-        stage: 'Procurement',
+        category: "Materials",
+        stage: "Procurement",
         material_name: form.material_name,
         material_quantity: Number(form.material_quantity) || 0,
         material_unit: form.material_unit,
@@ -513,44 +777,18 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         funds_received: false,
         goods_paid: false,
         remarks: form.remarks,
-        created_by: currentUser?.profile?.id
+        created_by: currentUser?.profile?.id,
       }])
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
-    
+
     if (!error && data) {
-      setFinancials(prev => ({
-        ...prev,
-        [form.milestone_id]: [...(prev[form.milestone_id] || []), data[0]]
-      }));
+      setFinancials(prev => ({ ...prev, [form.milestone_id]: [...(prev[form.milestone_id] || []), data[0]] }));
       resetForm();
-      setSuccessMessage("Material added successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
+      toast("Material added successfully!");
     } else {
       alert("Error adding material: " + error?.message);
     }
     setLoading(false);
-  };
-
-  const handleEdit = (milestoneId: string, idx: number) => {
-    const items = financials[milestoneId] || [];
-    const f = items[idx];
-    setEditIdx(idx);
-    setEditId(f.id);
-    setForm({
-      milestone_id: milestoneId,
-      material_name: f.material_name,
-      material_quantity: f.material_quantity.toString(),
-      material_unit: f.material_unit,
-      tender_company_id: f.tender_company_id || "",
-      price_per_unit: f.price_per_unit.toString(),
-      expected_delivery_date: f.expected_delivery_date || "",
-      delivery_option: f.delivery_option,
-      delivery_price: f.delivery_price.toString(),
-      remarks: f.remarks,
-    });
-    setShowFormForMilestone(milestoneId);
-    setExpandedMilestones(prev => new Set([...prev, milestoneId]));
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -574,17 +812,13 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       })
       .eq("id", editId)
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
-      
+
     if (!error && data) {
-      const milestoneId = form.milestone_id;
-      const items = financials[milestoneId] || [];
-      const updated = [...items];
-      updated[editIdx] = data[0];
-      setFinancials(prev => ({ ...prev, [milestoneId]: updated }));
+      const items = [...(financials[form.milestone_id] || [])];
+      items[editIdx] = data[0];
+      setFinancials(prev => ({ ...prev, [form.milestone_id]: items }));
       resetForm();
-      setSuccessMessage("Material updated successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
+      toast("Material updated successfully!");
     } else {
       alert("Error updating material: " + error?.message);
     }
@@ -597,14 +831,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     try {
       const { error } = await supabase.from("project_financials").delete().eq("id", id);
-      if (error) { alert("Error deleting material: " + error.message); return; }
-      const { data: checkData } = await supabase.from("project_financials").select("id").eq("id", id).maybeSingle();
-      if (checkData) { alert("Failed to delete material. Please check your permissions or contact support."); return; }
+      if (error) { alert("Error deleting: " + error.message); return; }
       setFinancials(prev => ({ ...prev, [milestoneId]: items.filter((_, i) => i !== idx) }));
       if (editId === id) resetForm();
-      setSuccessMessage("Material deleted successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
+      toast("Material deleted successfully!");
     } catch (err: any) {
       alert("Unexpected error: " + err.message);
     } finally {
@@ -613,125 +843,115 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     }
   };
 
-  const handleDelete = (milestoneId: string, idx: number) => setConfirmDelete({ milestoneId, idx });
-
   const resetForm = () => {
     setEditIdx(-1);
     setEditId(null);
-    setForm({
-      milestone_id: "",
-      material_name: "",
-      material_quantity: "",
-      material_unit: materialUnits[0],
-      tender_company_id: "",
-      price_per_unit: "",
-      expected_delivery_date: "",
-      delivery_option: deliveryOptions[0],
-      delivery_price: "",
-      remarks: ""
-    });
+    setForm({ milestone_id: "", material_name: "", material_quantity: "", material_unit: materialUnits[0], tender_company_id: "", price_per_unit: "", expected_delivery_date: "", delivery_option: deliveryOptions[0], delivery_price: "", remarks: "" });
     setShowFormForMilestone(null);
+    setFormStep('company');
   };
 
-  // ─── Email Templates ───────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════
+  // Compare prices
+  // ══════════════════════════════════════════════════════════
+  const handleViewPrices = (materialName: string) => {
+    setSelectedMaterial(materialName);
+    setCompanyPrices(getPricesForItem(materialName));
+    setShowPriceModal(true);
+  };
 
+  const applyPriceFromModal = (cp: CompanyPrice) => {
+    setForm(prev => ({
+      ...prev,
+      tender_company_id: cp.company_id,
+      price_per_unit: cp.price_per_unit.toString(),
+      material_unit: cp.unit,
+    }));
+    setShowPriceModal(false);
+    toast("Price applied!");
+  };
+
+  // ══════════════════════════════════════════════════════════
+  // Email helpers
+  // ══════════════════════════════════════════════════════════
   const generateEmailTemplate = (type: EmailModalData['type'], financial: Financial, milestoneName: string) => {
     const company = financial.tender_company;
-    const templates = {
+    const templates: Record<string, { subject: string; body: string }> = {
       order_request: {
-        subject: `Order Request - ${financial.material_name} for ${milestoneName}`,
-        body: `Dear ${company?.name || 'Supplier'},\n\nWe would like to request an order for the following materials:\n\nORDER DETAILS:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nPrice per Unit: KSH ${financial.price_per_unit.toLocaleString()}\nTotal Amount: KSH ${financial.total_price.toLocaleString()}\n\nDELIVERY INFORMATION:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nExpected Delivery Date: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\nDelivery Option: ${financial.delivery_option}\nDelivery Cost: KSH ${financial.delivery_price.toLocaleString()}\n\nPROJECT INFORMATION:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMilestone: ${milestoneName}\n${financial.remarks ? `Additional Notes: ${financial.remarks}` : ''}\n\nTOTAL ORDER VALUE: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\n\nPlease confirm receipt of this order request and provide an estimated delivery timeline.\n\nBest regards,\nProject Finance Team`
+        subject: `Order Request – ${financial.material_name} for ${milestoneName}`,
+        body: `Dear ${company?.name || 'Supplier'},\n\nWe would like to request an order for:\n\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nPrice/Unit: KSH ${financial.price_per_unit.toLocaleString()}\nTotal: KSH ${financial.total_price.toLocaleString()}\nDelivery: ${financial.delivery_option} – KSH ${financial.delivery_price.toLocaleString()}\nExpected: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\n\nGRAND TOTAL: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\n\nPlease confirm receipt and provide delivery timeline.\n\nBest regards,\nProject Finance Team`,
       },
       order_approval: {
-        subject: `Order ${financial.order_approved ? 'Approved' : 'Rejected'} - ${financial.material_name}`,
-        body: `Dear ${company?.name || 'Supplier'},\n\nThis is to inform you that your order has been ${financial.order_approved ? 'APPROVED' : 'REJECTED'}.\n\nORDER REFERENCE:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nTotal Amount: KSH ${financial.total_price.toLocaleString()}\nStatus: ${financial.order_approved ? '✓ APPROVED' : '✗ REJECTED'}\n\n${financial.order_approved ? `Please proceed with the order preparation. We will initiate the payment process shortly.\n\nExpected Delivery: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\nDelivery Method: ${financial.delivery_option}` : `We regret to inform you that we cannot proceed with this order at this time.`}\n\nBest regards,\nProject Finance Team`
+        subject: `Order ${financial.order_approved ? 'Approved' : 'Rejected'} – ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},\n\nYour order for ${financial.material_name} has been ${financial.order_approved ? 'APPROVED' : 'REJECTED'}.\n\nTotal: KSH ${financial.total_price.toLocaleString()}\n\n${financial.order_approved ? 'Please proceed with order preparation.\n\nExpected Delivery: ' + (financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD') : 'We cannot proceed with this order at this time.'}\n\nBest regards,\nProject Finance Team`,
       },
       funds_request: {
-        subject: `Funds Request - ${financial.material_name} Payment`,
-        body: `Dear Finance Department,\n\nWe are requesting funds for the following approved order:\n\nPAYMENT REQUEST:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSupplier: ${company?.name || 'N/A'}\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nMaterial Cost: KSH ${financial.total_price.toLocaleString()}\nDelivery Cost: KSH ${financial.delivery_price.toLocaleString()}\n\nTOTAL AMOUNT REQUESTED: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\n\nPROJECT DETAILS:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMilestone: ${milestoneName}\nExpected Delivery: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\n\nPlease approve and transfer the funds at your earliest convenience.\n\nBest regards,\nProject Team`
+        subject: `Funds Request – ${financial.material_name} Payment`,
+        body: `Dear Finance Department,\n\nFunds requested for:\n\nSupplier: ${company?.name || 'N/A'}\nMaterial: ${financial.material_name}\nMaterial Cost: KSH ${financial.total_price.toLocaleString()}\nDelivery Cost: KSH ${financial.delivery_price.toLocaleString()}\n\nTOTAL REQUESTED: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\n\nBest regards,\nProject Team`,
       },
       funds_sent: {
-        subject: `Payment Sent - ${financial.material_name}`,
-        body: `Dear ${company?.name || 'Supplier'},\n\nThis is to confirm that payment has been sent for your order.\n\nPAYMENT CONFIRMATION:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nAmount Sent: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\nDate Sent: ${financial.funds_sent_at ? new Date(financial.funds_sent_at).toLocaleDateString() : new Date().toLocaleDateString()}\n\nPlease confirm receipt of payment and proceed with order preparation and delivery.\n\nExpected Delivery Date: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\nDelivery Method: ${financial.delivery_option}\n\nThank you for your service.\n\nBest regards,\nProject Finance Team`
+        subject: `Payment Sent – ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},\n\nPayment of KSH ${(financial.total_price + financial.delivery_price).toLocaleString()} has been sent.\n\nPlease confirm receipt and proceed with delivery.\n\nExpected Delivery: ${financial.expected_delivery_date ? new Date(financial.expected_delivery_date).toLocaleDateString() : 'TBD'}\n\nBest regards,\nProject Finance Team`,
       },
       funds_received: {
-        subject: `Payment Received Confirmation - ${financial.material_name}`,
-        body: `Dear Project Team,\n\nThis is to confirm that we have received payment for the following order:\n\nPAYMENT RECEIVED:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nFrom: ${company?.name || 'Supplier'}\nMaterial: ${financial.material_name}\nQuantity: ${financial.material_quantity} ${financial.material_unit}\nAmount: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\nDate Received: ${financial.funds_received_at ? new Date(financial.funds_received_at).toLocaleDateString() : new Date().toLocaleDateString()}\n\nOrder preparation will commence immediately.\n\nBest regards,\n${company?.name || 'Supplier'}`
+        subject: `Payment Received – ${financial.material_name}`,
+        body: `Dear Project Team,\n\nPayment of KSH ${(financial.total_price + financial.delivery_price).toLocaleString()} received from ${company?.name || 'Supplier'}.\n\nOrder preparation will commence immediately.\n\nBest regards,\n${company?.name || 'Supplier'}`,
       },
       goods_paid: {
-        subject: `Final Payment Confirmation - ${financial.material_name}`,
-        body: `Dear ${company?.name || 'Supplier'},\n\nThis is to confirm that final payment has been processed for the delivered goods.\n\nFINAL PAYMENT DETAILS:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMaterial: ${financial.material_name}\nQuantity Delivered: ${financial.material_quantity} ${financial.material_unit}\nFinal Amount Paid: KSH ${(financial.total_price + financial.delivery_price).toLocaleString()}\nPayment Date: ${financial.goods_paid_at ? new Date(financial.goods_paid_at).toLocaleDateString() : new Date().toLocaleDateString()}\n\nThank you for your excellent service. This transaction is now complete.\n\nWe look forward to future business opportunities.\n\nBest regards,\nProject Finance Team`
-      }
+        subject: `Final Payment Confirmation – ${financial.material_name}`,
+        body: `Dear ${company?.name || 'Supplier'},\n\nFinal payment of KSH ${(financial.total_price + financial.delivery_price).toLocaleString()} has been processed for delivered goods.\n\nThank you for your excellent service.\n\nBest regards,\nProject Finance Team`,
+      },
     };
     return templates[type];
   };
 
   const openEmailModal = (type: EmailModalData['type'], milestoneId: string, idx: number) => {
-    const items = financials[milestoneId] || [];
-    const financial = items[idx];
-    if (!financial.tender_company_id || !financial.tender_company?.contact_email) {
-      alert("No email address found for this company. Please update company details.");
+    const financial = (financials[milestoneId] || [])[idx];
+    if (!financial?.tender_company_id || !financial?.tender_company?.contact_email) {
+      alert("No email address found. Please update company details.");
       return;
     }
     const milestone = milestones.find(m => m.id === milestoneId);
-    const template = generateEmailTemplate(type, financial, milestone?.title || 'Project');
+    const tpl = generateEmailTemplate(type, financial, milestone?.title || "Project");
     setEmailModalData({ type, financial, milestoneId, itemIdx: idx });
-    setEmailForm({ to: financial.tender_company.contact_email, subject: template.subject, body: template.body });
+    setEmailForm({ to: financial.tender_company.contact_email, subject: tpl.subject, body: tpl.body });
     setShowEmailModal(true);
   };
 
-  const closeEmailModal = () => {
-    setShowEmailModal(false);
-    setEmailModalData(null);
-    setEmailForm({ to: "", subject: "", body: "" });
-  };
-
-  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setEmailForm(prev => ({ ...prev, [name]: value }));
-  };
+  const closeEmailModal = () => { setShowEmailModal(false); setEmailModalData(null); setEmailForm({ to: "", subject: "", body: "" }); };
 
   const sendEmail = async () => {
     if (!emailModalData) return;
     setSendingEmail(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const getSupabaseUrl = () => {
-        if (supabase && (supabase as any).supabaseUrl) return (supabase as any).supabaseUrl;
-        if (typeof window !== 'undefined' && (window as any).SUPABASE_URL) return (window as any).SUPABASE_URL;
-        const envUrl = 
-          (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
-          (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL) ||
-          (typeof process !== 'undefined' && process.env?.REACT_APP_SUPABASE_URL);
-        if (envUrl) return envUrl;
-        return null;
-      };
-      const supabaseUrl = getSupabaseUrl();
-      if (!supabaseUrl) throw new Error('Supabase URL not configured. Please check your environment variables.');
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-financial-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+      const supabaseUrl = (supabase as any).supabaseUrl ||
+        (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_URL);
+      if (!supabaseUrl) throw new Error("Supabase URL not configured.");
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-financial-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           financial_id: emailModalData.financial.id,
           project_id: projectId,
           milestone_id: emailModalData.milestoneId,
           email_type: emailModalData.type,
-          email_data: { to: emailForm.to, subject: emailForm.subject, body: emailForm.body }
-        })
+          email_data: emailForm,
+        }),
       });
-      if (response.ok) {
+
+      if (res.ok) {
         await updateFinancialAfterEmail(emailModalData.type, emailModalData.milestoneId, emailModalData.itemIdx);
-        setSuccessMessage("Email sent successfully!");
-        setShowSuccessToast(true);
-        setTimeout(() => setShowSuccessToast(false), 3000);
+        toast("Email sent successfully!");
         closeEmailModal();
         await fetchFinancials();
       } else {
-        const error = await response.json();
-        alert("Error sending email: " + (error.message || 'Unknown error'));
+        const err = await res.json();
+        alert("Error sending email: " + (err.message || "Unknown error"));
       }
-    } catch (error: any) {
-      alert("Error sending email: " + error.message);
+    } catch (err: any) {
+      alert("Error: " + err.message);
     } finally {
       setSendingEmail(false);
     }
@@ -740,15 +960,15 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const updateFinancialAfterEmail = async (type: EmailModalData['type'], milestoneId: string, idx: number) => {
     const items = financials[milestoneId] || [];
     const item = items[idx];
-    let updateData: any = {};
-    switch(type) {
-      case 'order_request': updateData = { order_requested: true, order_requested_at: new Date().toISOString(), order_requested_by: currentUser?.profile?.id }; break;
-      case 'funds_request': updateData = { funds_requested: true, funds_requested_at: new Date().toISOString(), funds_requested_by: currentUser?.profile?.id }; break;
-      case 'funds_sent': updateData = { funds_sent: true, funds_sent_at: new Date().toISOString() }; break;
-      case 'funds_received': updateData = { funds_received: true, funds_received_at: new Date().toISOString() }; break;
-      case 'goods_paid': updateData = { goods_paid: true, goods_paid_at: new Date().toISOString(), goods_paid_by: currentUser?.profile?.id }; break;
-    }
-    if (Object.keys(updateData).length > 0) {
+    const map: Record<string, any> = {
+      order_request: { order_requested: true, order_requested_at: new Date().toISOString(), order_requested_by: currentUser?.profile?.id },
+      funds_request: { funds_requested: true, funds_requested_at: new Date().toISOString(), funds_requested_by: currentUser?.profile?.id },
+      funds_sent: { funds_sent: true, funds_sent_at: new Date().toISOString() },
+      funds_received: { funds_received: true, funds_received_at: new Date().toISOString() },
+      goods_paid: { goods_paid: true, goods_paid_at: new Date().toISOString(), goods_paid_by: currentUser?.profile?.id },
+    };
+    const updateData = map[type];
+    if (updateData) {
       const { data, error } = await supabase
         .from("project_financials")
         .update(updateData)
@@ -762,6 +982,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     }
   };
 
+  // ══════════════════════════════════════════════════════════
+  // Finance action handlers
+  // ══════════════════════════════════════════════════════════
   const handleToggleOrderApproval = async (milestoneId: string, idx: number, approved: boolean) => {
     if (!isFinanceTeam) { alert("Only finance team can update order approval"); return; }
     const items = financials[milestoneId] || [];
@@ -774,10 +997,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       .eq("id", item.id)
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
     if (!error && data) {
-      const updated = [...items];
-      updated[idx] = data[0];
+      const updated = [...items]; updated[idx] = data[0];
       setFinancials(prev => ({ ...prev, [milestoneId]: updated }));
-      if (approved) openEmailModal('order_approval', milestoneId, idx);
+      if (approved) openEmailModal("order_approval", milestoneId, idx);
     }
     setLoading(false);
   };
@@ -785,107 +1007,57 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const handleToggleFundsSent = async (milestoneId: string, idx: number, sent: boolean) => {
     if (!isFinanceTeam) { alert("Only finance team can mark funds as sent"); return; }
     const items = financials[milestoneId] || [];
-    const item = items[idx];
-    if (!item.funds_requested) { alert("Funds must be requested first"); return; }
-    if (sent) { openEmailModal('funds_sent', milestoneId, idx); return; }
+    if (!items[idx].funds_requested) { alert("Funds must be requested first"); return; }
+    if (sent) { openEmailModal("funds_sent", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("project_financials")
       .update({ funds_sent: sent, funds_sent_at: sent ? new Date().toISOString() : null })
-      .eq("id", item.id)
+      .eq("id", items[idx].id)
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
-    if (!error && data) {
-      const updated = [...items]; updated[idx] = data[0];
-      setFinancials(prev => ({ ...prev, [milestoneId]: updated }));
-    }
+    if (!error && data) { const u = [...items]; u[idx] = data[0]; setFinancials(prev => ({ ...prev, [milestoneId]: u })); }
     setLoading(false);
   };
 
   const handleToggleFundsReceived = async (milestoneId: string, idx: number, received: boolean) => {
     const items = financials[milestoneId] || [];
-    const item = items[idx];
-    if (!item.funds_sent) { alert("Funds must be sent first"); return; }
-    if (received) { openEmailModal('funds_received', milestoneId, idx); return; }
+    if (!items[idx].funds_sent) { alert("Funds must be sent first"); return; }
+    if (received) { openEmailModal("funds_received", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("project_financials")
       .update({ funds_received: received, funds_received_at: received ? new Date().toISOString() : null })
-      .eq("id", item.id)
+      .eq("id", items[idx].id)
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
-    if (!error && data) {
-      const updated = [...items]; updated[idx] = data[0];
-      setFinancials(prev => ({ ...prev, [milestoneId]: updated }));
-    }
+    if (!error && data) { const u = [...items]; u[idx] = data[0]; setFinancials(prev => ({ ...prev, [milestoneId]: u })); }
     setLoading(false);
   };
 
   const handleToggleGoodsPaid = async (milestoneId: string, idx: number, paid: boolean) => {
     if (!isFinanceTeam) { alert("Only finance team can mark goods as paid"); return; }
     const items = financials[milestoneId] || [];
-    const item = items[idx];
-    if (!item.funds_received) { alert("Funds must be received before marking goods as paid"); return; }
-    if (paid) { openEmailModal('goods_paid', milestoneId, idx); return; }
+    if (!items[idx].funds_received) { alert("Funds must be received first"); return; }
+    if (paid) { openEmailModal("goods_paid", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("project_financials")
       .update({ goods_paid: paid, goods_paid_at: paid ? new Date().toISOString() : null, goods_paid_by: paid ? currentUser?.profile?.id : null })
-      .eq("id", item.id)
+      .eq("id", items[idx].id)
       .select(`*, tender_company:tender_companies(id, name, contact_email, contact_phone)`);
-    if (!error && data) {
-      const updated = [...items]; updated[idx] = data[0];
-      setFinancials(prev => ({ ...prev, [milestoneId]: updated }));
-    }
+    if (!error && data) { const u = [...items]; u[idx] = data[0]; setFinancials(prev => ({ ...prev, [milestoneId]: u })); }
     setLoading(false);
   };
 
-  // ─── Compare Prices (now fetches from DB) ──────────────────────────────────
-
-  const handleViewPrices = async (materialName: string) => {
-    setSelectedMaterial(materialName);
-    setLoading(true);
-
-    // Fetch real prices from all companies for this material
-    const { data, error } = await supabase
-      .from("company_material_prices")
-      .select(`
-        id,
-        company_id,
-        price_per_unit,
-        delivery_price,
-        delivery_option,
-        unit,
-        tender_companies:company_id (name)
-      `)
-      .ilike("material_name", materialName);
-
-    if (!error && data && data.length > 0) {
-      const prices: CompanyPrice[] = data.map((row: any) => ({
-        company_id: row.company_id,
-        company_name: row.tender_companies?.name || "Unknown",
-        price_per_unit: row.price_per_unit,
-        delivery_price: row.delivery_price,
-        delivery_option: row.delivery_option,
-        price_id: row.id
-      }));
-      setCompanyPrices(prices);
-    } else {
-      setCompanyPrices([]);
-    }
-
-    setShowPriceModal(true);
-    setLoading(false);
-  };
-
-  // ─── Tender Company CRUD ───────────────────────────────────────────────────
-
+  // ══════════════════════════════════════════════════════════
+  // Company CRUD
+  // ══════════════════════════════════════════════════════════
   const openCompanyForm = (company?: TenderCompany) => {
-    if (company) {
-      setCompanyForm({ id: company.id, name: company.name, contact_email: company.contact_email, contact_phone: company.contact_phone, address: company.address });
-      setEditingCompany(true);
-    } else {
-      setCompanyForm({ id: "", name: "", contact_email: "", contact_phone: "", address: "" });
-      setEditingCompany(false);
-    }
+    setCompanyForm(company
+      ? { id: company.id, name: company.name, contact_email: company.contact_email, contact_phone: company.contact_phone, address: company.address }
+      : { id: "", name: "", contact_email: "", contact_phone: "", address: "" }
+    );
+    setEditingCompany(!!company);
+    if (company) setActiveCatalogCompanyId(company.id);
     setShowCompanyForm(true);
   };
 
@@ -893,172 +1065,221 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setShowCompanyForm(false);
     setCompanyForm({ id: "", name: "", contact_email: "", contact_phone: "", address: "" });
     setEditingCompany(false);
+    resetCatalogForm();
+    setCatalogSearch("");
   };
 
-  const handleCompanyChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setCompanyForm(prev => ({ ...prev, [name]: value }));
-  };
+  const handleCompanyChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setCompanyForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleAddCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyForm.name.trim()) { alert("Please enter company name"); return; }
+    if (!companyForm.name.trim()) { alert("Company name required"); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
       .insert([{ name: companyForm.name, contact_email: companyForm.contact_email, contact_phone: companyForm.contact_phone, address: companyForm.address, is_active: true }])
-      .select();
+      .select().single();
     if (!error && data) {
-      setTenderCompanies(prev => [...prev, data[0]]);
-      closeCompanyForm();
-      setSuccessMessage("Company added successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } else {
-      alert("Error adding company: " + error?.message);
-    }
+      setTenderCompanies(prev => [...prev, data as TenderCompany]);
+      setActiveCatalogCompanyId((data as TenderCompany).id);
+      toast("Company added!");
+    } else { alert("Error: " + error?.message); }
     setLoading(false);
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyForm.name.trim()) { alert("Please enter company name"); return; }
+    if (!companyForm.name.trim()) { alert("Company name required"); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
       .update({ name: companyForm.name, contact_email: companyForm.contact_email, contact_phone: companyForm.contact_phone, address: companyForm.address })
-      .eq("id", companyForm.id)
-      .select();
+      .eq("id", companyForm.id).select().single();
     if (!error && data) {
-      setTenderCompanies(prev => prev.map(c => c.id === companyForm.id ? data[0] : c));
-      closeCompanyForm();
-      setSuccessMessage("Company updated successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } else {
-      alert("Error updating company: " + error?.message);
-    }
+      setTenderCompanies(prev => prev.map(c => c.id === companyForm.id ? data as TenderCompany : c));
+      toast("Company updated!");
+    } else { alert("Error: " + error?.message); }
     setLoading(false);
   };
 
   const deleteCompany = async (companyId: string) => {
     setLoading(true);
     try {
-      const { error } = await supabase.from("tender_companies").update({ is_active: false }).eq("id", companyId).select();
-      if (error) { alert("Error deleting company: " + error.message); return; }
+      const { error } = await supabase.from("tender_companies").update({ is_active: false }).eq("id", companyId);
+      if (error) { alert("Error: " + error.message); return; }
       setTenderCompanies(prev => prev.filter(c => c.id !== companyId));
-      setSuccessMessage("Company deleted successfully!");
-      setShowSuccessToast(true);
-      setTimeout(() => setShowSuccessToast(false), 3000);
-    } catch (err: any) {
-      alert("Error: " + err.message);
-    } finally {
-      setLoading(false);
-      setConfirmDeleteCompany(null);
+      toast("Company deleted!");
+    } catch (err: any) { alert("Error: " + err.message); }
+    finally { setLoading(false); setConfirmDeleteCompany(null); }
+  };
+
+  // ══════════════════════════════════════════════════════════
+  // Catalog CRUD
+  // ══════════════════════════════════════════════════════════
+  const handleSaveCatalogItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeCatalogCompanyId || !catalogForm.item_name.trim() || !catalogForm.price) return;
+    setCatalogLoading(true);
+
+    const payload = {
+      company_id: activeCatalogCompanyId,
+      item_name: catalogForm.item_name.trim(),
+      unit: catalogForm.unit,
+      price: Number(catalogForm.price),
+    };
+
+    if (editingCatalogItem) {
+      const { data, error } = await supabase
+        .from("company_price_catalog")
+        .update({ ...payload, updated_at: new Date().toISOString() })
+        .eq("id", editingCatalogItem.id)
+        .select()
+        .single();
+      if (!error && data) {
+        setCatalog(prev => prev.map(c => c.id === editingCatalogItem.id ? data as CatalogItem : c));
+        toast("Price updated!");
+      } else { alert("Error: " + error?.message); }
+    } else {
+      const { data, error } = await supabase
+        .from("company_price_catalog")
+        .insert([payload])
+        .select()
+        .single();
+      if (!error && data) {
+        setCatalog(prev => [...prev, data as CatalogItem]);
+        toast("Price added!");
+      } else { alert("Error: " + error?.message); }
     }
+
+    resetCatalogForm();
+    setCatalogLoading(false);
+  };
+
+  const handleDeleteCatalogItem = async (item: CatalogItem) => {
+    setCatalogLoading(true);
+    const { error } = await supabase.from("company_price_catalog").delete().eq("id", item.id);
+    if (!error) {
+      setCatalog(prev => prev.filter(c => c.id !== item.id));
+      toast("Price entry deleted!");
+    } else { alert("Error: " + error.message); }
+    setConfirmDeleteCatalog(null);
+    setCatalogLoading(false);
+  };
+
+  const resetCatalogForm = () => {
+    setCatalogForm({ item_name: "", unit: materialUnits[0], price: "" });
+    setEditingCatalogItem(null);
+  };
+
+  const startEditCatalog = (item: CatalogItem) => {
+    setEditingCatalogItem(item);
+    setCatalogForm({ item_name: item.item_name, unit: item.unit, price: item.price.toString() });
+  };
+
+  const filteredCatalog = activeCatalogCompanyId
+    ? catalogForCompany(activeCatalogCompanyId).filter(c =>
+        c.item_name.toLowerCase().includes(catalogSearch.toLowerCase())
+      )
+    : [];
+
+  // ══════════════════════════════════════════════════════════
+  // Utility
+  // ══════════════════════════════════════════════════════════
+  const toast = (msg: string) => {
+    setSuccessMessage(msg);
+    setShowSuccessToast(true);
+    setTimeout(() => setShowSuccessToast(false), 3000);
   };
 
   const calculateGrandTotals = () => {
     let totalMaterials = 0, totalDelivery = 0, totalPaid = 0, totalItems = 0;
-    Object.values(financials).forEach(items => {
-      items.forEach(item => {
-        totalMaterials += item.total_price;
-        totalDelivery += item.delivery_price;
-        if (item.goods_paid) totalPaid++;
-        totalItems++;
-      });
-    });
+    Object.values(financials).forEach(items => items.forEach(item => {
+      totalMaterials += item.total_price;
+      totalDelivery += item.delivery_price;
+      if (item.goods_paid) totalPaid++;
+      totalItems++;
+    }));
     return { totalMaterials, totalDelivery, grandTotal: totalMaterials + totalDelivery, totalPaid, totalItems };
   };
 
   const grandTotals = calculateGrandTotals();
+  const selectedCompanyName = tenderCompanies.find(c => c.id === form.tender_company_id)?.name || "";
+  const selectedCompanyCatalog = form.tender_company_id ? catalogForCompany(form.tender_company_id) : [];
 
-  // ─── SQL helper note displayed to user ────────────────────────────────────
-  // Required table: company_material_prices
-  // CREATE TABLE company_material_prices (
-  //   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  //   company_id uuid REFERENCES tender_companies(id) ON DELETE CASCADE,
-  //   material_name text NOT NULL,
-  //   price_per_unit numeric DEFAULT 0,
-  //   unit text DEFAULT 'units',
-  //   delivery_price numeric DEFAULT 0,
-  //   delivery_option text DEFAULT 'Pickup',
-  //   notes text DEFAULT '',
-  //   created_at timestamptz DEFAULT now(),
-  //   updated_at timestamptz DEFAULT now()
-  // );
+  // Step titles for the form header
+  const stepMeta: Record<FormStep, { title: string; subtitle: string }> = {
+    company: { title: "Choose Supplier", subtitle: "Who is supplying this material?" },
+    product: { title: "Select Product", subtitle: selectedCompanyName ? `From ${selectedCompanyName}'s catalog` : "Choose from catalog" },
+    details: { title: editIdx === -1 ? "Order Details" : "Edit Details", subtitle: form.material_name ? `Configuring: ${form.material_name}` : "Fill in quantities and logistics" },
+  };
 
+  // ══════════════════════════════════════════════════════════
+  // RENDER
+  // ══════════════════════════════════════════════════════════
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="min-h-screen bg-background/90 py-8 sm:py-12 md:py-16 flex flex-col"
-      >
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="min-h-screen bg-background/90 py-8 sm:py-12 md:py-16 flex flex-col">
         <div className="container mx-auto px-2 sm:px-6 flex-1 flex flex-col">
 
-          {/* Tender Companies Button */}
+          {/* ── Top bar ── */}
           {(isAdmin || canEdit) && (
             <div className="mb-6 flex justify-end">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                 onClick={() => setShowCompanyModal(true)}
-                className="bg-primary text-background font-semibold px-6 py-3 rounded-xl hover:bg-primary/90 transition flex items-center gap-2 shadow-lg"
-                disabled={loading}
-              >
-                <Building2 className="w-5 h-5" />
-                Manage Companies
+                className="bg-primary text-background font-semibold px-6 py-3 rounded-xl hover:bg-primary/90 transition flex items-center gap-2 shadow-lg" disabled={loading}>
+                <Building2 className="w-5 h-5" /> Manage Companies
               </motion.button>
             </div>
           )}
 
-          {/* Milestones and Financials */}
-          {milestones.map((milestone) => {
+          {/* ── Grand Totals ── */}
+          {grandTotals.totalItems > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+              {[
+                { label: "Total Materials", value: `KSH ${grandTotals.totalMaterials.toLocaleString()}`, color: "from-blue-500/20 to-blue-600/10", icon: Package },
+                { label: "Total Delivery", value: `KSH ${grandTotals.totalDelivery.toLocaleString()}`, color: "from-purple-500/20 to-purple-600/10", icon: Truck },
+                { label: "Grand Total", value: `KSH ${grandTotals.grandTotal.toLocaleString()}`, color: "from-primary/20 to-primary/10", icon: DollarSign },
+                { label: "Items Paid", value: `${grandTotals.totalPaid} / ${grandTotals.totalItems}`, color: "from-green-500/20 to-green-600/10", icon: CheckCircle },
+              ].map((s) => (
+                <div key={s.label} className={`rounded-2xl bg-gradient-to-br ${s.color} border border-white/10 p-4`}>
+                  <div className="flex items-center gap-2 mb-1"><s.icon className="w-4 h-4 text-muted-foreground" /><p className="text-xs text-muted-foreground font-medium">{s.label}</p></div>
+                  <p className="text-lg font-bold">{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Milestones ── */}
+          {milestones.map(milestone => {
             const milestoneFinancials = financials[milestone.id] || [];
             const showingForm = showFormForMilestone === milestone.id;
 
             return (
               <div key={milestone.id} className="mb-8 rounded-xl overflow-hidden border border-white/10">
-                <button
-                  onClick={() => toggleMilestone(milestone.id)}
-                  className="w-full flex items-center justify-between p-5 bg-background/60 hover:bg-background/80 transition"
-                >
+                <button onClick={() => toggleMilestone(milestone.id)} className="w-full flex items-center justify-between p-5 bg-background/60 hover:bg-background/80 transition">
                   <div>
                     <h3 className="text-lg font-bold">{milestone.title}</h3>
-                    {milestone.description && (
-                      <p className="text-sm text-muted-foreground mt-1">{milestone.description}</p>
-                    )}
+                    {milestone.description && <p className="text-sm text-muted-foreground mt-1">{milestone.description}</p>}
                   </div>
                   {expandedMilestones.has(milestone.id) ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
                 </button>
 
                 <AnimatePresence>
                   {expandedMilestones.has(milestone.id) && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="overflow-hidden"
-                    >
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
                       <div className="p-6">
                         {isQuantitySurveyor && !isClient && (
                           <div className="mb-6">
-                            <motion.button
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
-                              onClick={() => { if (showingForm) resetForm(); else openAddForm(milestone.id); }}
-                              className="bg-primary text-background font-semibold px-6 py-3 rounded-xl hover:bg-primary/90 transition flex items-center gap-2"
-                              disabled={loading}
-                            >
-                              {showingForm ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-                              {showingForm ? "Cancel" : "Add Material"}
+                            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                              onClick={() => { if (showingForm && editIdx === -1) resetForm(); else openAddForm(milestone.id); }}
+                              className="bg-primary text-background font-semibold px-6 py-3 rounded-xl hover:bg-primary/90 transition flex items-center gap-2" disabled={loading}>
+                              {showingForm && editIdx === -1 ? <><X className="w-5 h-5" /> Cancel</> : <><Plus className="w-5 h-5" /> Add Material</>}
                             </motion.button>
                           </div>
                         )}
 
+                        {/* ── Wizard Add/Edit Form ── */}
                         <AnimatePresence>
                           {showingForm && isQuantitySurveyor && !isClient && (
                             <motion.div
@@ -1067,180 +1288,128 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                               exit={{ opacity: 0, height: 0 }}
                               className="overflow-hidden mb-8"
                             >
-                              <div className="backdrop-blur-2xl bg-background/95 border border-white/20 rounded-2xl shadow-2xl p-6">
-                                <h4 className="text-xl font-bold mb-6">
-                                  {editIdx === -1 ? "Add New Material" : "Edit Material"}
-                                </h4>
-                                <form onSubmit={editIdx === -1 ? handleAdd : handleUpdate} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Material Name *</label>
-                                    <input
-                                      name="material_name"
-                                      type="text"
-                                      value={form.material_name}
-                                      onChange={handleChange}
-                                      onBlur={handleMaterialNameBlur}
-                                      placeholder="e.g., Cement"
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50"
-                                      required
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Quantity *</label>
-                                    <input
-                                      name="material_quantity"
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={form.material_quantity}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      required
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Unit *</label>
-                                    <select
-                                      name="material_unit"
-                                      value={form.material_unit}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      required
-                                      disabled={loading}
-                                    >
-                                      {materialUnits.map((unit) => (
-                                        <option key={unit} value={unit} className="bg-background text-foreground">{unit}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">
-                                      Tender Company
-                                      {form.tender_company_id && form.material_name && (
-                                        <span className="ml-2 text-xs text-primary font-normal">(price auto-fills from company catalogue)</span>
-                                      )}
-                                    </label>
-                                    <select
-                                      name="tender_company_id"
-                                      value={form.tender_company_id}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      disabled={loading}
-                                    >
-                                      <option value="">Select Company</option>
-                                      {tenderCompanies.map((company) => (
-                                        <option key={company.id} value={company.id} className="bg-background text-foreground">{company.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Price Per Unit (KSH) *</label>
-                                    <input
-                                      name="price_per_unit"
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={form.price_per_unit}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      required
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Total Price</label>
-                                    <div className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl text-base font-bold text-primary">
-                                      KSH {calculateTotalPrice().toLocaleString()}
+                              <div className="backdrop-blur-2xl bg-background/95 border border-white/20 rounded-2xl shadow-2xl overflow-hidden">
+                                {/* Form Header */}
+                                <div className="bg-gradient-to-r from-primary/10 to-transparent border-b border-white/10 px-6 py-4">
+                                  <div className="flex items-start justify-between">
+                                    <div>
+                                      <h4 className="text-lg font-bold">{stepMeta[formStep].title}</h4>
+                                      <p className="text-sm text-muted-foreground mt-0.5">{stepMeta[formStep].subtitle}</p>
                                     </div>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Expected Delivery Date</label>
-                                    <input
-                                      name="expected_delivery_date"
-                                      type="date"
-                                      value={form.expected_delivery_date}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Delivery Option</label>
-                                    <select
-                                      name="delivery_option"
-                                      value={form.delivery_option}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      disabled={loading}
-                                    >
-                                      {deliveryOptions.map((option) => (
-                                        <option key={option} value={option} className="bg-background text-foreground">{option}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Delivery Price (KSH)</label>
-                                    <input
-                                      name="delivery_price"
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={form.delivery_price}
-                                      onChange={handleChange}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div className="md:col-span-2 lg:col-span-3">
-                                    <label className="block text-sm font-semibold text-muted-foreground mb-2">Remarks</label>
-                                    <textarea
-                                      name="remarks"
-                                      value={form.remarks}
-                                      onChange={handleChange}
-                                      rows={2}
-                                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground resize-none"
-                                      disabled={loading}
-                                    />
-                                  </div>
-
-                                  <div className="md:col-span-2 lg:col-span-3 flex gap-3 mt-2">
-                                    <button
-                                      type="submit"
-                                      className="bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center gap-2"
-                                      disabled={loading}
-                                    >
-                                      <Save className="w-5 h-5" />
-                                      {editIdx === -1 ? "Add Material" : "Update Material"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={resetForm}
-                                      className="bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center gap-2"
-                                      disabled={loading}
-                                    >
+                                    <button type="button" onClick={resetForm}
+                                      className="p-2 hover:bg-white/10 rounded-lg transition text-muted-foreground hover:text-foreground">
                                       <X className="w-5 h-5" />
-                                      Cancel
                                     </button>
                                   </div>
-                                </form>
+
+                                  {/* Step indicator — only on add mode */}
+                                  {editIdx === -1 && (
+                                    <div className="mt-4">
+                                      <StepIndicator currentStep={formStep} />
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="p-6">
+                                  <form onSubmit={editIdx === -1 ? handleAdd : handleUpdate}>
+
+                                    {/* STEP 1: Company picker */}
+                                    <AnimatePresence mode="wait">
+                                      {formStep === 'company' && (
+                                        <motion.div key="company" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                          <CompanyPickerStep
+                                            companies={tenderCompanies}
+                                            catalog={catalog}
+                                            selectedId={form.tender_company_id}
+                                            onSelect={handleCompanySelect}
+                                          />
+                                          <div className="mt-4 flex justify-between items-center pt-4 border-t border-white/10">
+                                            <p className="text-xs text-muted-foreground">
+                                              {tenderCompanies.length === 0 ? (
+                                                <span className="text-amber-400">No suppliers yet — add one in Manage Companies</span>
+                                              ) : "Select a supplier to continue"}
+                                            </p>
+                                            {form.tender_company_id && (
+                                              <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                                onClick={() => setFormStep('product')}
+                                                className="flex items-center gap-2 bg-primary text-background px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-primary/90 transition">
+                                                Next: Products <ArrowRight className="w-4 h-4" />
+                                              </motion.button>
+                                            )}
+                                          </div>
+                                        </motion.div>
+                                      )}
+
+                                      {/* STEP 2: Product picker */}
+                                      {formStep === 'product' && (
+                                        <motion.div key="product" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                          <ProductPickerStep
+                                            companyName={selectedCompanyName}
+                                            items={selectedCompanyCatalog}
+                                            selectedItemName={form.material_name}
+                                            onSelect={handleProductSelect}
+                                          />
+                                          <div className="mt-4 flex justify-between items-center pt-4 border-t border-white/10">
+                                            <button type="button" onClick={() => setFormStep('company')}
+                                              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition px-3 py-2 rounded-lg hover:bg-white/5">
+                                              <ChevronDown className="w-4 h-4 rotate-90" /> Back
+                                            </button>
+                                            {form.material_name && (
+                                              <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                                onClick={() => setFormStep('details')}
+                                                className="flex items-center gap-2 bg-primary text-background px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-primary/90 transition">
+                                                Next: Details <ArrowRight className="w-4 h-4" />
+                                              </motion.button>
+                                            )}
+                                          </div>
+                                        </motion.div>
+                                      )}
+
+                                      {/* STEP 3: Details */}
+                                      {formStep === 'details' && (
+                                        <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                          <DetailsStep
+                                            form={form}
+                                            onFormChange={handleChange}
+                                            loading={loading}
+                                            companyName={selectedCompanyName}
+                                            allCompanies={tenderCompanies}
+                                            allCatalog={catalog}
+                                            onCompanyChange={(e) => setForm(prev => ({ ...prev, tender_company_id: e.target.value }))}
+                                          />
+                                          <div className="mt-6 flex gap-3 pt-4 border-t border-white/10">
+                                            {editIdx === -1 && (
+                                              <button type="button" onClick={() => setFormStep('product')}
+                                                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition px-3 py-2.5 rounded-xl hover:bg-white/5">
+                                                <ChevronDown className="w-4 h-4 rotate-90" /> Back
+                                              </button>
+                                            )}
+                                            <motion.button type="submit" whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                                              className="flex-1 bg-primary text-background font-bold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+                                              disabled={loading || !form.material_quantity || !form.price_per_unit}>
+                                              {loading
+                                                ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />{editIdx === -1 ? "Adding…" : "Updating…"}</>
+                                                : <><Save className="w-4 h-4" />{editIdx === -1 ? "Add Material" : "Update Material"}</>
+                                              }
+                                            </motion.button>
+                                            <button type="button" onClick={resetForm}
+                                              className="px-5 py-2.5 bg-white/5 border border-white/10 font-semibold rounded-xl hover:bg-white/10 transition text-sm flex items-center gap-2" disabled={loading}>
+                                              <X className="w-4 h-4" /> Cancel
+                                            </button>
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                  </form>
+                                </div>
                               </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
 
+                        {/* ── Table ── */}
                         {milestoneFinancials.length === 0 ? (
-                          <div className="text-center py-8 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl">
+                          <div className="text-center py-8 bg-white/5 border border-white/10 rounded-xl">
                             <Package className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50" />
                             <p className="text-muted-foreground">No materials added for this milestone yet.</p>
                           </div>
@@ -1249,21 +1418,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                             <table className="min-w-full text-sm">
                               <thead>
                                 <tr className="bg-background/60 border-b border-white/10">
-                                  <th className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">1. Material</th>
-                                  <th className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">2. Qty</th>
-                                  <th className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">3. Company</th>
-                                  <th className="py-3 px-3 text-right font-semibold text-muted-foreground whitespace-nowrap">4. Price/Unit</th>
-                                  <th className="py-3 px-3 text-right font-semibold text-muted-foreground whitespace-nowrap">5. Total</th>
-                                  <th className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">6. Exp. Delivery</th>
-                                  <th className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">7. Delivery</th>
-                                  <th className="py-3 px-3 text-right font-semibold text-muted-foreground whitespace-nowrap">8. Del. Price</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">9. Req Order</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">10. Order</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">11. Req $</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">12. Sent $</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">13. Rec $</th>
-                                  <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">14. Paid</th>
-                                  {(isQuantitySurveyor && !isClient) && <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">Actions</th>}
+                                  {["1. Material","2. Qty","3. Company","4. Price/Unit","5. Total","6. Exp. Delivery","7. Delivery","8. Del. Price","9. Req Order","10. Order","11. Req $","12. Sent $","13. Rec $","14. Paid"].map(h => (
+                                    <th key={h} className="py-3 px-3 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+                                  ))}
+                                  {isQuantitySurveyor && !isClient && <th className="py-3 px-3 text-center font-semibold text-muted-foreground whitespace-nowrap">Actions</th>}
                                 </tr>
                               </thead>
                               <tbody>
@@ -1278,25 +1436,24 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       <div className="flex flex-col gap-1">
                                         <span>{item.tender_company?.name || "-"}</span>
                                         {item.material_name && (
-                                          <button onClick={() => handleViewPrices(item.material_name)} className="text-primary hover:text-primary/80 text-xs underline text-left">
-                                            Compare Prices
+                                          <button onClick={() => handleViewPrices(item.material_name)}
+                                            className="text-primary hover:text-primary/80 text-xs underline text-left flex items-center gap-1">
+                                            <TrendingUp className="w-3 h-3" /> Compare Prices
                                           </button>
                                         )}
                                       </div>
                                     </td>
                                     <td className="py-3 px-3 text-right">KSH {item.price_per_unit.toLocaleString()}</td>
                                     <td className="py-3 px-3 text-right font-bold text-primary">KSH {item.total_price.toLocaleString()}</td>
-                                    <td className="py-3 px-3 text-xs">
-                                      {item.expected_delivery_date ? new Date(item.expected_delivery_date).toLocaleDateString() : "-"}
-                                    </td>
+                                    <td className="py-3 px-3 text-xs">{item.expected_delivery_date ? new Date(item.expected_delivery_date).toLocaleDateString() : "-"}</td>
                                     <td className="py-3 px-3 text-xs">{item.delivery_option}</td>
                                     <td className="py-3 px-3 text-right text-xs text-muted-foreground">KSH {item.delivery_price.toLocaleString()}</td>
 
-                                    {/* Column 9: Request Order */}
                                     <td className="py-3 px-3 text-center">
                                       {!item.order_requested ? (
                                         isFinanceTeam && !isClient && item.tender_company_id ? (
-                                          <button onClick={() => openEmailModal('order_request', milestone.id, idx)} disabled={loading} className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600 transition disabled:opacity-50" title="Request order via email">
+                                          <button onClick={() => openEmailModal("order_request", milestone.id, idx)} disabled={loading}
+                                            className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600 transition disabled:opacity-50" title="Request order via email">
                                             <Mail className="w-4 h-4" />
                                           </button>
                                         ) : <span className="text-muted-foreground text-xs">-</span>
@@ -1308,72 +1465,75 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                                       )}
                                     </td>
 
-                                    {/* Column 10: Order Approval */}
                                     <td className="py-3 px-3 text-center">
                                       {item.order_requested ? (
                                         isFinanceTeam && !isClient ? (
                                           <div className="flex gap-2 justify-center">
-                                            <button onClick={() => handleToggleOrderApproval(milestone.id, idx, true)} disabled={loading || item.order_approved === true} className={cn("p-1.5 rounded transition", item.order_approved === true ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Approve order"><Check className="w-4 h-4" /></button>
-                                            <button onClick={() => handleToggleOrderApproval(milestone.id, idx, false)} disabled={loading || item.order_approved === false} className={cn("p-1.5 rounded transition", item.order_approved === false ? "bg-red-500 text-white" : "bg-white/5 hover:bg-red-500/20 disabled:opacity-50")} title="Reject order"><X className="w-4 h-4" /></button>
+                                            <button onClick={() => handleToggleOrderApproval(milestone.id, idx, true)} disabled={loading || item.order_approved === true}
+                                              className={cn("p-1.5 rounded transition", item.order_approved === true ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Approve">
+                                              <Check className="w-4 h-4" />
+                                            </button>
+                                            <button onClick={() => handleToggleOrderApproval(milestone.id, idx, false)} disabled={loading || item.order_approved === false}
+                                              className={cn("p-1.5 rounded transition", item.order_approved === false ? "bg-red-500 text-white" : "bg-white/5 hover:bg-red-500/20 disabled:opacity-50")} title="Reject">
+                                              <X className="w-4 h-4" />
+                                            </button>
                                           </div>
                                         ) : (
-                                          <span className="text-xs">
-                                            {item.order_approved === true && <Check className="w-4 h-4 text-green-600 mx-auto" />}
-                                            {item.order_approved === false && <X className="w-4 h-4 text-red-600 mx-auto" />}
-                                            {item.order_approved === null && <span className="text-muted-foreground">-</span>}
-                                          </span>
+                                          <span>{item.order_approved === true && <Check className="w-4 h-4 text-green-600 mx-auto" />}{item.order_approved === false && <X className="w-4 h-4 text-red-600 mx-auto" />}{item.order_approved === null && <span className="text-muted-foreground">-</span>}</span>
                                         )
                                       ) : <span className="text-muted-foreground">-</span>}
                                     </td>
 
-                                    {/* Column 11: Request Funds */}
                                     <td className="py-3 px-3 text-center">
                                       {item.order_approved === true && !item.funds_requested ? (
                                         isFinanceTeam && !isClient ? (
-                                          <button onClick={() => openEmailModal('funds_request', milestone.id, idx)} disabled={loading} className="bg-purple-500 text-white p-2 rounded-lg hover:bg-purple-600 transition disabled:opacity-50" title="Request funds via email"><Mail className="w-4 h-4" /></button>
+                                          <button onClick={() => openEmailModal("funds_request", milestone.id, idx)} disabled={loading}
+                                            className="bg-purple-500 text-white p-2 rounded-lg hover:bg-purple-600 transition disabled:opacity-50" title="Request funds">
+                                            <Mail className="w-4 h-4" />
+                                          </button>
                                         ) : <span className="text-muted-foreground text-xs">-</span>
                                       ) : item.funds_requested ? <Check className="w-4 h-4 text-purple-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}
                                     </td>
 
-                                    {/* Column 12: Funds Sent */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_requested ? (
                                         isFinanceTeam && !isClient ? (
-                                          <button onClick={() => handleToggleFundsSent(milestone.id, idx, !item.funds_sent)} disabled={loading || item.funds_sent} className={cn("p-1.5 rounded transition", item.funds_sent ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title={item.funds_sent ? "Funds sent" : "Mark as sent"}><Check className="w-4 h-4" /></button>
-                                        ) : (
-                                          <span>{item.funds_sent ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
-                                        )
+                                          <button onClick={() => handleToggleFundsSent(milestone.id, idx, !item.funds_sent)} disabled={loading || item.funds_sent}
+                                            className={cn("p-1.5 rounded transition", item.funds_sent ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title={item.funds_sent ? "Funds sent" : "Mark as sent"}>
+                                            <Check className="w-4 h-4" />
+                                          </button>
+                                        ) : <span>{item.funds_sent ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
                                       ) : <span className="text-muted-foreground">-</span>}
                                     </td>
 
-                                    {/* Column 13: Funds Received */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_sent ? (
                                         !isClient ? (
-                                          <button onClick={() => handleToggleFundsReceived(milestone.id, idx, true)} disabled={loading || item.funds_received} className={cn("p-1.5 rounded transition", item.funds_received ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Confirm receipt"><Check className="w-4 h-4" /></button>
-                                        ) : (
-                                          <span>{item.funds_received ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
-                                        )
+                                          <button onClick={() => handleToggleFundsReceived(milestone.id, idx, true)} disabled={loading || item.funds_received}
+                                            className={cn("p-1.5 rounded transition", item.funds_received ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Confirm receipt">
+                                            <Check className="w-4 h-4" />
+                                          </button>
+                                        ) : <span>{item.funds_received ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
                                       ) : <span className="text-muted-foreground">-</span>}
                                     </td>
 
-                                    {/* Column 14: Goods Paid */}
                                     <td className="py-3 px-3 text-center">
                                       {item.funds_received ? (
                                         isFinanceTeam && !isClient ? (
-                                          <button onClick={() => handleToggleGoodsPaid(milestone.id, idx, true)} disabled={loading || item.goods_paid} className={cn("p-1.5 rounded transition", item.goods_paid ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Mark as paid"><Check className="w-4 h-4" /></button>
-                                        ) : (
-                                          <span>{item.goods_paid ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
-                                        )
+                                          <button onClick={() => handleToggleGoodsPaid(milestone.id, idx, true)} disabled={loading || item.goods_paid}
+                                            className={cn("p-1.5 rounded transition", item.goods_paid ? "bg-green-500 text-white" : "bg-white/5 hover:bg-green-500/20 disabled:opacity-50")} title="Mark as paid">
+                                            <Check className="w-4 h-4" />
+                                          </button>
+                                        ) : <span>{item.goods_paid ? <Check className="w-4 h-4 text-green-600 mx-auto" /> : <span className="text-muted-foreground">-</span>}</span>
                                       ) : <span className="text-muted-foreground">-</span>}
                                     </td>
 
-                                    {(isQuantitySurveyor && !isClient) && (
+                                    {isQuantitySurveyor && !isClient && (
                                       <td className="py-3 px-3">
                                         <div className="flex gap-2 justify-center">
                                           <button onClick={() => handleEdit(milestone.id, idx)} className="bg-accent text-background p-2 rounded-lg hover:bg-accent/90 transition" disabled={loading} title="Edit"><Edit2 className="w-4 h-4" /></button>
                                           {canDelete && (
-                                            <button onClick={() => handleDelete(milestone.id, idx)} className="bg-red-500 text-background p-2 rounded-lg hover:bg-red-600 transition" disabled={loading} title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                            <button onClick={() => setConfirmDelete({ milestoneId: milestone.id, idx })} className="bg-red-500 text-background p-2 rounded-lg hover:bg-red-600 transition" disabled={loading} title="Delete"><Trash2 className="w-4 h-4" /></button>
                                           )}
                                         </div>
                                       </td>
@@ -1392,39 +1552,108 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             );
           })}
 
-          {/* ─── Email Modal ─────────────────────────────────────────────────── */}
+          {/* ══════════════════════════════════════════════════
+              PRICE COMPARISON MODAL
+          ══════════════════════════════════════════════════ */}
+          <AnimatePresence>
+            {showPriceModal && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setShowPriceModal(false)}>
+                <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                  className="bg-background border border-white/20 rounded-2xl p-6 max-w-xl w-full max-h-[80vh] overflow-y-auto"
+                  onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center mb-2">
+                    <div>
+                      <h3 className="text-2xl font-bold">Price Comparison</h3>
+                      <p className="text-sm text-muted-foreground mt-1">"{selectedMaterial}" across all companies in catalog</p>
+                    </div>
+                    <button onClick={() => setShowPriceModal(false)} className="p-2 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+                  </div>
+
+                  {companyPrices.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Tag className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground font-medium">No catalog prices found for "{selectedMaterial}"</p>
+                      <p className="text-sm text-muted-foreground mt-2">Add prices in Manage Companies → select a company → Pricing Catalog</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 mt-4">
+                      {companyPrices.map((cp, i) => (
+                        <motion.button key={cp.company_id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
+                          onClick={() => applyPriceFromModal(cp)}
+                          className={cn(
+                            "w-full flex items-center justify-between p-4 border rounded-xl hover:border-primary/50 hover:bg-primary/5 transition group text-left",
+                            i === 0 ? "border-green-500/40 bg-green-500/5" : "border-white/10 bg-white/5"
+                          )}>
+                          <div className="flex items-center gap-3">
+                            <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm", i === 0 ? "bg-green-500/20 text-green-400" : "bg-white/10 text-muted-foreground")}>
+                              #{i + 1}
+                            </div>
+                            <div>
+                              <span className="font-semibold">{cp.company_name}</span>
+                              {i === 0 && <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-semibold">Lowest</span>}
+                              <p className="text-xs text-muted-foreground">per {cp.unit}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={cn("text-xl font-bold", i === 0 ? "text-green-400" : "text-foreground")}>KSH {cp.price_per_unit.toLocaleString()}</span>
+                            <span className="text-xs text-primary opacity-0 group-hover:opacity-100 transition font-semibold">Apply →</span>
+                          </div>
+                        </motion.button>
+                      ))}
+                      <p className="text-xs text-center text-muted-foreground pt-2">Click a row to apply that company and price to the current form</p>
+                    </div>
+                  )}
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ══════════════════════════════════════════════════
+              EMAIL MODAL
+          ══════════════════════════════════════════════════ */}
           <AnimatePresence>
             {showEmailModal && emailModalData && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeEmailModal}>
-                <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-background border border-white/20 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeEmailModal}>
+                <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                  className="bg-background border border-white/20 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center"><Mail className="w-5 h-5 text-primary" /></div>
                       <div>
                         <h3 className="text-2xl font-bold">Compose Email</h3>
-                        <p className="text-sm text-muted-foreground">{emailModalData.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</p>
+                        <p className="text-sm text-muted-foreground">{emailModalData.type.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</p>
                       </div>
                     </div>
-                    <button onClick={closeEmailModal} className="p-2 hover:bg-white/10 rounded-lg transition"><X className="w-5 h-5" /></button>
+                    <button onClick={closeEmailModal} className="p-2 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
                   </div>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">To</label>
-                      <input name="to" type="email" value={emailForm.to} onChange={handleEmailChange} className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground" required disabled={sendingEmail} />
+                      <input name="to" type="email" value={emailForm.to} onChange={e => setEmailForm(p => ({ ...p, to: e.target.value }))}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium" required disabled={sendingEmail} />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Subject</label>
-                      <input name="subject" type="text" value={emailForm.subject} onChange={handleEmailChange} className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground" required disabled={sendingEmail} />
+                      <input name="subject" type="text" value={emailForm.subject} onChange={e => setEmailForm(p => ({ ...p, subject: e.target.value }))}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium" required disabled={sendingEmail} />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Message</label>
-                      <textarea name="body" value={emailForm.body} onChange={handleEmailChange} rows={16} className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground resize-none font-mono" required disabled={sendingEmail} />
+                      <textarea name="body" value={emailForm.body} onChange={e => setEmailForm(p => ({ ...p, body: e.target.value }))} rows={16}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium resize-none font-mono" required disabled={sendingEmail} />
                     </div>
                     <div className="flex gap-3 pt-4">
-                      <button onClick={sendEmail} className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2" disabled={sendingEmail}>
-                        {sendingEmail ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin"></div>Sending...</> : <><Send className="w-5 h-5" />Send Email</>}
+                      <button onClick={sendEmail}
+                        className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2" disabled={sendingEmail}>
+                        {sendingEmail ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />Sending...</> : <><Send className="w-5 h-5" />Send Email</>}
                       </button>
-                      <button onClick={closeEmailModal} className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2" disabled={sendingEmail}><X className="w-5 h-5" />Cancel</button>
+                      <button onClick={closeEmailModal}
+                        className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2" disabled={sendingEmail}>
+                        <X className="w-5 h-5" /> Cancel
+                      </button>
                     </div>
                   </div>
                 </motion.div>
@@ -1432,59 +1661,23 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* ─── Price Comparison Modal (now shows real DB prices) ────────────── */}
-          <AnimatePresence>
-            {showPriceModal && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowPriceModal(false)}>
-                <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-background border border-white/20 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-2xl font-bold">Price Comparison: {selectedMaterial}</h3>
-                    <button onClick={() => setShowPriceModal(false)} className="p-2 hover:bg-white/10 rounded-lg transition"><X className="w-5 h-5" /></button>
-                  </div>
-                  <div className="space-y-3">
-                    {companyPrices.length === 0 ? (
-                      <div className="text-center py-8">
-                        <Tag className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
-                        <p className="text-center text-muted-foreground">No pricing data available for this material.</p>
-                        <p className="text-xs text-muted-foreground mt-2">Add prices via Manage Companies → Set Prices.</p>
-                      </div>
-                    ) : (
-                      companyPrices
-                        .sort((a, b) => a.price_per_unit - b.price_per_unit)
-                        .map((cp, i) => (
-                          <div key={cp.company_id} className={cn("flex justify-between items-center p-4 border rounded-xl transition", i === 0 ? "bg-primary/10 border-primary/30" : "bg-white/5 border-white/10 hover:bg-white/10")}>
-                            <div className="flex items-center gap-3">
-                              <Building2 className={cn("w-5 h-5", i === 0 ? "text-primary" : "text-muted-foreground")} />
-                              <div>
-                                <span className="font-medium">{cp.company_name}</span>
-                                {cp.delivery_option && <div className="text-xs text-muted-foreground">{cp.delivery_option} · Del: KSH {(cp.delivery_price || 0).toLocaleString()}</div>}
-                              </div>
-                              {i === 0 && <span className="text-xs bg-primary text-background px-2 py-0.5 rounded-full font-semibold ml-2">Lowest</span>}
-                            </div>
-                            <div className="text-xl font-bold text-primary">KSH {cp.price_per_unit.toLocaleString()}/unit</div>
-                          </div>
-                        ))
-                    )}
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ─── Delete Material Confirmation ─────────────────────────────────── */}
+          {/* Delete material confirm */}
           <AnimatePresence>
             {confirmDelete && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center"><AlertCircle className="w-6 h-6 text-red-500" /></div>
-                    <div><h2 className="text-xl font-bold text-foreground">Delete Material Entry</h2><p className="text-sm text-muted-foreground">This action cannot be undone</p></div>
+                    <div><h2 className="text-xl font-bold">Delete Material Entry</h2><p className="text-sm text-muted-foreground">This action cannot be undone</p></div>
                   </div>
                   <p className="mb-6 text-muted-foreground">Are you sure you want to delete <span className="font-semibold text-foreground">{financials[confirmDelete.milestoneId]?.[confirmDelete.idx]?.material_name}</span>?</p>
                   <div className="flex justify-end gap-3">
-                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDelete(null)} disabled={loading}>Cancel</button>
-                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2" onClick={() => deleteMaterial(confirmDelete.milestoneId, confirmDelete.idx)} disabled={loading}>
-                      {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Deleting...</> : <><Trash2 className="w-4 h-4" />Delete</>}
+                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDelete(null)} disabled={loading}>Cancel</button>
+                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => deleteMaterial(confirmDelete.milestoneId, confirmDelete.idx)} disabled={loading}>
+                      {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Deleting...</> : <><Trash2 className="w-4 h-4" />Delete</>}
                     </button>
                   </div>
                 </motion.div>
@@ -1492,209 +1685,183 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* ─── Success Toast ─────────────────────────────────────────────────── */}
-          <AnimatePresence>
-            {showSuccessToast && (
-              <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed bottom-8 right-8 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3">
-                <CheckCircle className="w-5 h-5" />
-                <span className="font-semibold">{successMessage}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ─── Company Management Modal ──────────────────────────────────────── */}
+          {/* ══════════════════════════════════════════════════
+              COMPANY MANAGEMENT MODAL
+          ══════════════════════════════════════════════════ */}
           <AnimatePresence>
             {showCompanyModal && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setShowCompanyModal(false); setShowPricesForCompany(null); }}>
-                <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-background border border-white/20 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCompanyModal(false)}>
+                <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+
                   <div className="flex justify-between items-center p-6 border-b border-white/10">
                     <div>
                       <h2 className="text-2xl font-bold flex items-center gap-3"><Building2 className="w-6 h-6 text-primary" />Tender Companies</h2>
-                      <p className="text-sm text-muted-foreground mt-1">Manage companies and their material price catalogues</p>
+                      <p className="text-sm text-muted-foreground mt-1">Manage companies and their item pricing catalogs</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => openCompanyForm()} className="bg-primary text-background font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition flex items-center gap-2" disabled={loading}>
-                        <Plus className="w-5 h-5" />Add Company
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => { setActiveCatalogCompanyId(null); openCompanyForm(); }}
+                        className="bg-primary text-background font-semibold px-4 py-2 rounded-xl hover:bg-primary/90 transition flex items-center gap-2" disabled={loading}>
+                        <Plus className="w-5 h-5" /> Add Company
                       </motion.button>
-                      <button onClick={() => { setShowCompanyModal(false); setShowPricesForCompany(null); }} className="p-2 hover:bg-white/10 rounded-lg transition"><X className="w-5 h-5" /></button>
+                      <button onClick={() => setShowCompanyModal(false)} className="p-2 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-6">
-                    {tenderCompanies.length === 0 ? (
-                      <div className="text-center py-16 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl">
-                        <Building2 className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-lg text-muted-foreground mb-2">No tender companies added yet</p>
-                        <p className="text-sm text-muted-foreground">Click "Add Company" to get started</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {tenderCompanies.map((company, idx) => (
-                          <motion.div key={company.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="border border-white/10 rounded-xl overflow-hidden">
-                            {/* Company Row */}
-                            <div className="flex items-center justify-between p-4 bg-white/3 hover:bg-white/5 transition">
-                              <div className="flex items-center gap-4 flex-1 min-w-0">
-                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                                  <Building2 className="w-4 h-4 text-primary" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-foreground">{company.name}</div>
-                                  <div className="text-sm text-muted-foreground flex flex-wrap gap-3 mt-0.5">
-                                    {company.contact_email && <span>{company.contact_email}</span>}
-                                    {company.contact_phone && <span>{company.contact_phone}</span>}
-                                    {company.address && <span className="truncate max-w-xs">{company.address}</span>}
+                  <div className="flex-1 overflow-hidden flex">
+                    <div className="w-full md:w-2/5 border-r border-white/10 overflow-y-auto p-4 space-y-2">
+                      {tenderCompanies.length === 0 ? (
+                        <div className="text-center py-16">
+                          <Building2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
+                          <p className="text-muted-foreground">No companies yet</p>
+                          <p className="text-xs text-muted-foreground mt-1">Click "Add Company" to get started</p>
+                        </div>
+                      ) : (
+                        tenderCompanies.map((company, idx) => {
+                          const isActive = activeCatalogCompanyId === company.id;
+                          const itemCount = catalogForCompany(company.id).length;
+                          return (
+                            <motion.div key={company.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
+                              className={cn("rounded-xl border p-4 cursor-pointer transition-all", isActive ? "border-primary/60 bg-primary/10" : "border-white/10 bg-white/5 hover:bg-white/10")}
+                              onClick={() => { setActiveCatalogCompanyId(company.id); resetCatalogForm(); setCatalogSearch(""); }}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold truncate">{company.name}</div>
+                                  <div className="text-xs text-muted-foreground mt-0.5 truncate">{company.contact_email || "—"}</div>
+                                  <div className="flex items-center gap-3 mt-2">
+                                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", itemCount > 0 ? "bg-primary/20 text-primary" : "bg-white/10 text-muted-foreground")}>
+                                      {itemCount} {itemCount === 1 ? "item" : "items"} in catalog
+                                    </span>
                                   </div>
                                 </div>
+                                <div className="flex gap-1 shrink-0">
+                                  <button onClick={e => { e.stopPropagation(); setActiveCatalogCompanyId(company.id); openCompanyForm(company); }}
+                                    className="p-1.5 bg-accent/10 text-accent rounded-lg hover:bg-accent/20 transition" disabled={loading} title="Edit"><Edit2 className="w-3.5 h-3.5" /></button>
+                                  <button onClick={e => { e.stopPropagation(); setConfirmDeleteCompany(company.id); }}
+                                    className="p-1.5 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition" disabled={loading} title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </div>
                               </div>
-                              <div className="flex gap-2 flex-shrink-0 ml-4">
-                                <button
-                                  onClick={() => {
-                                    if (showPricesForCompany === company.id) {
-                                      setShowPricesForCompany(null);
-                                    } else {
-                                      handleOpenCompanyPrices(company.id);
-                                    }
-                                  }}
-                                  className={cn(
-                                    "px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5",
-                                    showPricesForCompany === company.id
-                                      ? "bg-primary text-background"
-                                      : "bg-white/10 hover:bg-primary/20 text-foreground"
+                            </motion.div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="hidden md:flex flex-1 flex-col overflow-hidden">
+                      {!activeCatalogCompanyId ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-muted-foreground">
+                          <Tag className="w-14 h-14 mb-4 opacity-30" />
+                          <p className="font-semibold text-lg">Select a Company</p>
+                          <p className="text-sm mt-2 max-w-xs">Click a company on the left to manage its product pricing catalog</p>
+                        </div>
+                      ) : (() => {
+                        const activeCompany = tenderCompanies.find(c => c.id === activeCatalogCompanyId);
+                        return (
+                          <div className="flex flex-col h-full overflow-hidden">
+                            <div className="p-4 border-b border-white/10 bg-background/30">
+                              <div className="flex items-center justify-between mb-3">
+                                <div>
+                                  <h3 className="font-bold text-lg flex items-center gap-2">
+                                    <Tag className="w-5 h-5 text-primary" />
+                                    {activeCompany?.name} – Pricing Catalog
+                                  </h3>
+                                  <p className="text-xs text-muted-foreground mt-0.5">Prices here auto-populate the financial form</p>
+                                </div>
+                              </div>
+
+                              <form onSubmit={handleSaveCatalogItem} className="flex flex-wrap gap-2 items-end">
+                                <div className="flex-1 min-w-[140px]">
+                                  <label className="text-xs text-muted-foreground font-medium mb-1 block">Item Name *</label>
+                                  <input type="text" value={catalogForm.item_name} onChange={e => setCatalogForm(p => ({ ...p, item_name: e.target.value }))}
+                                    placeholder="e.g., Cement" required
+                                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition" disabled={catalogLoading} />
+                                </div>
+                                <div className="w-28">
+                                  <label className="text-xs text-muted-foreground font-medium mb-1 block">Unit *</label>
+                                  <select value={catalogForm.unit} onChange={e => setCatalogForm(p => ({ ...p, unit: e.target.value }))}
+                                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition" disabled={catalogLoading}>
+                                    {materialUnits.map(u => <option key={u} value={u} className="bg-background">{u}</option>)}
+                                  </select>
+                                </div>
+                                <div className="w-36">
+                                  <label className="text-xs text-muted-foreground font-medium mb-1 block">Price (KSH) *</label>
+                                  <input type="number" min="0" step="0.01" value={catalogForm.price} onChange={e => setCatalogForm(p => ({ ...p, price: e.target.value }))}
+                                    placeholder="0.00" required
+                                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition" disabled={catalogLoading} />
+                                </div>
+                                <div className="flex gap-2">
+                                  <button type="submit"
+                                    className="px-4 py-2 bg-primary text-background rounded-lg text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50 flex items-center gap-1.5" disabled={catalogLoading}>
+                                    <Save className="w-4 h-4" />{editingCatalogItem ? "Update" : "Add"}
+                                  </button>
+                                  {editingCatalogItem && (
+                                    <button type="button" onClick={resetCatalogForm}
+                                      className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition" disabled={catalogLoading}>
+                                      <X className="w-4 h-4" />
+                                    </button>
                                   )}
-                                  disabled={loading}
-                                  title="Manage material prices"
-                                >
-                                  <Tag className="w-4 h-4" />
-                                  Set Prices
-                                  {showPricesForCompany === company.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                </button>
-                                <button onClick={() => openCompanyForm(company)} className="bg-accent text-background p-2 rounded-lg hover:bg-accent/90 transition" disabled={loading} title="Edit"><Edit2 className="w-4 h-4" /></button>
-                                <button onClick={() => setConfirmDeleteCompany(company.id)} className="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition" disabled={loading} title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              </form>
+                            </div>
+
+                            <div className="p-3 border-b border-white/10">
+                              <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                <input type="text" placeholder="Search catalog items…" value={catalogSearch} onChange={e => setCatalogSearch(e.target.value)}
+                                  className="w-full pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition" />
                               </div>
                             </div>
 
-                            {/* ── Inline Price Catalogue Panel ── */}
-                            <AnimatePresence>
-                              {showPricesForCompany === company.id && (
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: "auto", opacity: 1 }}
-                                  exit={{ height: 0, opacity: 0 }}
-                                  transition={{ duration: 0.25 }}
-                                  className="overflow-hidden border-t border-white/10"
-                                >
-                                  <div className="p-4 bg-background/40">
-                                    <div className="flex items-center justify-between mb-4">
-                                      <h4 className="font-semibold text-sm flex items-center gap-2">
-                                        <List className="w-4 h-4 text-primary" />
-                                        Material Price Catalogue
-                                        <span className="text-xs text-muted-foreground font-normal">(auto-fills material form when selected)</span>
-                                      </h4>
-                                      <button
-                                        onClick={() => openPriceForm()}
-                                        className="bg-primary/20 hover:bg-primary/30 text-primary text-xs font-semibold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
-                                        disabled={loading}
-                                      >
-                                        <Plus className="w-3 h-3" />
-                                        Add Price
-                                      </button>
-                                    </div>
-
-                                    {/* Price Form */}
-                                    <AnimatePresence>
-                                      {showPriceForm && (
-                                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-4">
-                                          <form onSubmit={editingPrice ? handleUpdatePrice : handleAddPrice} className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 bg-white/5 border border-white/10 rounded-xl">
-                                            <div className="col-span-2 md:col-span-1 lg:col-span-1">
-                                              <label className="block text-xs font-semibold text-muted-foreground mb-1">Material Name *</label>
-                                              <input name="material_name" type="text" value={priceForm.material_name} onChange={handlePriceFormChange} placeholder="e.g., Cement" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-foreground placeholder:text-muted-foreground/50" required disabled={loading} />
-                                            </div>
-                                            <div>
-                                              <label className="block text-xs font-semibold text-muted-foreground mb-1">Unit</label>
-                                              <select name="unit" value={priceForm.unit} onChange={handlePriceFormChange} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 text-foreground" disabled={loading}>
-                                                {materialUnits.map(u => <option key={u} value={u} className="bg-background">{u}</option>)}
-                                              </select>
-                                            </div>
-                                            <div>
-                                              <label className="block text-xs font-semibold text-muted-foreground mb-1">Price/Unit (KSH) *</label>
-                                              <input name="price_per_unit" type="number" min="0" step="0.01" value={priceForm.price_per_unit} onChange={handlePriceFormChange} placeholder="0" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-foreground" required disabled={loading} />
-                                            </div>
-                                            <div>
-                                              <label className="block text-xs font-semibold text-muted-foreground mb-1">Delivery Option</label>
-                                              <select name="delivery_option" value={priceForm.delivery_option} onChange={handlePriceFormChange} className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 text-foreground" disabled={loading}>
-                                                {deliveryOptions.map(o => <option key={o} value={o} className="bg-background">{o}</option>)}
-                                              </select>
-                                            </div>
-                                            <div>
-                                              <label className="block text-xs font-semibold text-muted-foreground mb-1">Delivery Price (KSH)</label>
-                                              <input name="delivery_price" type="number" min="0" step="0.01" value={priceForm.delivery_price} onChange={handlePriceFormChange} placeholder="0" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-foreground" disabled={loading} />
-                                            </div>
-                                            <div className="col-span-2 md:col-span-3 lg:col-span-6 flex gap-2 mt-1">
-                                              <button type="submit" className="bg-primary text-background text-xs font-semibold px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center gap-1.5 disabled:opacity-50" disabled={loading}>
-                                                <Save className="w-3 h-3" />{editingPrice ? "Update" : "Save"}
-                                              </button>
-                                              <button type="button" onClick={closePriceForm} className="bg-muted text-foreground text-xs font-semibold px-4 py-2 rounded-lg hover:bg-muted/80 transition flex items-center gap-1.5" disabled={loading}>
-                                                <X className="w-3 h-3" />Cancel
-                                              </button>
-                                            </div>
-                                          </form>
-                                        </motion.div>
-                                      )}
-                                    </AnimatePresence>
-
-                                    {/* Price List */}
-                                    {(companyMaterialPrices[company.id] || []).length === 0 ? (
-                                      <div className="text-center py-6 bg-white/3 rounded-xl border border-white/5">
-                                        <Tag className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-40" />
-                                        <p className="text-sm text-muted-foreground">No prices set yet.</p>
-                                        <p className="text-xs text-muted-foreground mt-1">Click "Add Price" to add material prices for this company.</p>
-                                      </div>
-                                    ) : (
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                          <thead>
-                                            <tr className="border-b border-white/10">
-                                              <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Material</th>
-                                              <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Unit</th>
-                                              <th className="text-right py-2 px-3 text-xs font-semibold text-muted-foreground">Price/Unit (KSH)</th>
-                                              <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Delivery</th>
-                                              <th className="text-right py-2 px-3 text-xs font-semibold text-muted-foreground">Del. Price (KSH)</th>
-                                              <th className="text-center py-2 px-3 text-xs font-semibold text-muted-foreground">Actions</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {(companyMaterialPrices[company.id] || []).map((price) => (
-                                              <tr key={price.id} className="border-b border-white/5 last:border-0 hover:bg-white/5 transition">
-                                                <td className="py-2 px-3 font-medium">{price.material_name}</td>
-                                                <td className="py-2 px-3 text-muted-foreground">{price.unit}</td>
-                                                <td className="py-2 px-3 text-right font-bold text-primary">{price.price_per_unit.toLocaleString()}</td>
-                                                <td className="py-2 px-3 text-muted-foreground text-xs">{price.delivery_option}</td>
-                                                <td className="py-2 px-3 text-right text-muted-foreground">{price.delivery_price.toLocaleString()}</td>
-                                                <td className="py-2 px-3">
-                                                  <div className="flex gap-1.5 justify-center">
-                                                    <button onClick={() => openPriceForm(price)} className="bg-accent/80 text-background p-1.5 rounded-lg hover:bg-accent transition" disabled={loading} title="Edit"><Edit2 className="w-3 h-3" /></button>
-                                                    <button onClick={() => setConfirmDeletePrice(price.id)} className="bg-red-500/80 text-white p-1.5 rounded-lg hover:bg-red-500 transition" disabled={loading} title="Delete"><Trash2 className="w-3 h-3" /></button>
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    )}
-                                  </div>
-                                </motion.div>
+                            <div className="flex-1 overflow-y-auto">
+                              {filteredCatalog.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                                  <Package className="w-10 h-10 mb-3 opacity-30" />
+                                  <p className="text-sm font-medium">{catalogSearch ? "No items match your search" : "No catalog items yet"}</p>
+                                  <p className="text-xs mt-1">{catalogSearch ? "" : "Use the form above to add prices"}</p>
+                                </div>
+                              ) : (
+                                <table className="min-w-full text-sm">
+                                  <thead className="sticky top-0 bg-background/90 backdrop-blur-sm">
+                                    <tr className="border-b border-white/10">
+                                      <th className="py-2 px-4 text-left text-xs font-semibold text-muted-foreground">Item</th>
+                                      <th className="py-2 px-4 text-left text-xs font-semibold text-muted-foreground">Unit</th>
+                                      <th className="py-2 px-4 text-right text-xs font-semibold text-muted-foreground">Price (KSH)</th>
+                                      <th className="py-2 px-4 text-center text-xs font-semibold text-muted-foreground">Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {filteredCatalog.map((item, i) => (
+                                      <motion.tr key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                                        className={cn("border-b border-white/5 hover:bg-white/5 transition-colors", editingCatalogItem?.id === item.id && "bg-primary/5 border-primary/20")}>
+                                        <td className="py-2.5 px-4 font-medium">{item.item_name}</td>
+                                        <td className="py-2.5 px-4 text-muted-foreground">{item.unit}</td>
+                                        <td className="py-2.5 px-4 text-right font-bold text-primary">{item.price.toLocaleString()}</td>
+                                        <td className="py-2.5 px-4">
+                                          <div className="flex gap-1 justify-center">
+                                            <button onClick={() => startEditCatalog(item)}
+                                              className="p-1.5 bg-accent/10 text-accent rounded hover:bg-accent/20 transition" title="Edit"><Edit2 className="w-3 h-3" /></button>
+                                            <button onClick={() => setConfirmDeleteCatalog(item)}
+                                              className="p-1.5 bg-red-500/10 text-red-400 rounded hover:bg-red-500/20 transition" title="Delete"><Trash2 className="w-3 h-3" /></button>
+                                          </div>
+                                        </td>
+                                      </motion.tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                               )}
-                            </AnimatePresence>
-                          </motion.div>
-                        ))}
-                      </div>
-                    )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   <div className="p-4 border-t border-white/10 bg-background/60">
                     <p className="text-sm text-muted-foreground text-center">
-                      Total: <span className="font-semibold text-foreground">{tenderCompanies.length}</span> {tenderCompanies.length === 1 ? 'company' : 'companies'}
+                      <span className="font-semibold text-foreground">{tenderCompanies.length}</span> {tenderCompanies.length === 1 ? "company" : "companies"} &nbsp;·&nbsp;
+                      <span className="font-semibold text-foreground">{catalog.length}</span> total catalog entries
                     </p>
                   </div>
                 </motion.div>
@@ -1702,37 +1869,51 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* ─── Company Add/Edit Form Modal ──────────────────────────────────── */}
+          {/* Add / Edit Company Form */}
           <AnimatePresence>
             {showCompanyForm && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={closeCompanyForm}>
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-background border border-white/20 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4" onClick={closeCompanyForm}>
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-between items-center mb-6">
                     <h3 className="text-2xl font-bold flex items-center gap-3"><Building2 className="w-6 h-6 text-primary" />{editingCompany ? "Edit Company" : "Add New Company"}</h3>
-                    <button onClick={closeCompanyForm} className="p-2 hover:bg-white/10 rounded-lg transition"><X className="w-5 h-5" /></button>
+                    <button onClick={closeCompanyForm} className="p-2 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
                   </div>
                   <form onSubmit={editingCompany ? handleUpdateCompany : handleAddCompany} className="space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Company Name *</label>
-                      <input name="name" type="text" value={companyForm.name} onChange={handleCompanyChange} placeholder="e.g., ABC Supplies Ltd" className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50" required disabled={loading} />
+                      <input name="name" type="text" value={companyForm.name} onChange={handleCompanyChange} placeholder="e.g., ABC Supplies Ltd"
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" required disabled={loading} />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Contact Email *</label>
-                      <input name="contact_email" type="email" value={companyForm.contact_email} onChange={handleCompanyChange} placeholder="contact@company.com" className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50" required disabled={loading} />
+                      <input name="contact_email" type="email" value={companyForm.contact_email} onChange={handleCompanyChange} placeholder="contact@company.com"
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" required disabled={loading} />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Contact Phone</label>
-                      <input name="contact_phone" type="tel" value={companyForm.contact_phone} onChange={handleCompanyChange} placeholder="+254 123 456 789" className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50" disabled={loading} />
+                      <input name="contact_phone" type="tel" value={companyForm.contact_phone} onChange={handleCompanyChange} placeholder="+254 123 456 789"
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" disabled={loading} />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-muted-foreground mb-2">Address</label>
-                      <textarea name="address" value={companyForm.address} onChange={handleCompanyChange} placeholder="Company address" rows={3} className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground placeholder:text-muted-foreground/50 resize-none" disabled={loading} />
+                      <textarea name="address" value={companyForm.address} onChange={handleCompanyChange} placeholder="Company address" rows={3}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition resize-none" disabled={loading} />
                     </div>
-                    <div className="flex gap-3 pt-4">
-                      <button type="submit" className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2" disabled={loading}>
-                        {loading ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin"></div>{editingCompany ? "Updating..." : "Adding..."}</> : <><Save className="w-5 h-5" />{editingCompany ? "Update Company" : "Add Company"}</>}
+                    <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-sm text-blue-400 flex items-start gap-2">
+                      <Tag className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>After {editingCompany ? "saving" : "adding"} the company, select it from the list to add its item prices. Prices will auto-populate in the financial form.</span>
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                      <button type="submit"
+                        className="flex-1 bg-primary text-background font-semibold px-8 py-3 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 flex items-center justify-center gap-2" disabled={loading}>
+                        {loading ? <><div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />{editingCompany ? "Updating…" : "Adding…"}</> : <><Save className="w-5 h-5" />{editingCompany ? "Update Company" : "Add Company"}</>}
                       </button>
-                      <button type="button" onClick={closeCompanyForm} className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2" disabled={loading}><X className="w-5 h-5" />Cancel</button>
+                      <button type="button" onClick={closeCompanyForm}
+                        className="flex-1 bg-muted text-foreground font-semibold px-8 py-3 rounded-xl hover:bg-muted/80 transition flex items-center justify-center gap-2" disabled={loading}>
+                        <X className="w-5 h-5" /> Cancel
+                      </button>
                     </div>
                   </form>
                 </motion.div>
@@ -1740,20 +1921,23 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* ─── Company Delete Confirmation ──────────────────────────────────── */}
+          {/* Delete company confirm */}
           <AnimatePresence>
             {confirmDeleteCompany && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDeleteCompany(null)}>
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDeleteCompany(null)}>
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center"><AlertCircle className="w-6 h-6 text-red-500" /></div>
-                    <div><h2 className="text-xl font-bold text-foreground">Delete Company</h2><p className="text-sm text-muted-foreground">This action cannot be undone</p></div>
+                    <div><h2 className="text-xl font-bold">Delete Company</h2><p className="text-sm text-muted-foreground">This will also delete all its catalog prices</p></div>
                   </div>
-                  <p className="mb-6 text-muted-foreground">Are you sure you want to delete <span className="font-semibold text-foreground">{tenderCompanies.find(c => c.id === confirmDeleteCompany)?.name}</span>? This company may be referenced in existing materials.</p>
+                  <p className="mb-6 text-muted-foreground">Are you sure you want to delete <span className="font-semibold text-foreground">{tenderCompanies.find(c => c.id === confirmDeleteCompany)?.name}</span>?</p>
                   <div className="flex justify-end gap-3">
-                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDeleteCompany(null)} disabled={loading}>Cancel</button>
-                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2" onClick={() => deleteCompany(confirmDeleteCompany)} disabled={loading}>
-                      {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Deleting...</> : <><Trash2 className="w-4 h-4" />Delete</>}
+                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDeleteCompany(null)} disabled={loading}>Cancel</button>
+                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => deleteCompany(confirmDeleteCompany)} disabled={loading}>
+                      {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Deleting…</> : <><Trash2 className="w-4 h-4" />Delete</>}
                     </button>
                   </div>
                 </motion.div>
@@ -1761,23 +1945,37 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
             )}
           </AnimatePresence>
 
-          {/* ─── Price Delete Confirmation ─────────────────────────────────────── */}
+          {/* Delete catalog item confirm */}
           <AnimatePresence>
-            {confirmDeletePrice && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDeletePrice(null)}>
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            {confirmDeleteCatalog && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setConfirmDeleteCatalog(null)}>
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-background border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center"><AlertCircle className="w-6 h-6 text-red-500" /></div>
-                    <div><h2 className="text-xl font-bold text-foreground">Delete Price Entry</h2><p className="text-sm text-muted-foreground">This action cannot be undone</p></div>
+                    <div><h2 className="text-xl font-bold">Delete Price Entry</h2><p className="text-sm text-muted-foreground">This action cannot be undone</p></div>
                   </div>
-                  <p className="mb-6 text-muted-foreground">Are you sure you want to remove this material price from the catalogue?</p>
+                  <p className="mb-6 text-muted-foreground">Remove <span className="font-semibold text-foreground">{confirmDeleteCatalog.item_name}</span> (KSH {confirmDeleteCatalog.price.toLocaleString()}/{confirmDeleteCatalog.unit}) from this company's catalog?</p>
                   <div className="flex justify-end gap-3">
-                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 text-foreground font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDeletePrice(null)} disabled={loading}>Cancel</button>
-                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2" onClick={() => deletePrice(confirmDeletePrice)} disabled={loading}>
-                      {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Deleting...</> : <><Trash2 className="w-4 h-4" />Delete</>}
+                    <button className="px-6 py-3 rounded-xl bg-background/60 border border-white/10 font-semibold hover:bg-background/80 transition" onClick={() => setConfirmDeleteCatalog(null)} disabled={catalogLoading}>Cancel</button>
+                    <button className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => handleDeleteCatalogItem(confirmDeleteCatalog)} disabled={catalogLoading}>
+                      {catalogLoading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Deleting…</> : <><Trash2 className="w-4 h-4" />Delete</>}
                     </button>
                   </div>
                 </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Success Toast ── */}
+          <AnimatePresence>
+            {showSuccessToast && (
+              <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }}
+                className="fixed bottom-8 right-8 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3">
+                <CheckCircle className="w-5 h-5" />
+                <span className="font-semibold">{successMessage}</span>
               </motion.div>
             )}
           </AnimatePresence>

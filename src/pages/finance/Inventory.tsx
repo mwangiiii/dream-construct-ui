@@ -286,8 +286,8 @@ function ItemModal({
               type="number"
               step="0.0001"
               min="0"
-              value={form.quantity_of_item}
-              onChange={e => set("quantity_of_item", parseFloat(e.target.value) || 0)}
+              value={form.quantity_of_item === 0 ? (form.quantity_of_item === "" ? "" : "0") : form.quantity_of_item || ""}
+              onChange={e => set("quantity_of_item", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
               required
             />
@@ -298,8 +298,8 @@ function ItemModal({
               type="number"
               step="0.01"
               min="0"
-              value={form.cost_per_quantity}
-              onChange={e => set("cost_per_quantity", parseFloat(e.target.value) || 0)}
+              value={form.cost_per_quantity === 0 ? (form.cost_per_quantity === "" ? "" : "0") : form.cost_per_quantity || ""}
+              onChange={e => set("cost_per_quantity", e.target.value === "" ? "" : parseFloat(e.target.value))}
               className={inputCls}
               required
             />
@@ -311,8 +311,8 @@ function ItemModal({
               step="0.0001"
               min="0"
               max={form.quantity_of_item}
-              value={qtyUsed}
-              onChange={e => set("quantity_used", Math.min(parseFloat(e.target.value) || 0, form.quantity_of_item))}
+              value={qtyUsed === 0 ? (qtyUsed === "" ? "" : "0") : qtyUsed || ""}
+              onChange={e => set("quantity_used", e.target.value === "" ? "" : Math.min(parseFloat(e.target.value), form.quantity_of_item))}
               className={inputCls}
             />
           </Field>

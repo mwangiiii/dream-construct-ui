@@ -11,6 +11,7 @@ import {
   FileText,
   LogOut,
   Menu,
+  ScrollText,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -56,6 +57,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     { icon: Briefcase, label: "Projects", path: "/admin/projects" },
     { icon: FileText, label: "Content", path: "/admin/content/media" },
     { icon: Settings, label: "Settings", path: "/admin/settings" },
+    { icon: ScrollText, label: "Policies", path: "/policies" },
   ];
 
   // Determine sidebar width and margin classes

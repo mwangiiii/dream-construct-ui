@@ -24,6 +24,7 @@ import {
   ClipboardList,
   CalendarCheck,
   LayoutDashboard,
+  ScrollText,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -52,13 +53,14 @@ const financeRoutes = [
       { label: "Cash Flow",            path: "/finance/cash-flow",                          icon: Droplets             },
       { label: "Statement of Account", path: "/finance/statement-of-account",               icon: FileText             },
       { label: "Bank Reconciliation",  path: "/finance/bank-reconciliation",                icon: Landmark             },
+
     ],
   },
   {
     group: "Operations",
     items: [
-      { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
-      { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
+        // { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
+        // { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
       { label: "Work in Progress",    path: "/finance/work-in-progress",                   icon: HardHat              },
       { label: "Change Orders",       path: "/finance/change-orders-tracking",             icon: GitPullRequestArrow  },
       { label: "Inventory",           path: "/finance/inventory",                          icon: Package              },
@@ -83,6 +85,9 @@ const financeRoutes = [
     group: "Closing",
     items: [
       { label: "Month-End Checklist", path: "/finance/end-month-close-checklist",          short: "MEC", icon: CalendarCheck        },
+      
+
+      
     ],
   },
 ];
@@ -243,6 +248,23 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           {sidebarOpen && <span className="font-medium">View Site</span>}
         </Link>
 
+        {/* Policies link, similar to AdminLayout */}
+        <Link
+          to="/policies"
+          className={`
+            flex items-center gap-3 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all text-sm
+            ${sidebarOpen ? "px-3 py-2.5" : "px-2 py-2.5 justify-center"}
+          `}
+        >
+          <span
+            title="Policies"
+            className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-md bg-white/5"
+          >
+            <ScrollText className="w-4 h-4" />
+          </span>
+          {sidebarOpen && <span className="font-medium">Policies</span>}
+        </Link>
+
         <button
           onClick={handleLogout}
           className={`
@@ -325,7 +347,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
 
             {/* Breadcrumb */}
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Finance</span>
+              <span className="text-muted-foreground">Accounts</span>
               <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40" />
               <span className="text-foreground font-medium">
                 {activeItem?.label ?? "Dashboard"}
@@ -375,7 +397,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           </button>
 
           <div className="flex items-center gap-2 text-sm min-w-0 flex-1">
-            <span className="text-muted-foreground flex-shrink-0">Finance</span>
+            <span className="text-muted-foreground flex-shrink-0">Accounts</span>
             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
             <span className="text-foreground font-medium truncate">
               {activeItem?.label ?? "Dashboard"}

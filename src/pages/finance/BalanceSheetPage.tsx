@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -32,7 +33,7 @@ type EquityType    = "Owner's Capital" | "Retained Earnings" | "Shareholder Equi
 
 interface BalanceSheetEntry {
   id:             number;
-  project_id:     string;
+  project_id:     string | null;   // nullable — entries can be unlinked from any project
   entry_type:     EntryType;
   asset_type:     AssetType     | null;
   liability_type: LiabilityType | null;
@@ -64,7 +65,6 @@ const SUB_TYPES: Record<EntryType, string[]> = {
   Equity:    ["Owner's Capital", "Retained Earnings", "Shareholder Equity"],
 };
 
-// Exact same pattern as CATEGORY_STYLE in ChartOfAccountsPage
 const TYPE_STYLE: Record<EntryType, { accent: string; badge: string; dot: string; row: string }> = {
   Asset:     { accent: "text-emerald-400", badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", dot: "bg-emerald-400", row: "hover:bg-emerald-950/30" },
   Liability: { accent: "text-rose-400",    badge: "bg-rose-500/10    border-rose-500/30    text-rose-300",    dot: "bg-rose-400",    row: "hover:bg-rose-950/30"    },
@@ -79,7 +79,10 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
-const makeEmptyForm = (projectId: string): BSFormData => ({
+// Entry date is always today and cannot be changed by the user
+const todayISO = () => new Date().toISOString().split("T")[0];
+
+const makeEmptyForm = (projectId: string | null = null): BSFormData => ({
   project_id:     projectId,
   entry_type:     "Asset",
   asset_type:     "Current Asset",
@@ -88,13 +91,15 @@ const makeEmptyForm = (projectId: string): BSFormData => ({
   account_name:   "",
   description:    "",
   amount:         0,
-  entry_date:     new Date().toISOString().split("T")[0],
+  entry_date:     todayISO(),   // always today, read-only
   reference_code: "",
   notes:          "",
 });
 
-const fmt = (n: number, currency = "USD") =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(n);
+const fmt = (n: number, currency = "Kshs") =>
+  currency === "Kshs"
+    ? `Kshs ${Number(n).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`
+    : new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(n);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -120,17 +125,26 @@ const api = {
     if (error) throw new Error(error.message);
     return (data ?? []) as BalanceSheetEntry[];
   },
-  async create(body: BSFormData): Promise<BalanceSheetEntry> {
-    const { data, error } = await supabase
-      .from("balance_sheet_entries").insert([body]).select().single();
-    if (error) throw new Error(error.message);
-    return data as BalanceSheetEntry;
-  },
-  async update(id: number, body: BSFormData): Promise<BalanceSheetEntry> {
+  async listAll(): Promise<BalanceSheetEntry[]> {
     const { data, error } = await supabase
       .from("balance_sheet_entries")
-      .update({ ...body, updated_at: new Date().toISOString() })
-      .eq("id", id).select().single();
+      .select("*")
+      .order("entry_type")
+      .order("entry_date", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as BalanceSheetEntry[];
+  },
+  async create(body: BSFormData): Promise<BalanceSheetEntry> {
+    // Always stamp today as the posting date; strip null project_id
+    const payload: Record<string, unknown> = { ...body, entry_date: todayISO() };
+    if (payload.project_id === null || payload.project_id === "") {
+      delete payload.project_id;
+    }
+    const { data, error } = await supabase
+      .from("balance_sheet_entries")
+      .insert([payload])
+      .select()
+      .single();
     if (error) throw new Error(error.message);
     return data as BalanceSheetEntry;
   },
@@ -140,7 +154,7 @@ const api = {
   },
 };
 
-// ─── TOAST — exact same hook as ChartOfAccountsPage ──────────────────────────
+// ─── TOAST ────────────────────────────────────────────────────────────────────
 
 function useToast() {
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: "success" | "error" }[]>([]);
@@ -152,10 +166,13 @@ function useToast() {
   return { toasts, push };
 }
 
-// ─── SHARED — exact same inputCls + Field as ChartOfAccountsPage ─────────────
+// ─── SHARED ───────────────────────────────────────────────────────────────────
 
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
+
+const readonlyCls =
+  "w-full px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -166,16 +183,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// ─── ENTRY MODAL — same structure as AccountModal in ChartOfAccountsPage ─────
+// ─── POST JOURNAL ENTRY MODAL ─────────────────────────────────────────────────
+// Balance sheets are never directly edited.
+// Users post new journal entries; the balance sheet reflects them automatically.
+// • Entry date is auto-set to today and is READ-ONLY.
+// • Amount field shows a KES prefix instead of a currency symbol icon.
+// • No "edit" mode — this modal is for new entries only.
 
-function EntryModal({ initial, onSave, onClose, loading }: {
-  initial: BSFormData & { id?: number };
-  onSave:  (d: BSFormData) => void;
-  onClose: () => void;
-  loading: boolean;
+function PostEntryModal({ initial, onSave, onClose, loading, projects = [], showProjectSelector = false }: {
+  initial:              BSFormData;
+  onSave:               (d: BSFormData) => void;
+  onClose:              () => void;
+  loading:              boolean;
+  projects?:            Project[];
+  showProjectSelector?: boolean;
 }) {
-  const [form, setForm] = useState<BSFormData>({ ...initial });
-  const isEdit = Boolean(initial.id);
+  const [form, setForm] = useState<BSFormData>({ ...initial, entry_date: todayISO() });
 
   const setField = (k: keyof BSFormData, v: unknown) =>
     setForm((prev) => {
@@ -208,10 +231,13 @@ function EntryModal({ initial, onSave, onClose, loading }: {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-base font-semibold text-foreground tracking-tight">
-            {isEdit ? "Edit Entry" : "New Balance Sheet Entry"}
-          </h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
+          <div>
+            <h2 className="text-base font-semibold text-foreground tracking-tight">Post Journal Entry</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Entries are posted today and cannot be back-dated or edited after posting.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10 ml-4 flex-shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
@@ -220,58 +246,131 @@ function EntryModal({ initial, onSave, onClose, loading }: {
 
         {/* Body */}
         <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+
+          {/* Project selector — only in global sheet modal */}
+          {showProjectSelector && (
+            <div className="col-span-2">
+              <Field label="Linked Project (optional)">
+                <select
+                  value={form.project_id ?? ""}
+                  onChange={(e) => setField("project_id", e.target.value === "" ? null : e.target.value)}
+                  className={inputCls}
+                >
+                  <option value="">— Not linked to any project —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.project_number} · {p.title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
+
           <Field label="Entry Type *">
             <select value={form.entry_type} onChange={(e) => setField("entry_type", e.target.value as EntryType)} className={inputCls}>
               {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
+
           <Field label={`${form.entry_type} Sub-type *`}>
             <select value={subVal} onChange={(e) => setField(subKey as keyof BSFormData, e.target.value)} className={inputCls}>
               {SUB_TYPES[form.entry_type].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
+
           <div className="col-span-2">
             <Field label="Account Name *">
-              <input value={form.account_name} onChange={(e) => setField("account_name", e.target.value)}
-                placeholder="e.g. Cash – Operating Account" className={inputCls} />
+              <input
+                value={form.account_name}
+                onChange={(e) => setField("account_name", e.target.value)}
+                placeholder="e.g. Cash – Operating Account"
+                className={inputCls}
+              />
             </Field>
           </div>
-          <Field label="Amount (USD) *">
-            <input type="number" step="0.01" min="0" value={form.amount}
-              onChange={(e) => setField("amount", parseFloat(e.target.value) || 0)} className={inputCls} />
+
+          {/* Amount — KES prefix badge, no currency icon */}
+          <Field label="Amount *">
+            <div className="flex items-stretch gap-0">
+              <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 border-r-0 whitespace-nowrap select-none">
+                KES
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.amount === 0 ? "0" : form.amount || ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setField("amount", val === "" ? "" : parseFloat(val));
+                }}
+                className="flex-1 px-3 py-2 rounded-r-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all"
+                placeholder="0.00"
+              />
+            </div>
           </Field>
-          <Field label="Entry Date *">
-            <input type="date" value={form.entry_date}
-              onChange={(e) => setField("entry_date", e.target.value)} className={inputCls} />
+
+          {/* Posting date — read-only, always today */}
+          <Field label="Posting Date">
+            <div className="relative">
+              <div className={readonlyCls + " flex items-center gap-2"}>
+                <svg className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+                </svg>
+                <span>{fmtDate(form.entry_date)}</span>
+                <span className="ml-auto text-[10px] uppercase tracking-widest text-muted-foreground/40 font-medium">Auto</span>
+              </div>
+            </div>
           </Field>
+
           <Field label="Reference Code">
-            <input value={form.reference_code ?? ""} onChange={(e) => setField("reference_code", e.target.value || null)}
-              placeholder="e.g. BS-2024-001" className={inputCls} />
+            <input
+              value={form.reference_code ?? ""}
+              onChange={(e) => setField("reference_code", e.target.value || null)}
+              placeholder="e.g. JE-2024-001"
+              className={inputCls}
+            />
           </Field>
+
           <Field label="Description">
-            <input value={form.description ?? ""} onChange={(e) => setField("description", e.target.value || null)}
-              placeholder="Brief description" className={inputCls} />
+            <input
+              value={form.description ?? ""}
+              onChange={(e) => setField("description", e.target.value || null)}
+              placeholder="Brief description"
+              className={inputCls}
+            />
           </Field>
+
           <div className="col-span-2">
             <Field label="Notes">
-              <textarea value={form.notes ?? ""} onChange={(e) => setField("notes", e.target.value || null)}
-                rows={2} placeholder="Additional notes…" className={inputCls + " resize-none"} />
+              <textarea
+                value={form.notes ?? ""}
+                onChange={(e) => setField("notes", e.target.value || null)}
+                rows={2}
+                placeholder="Additional notes…"
+                className={inputCls + " resize-none"}
+              />
             </Field>
           </div>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+          >
             Cancel
           </button>
           <button
-            onClick={() => onSave(form)} disabled={loading}
+            onClick={() => onSave(form)}
+            disabled={loading}
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
           >
             {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-            {isEdit ? "Save Changes" : "Add Entry"}
+            Post Entry
           </button>
         </div>
       </motion.div>
@@ -279,7 +378,7 @@ function EntryModal({ initial, onSave, onClose, loading }: {
   );
 }
 
-// ─── DELETE CONFIRM — exact same as ChartOfAccountsPage ──────────────────────
+// ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
 
 function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
   entry: BalanceSheetEntry; onConfirm: () => void; onClose: () => void; loading: boolean;
@@ -300,9 +399,9 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-foreground mb-1">Delete Entry</h3>
+            <h3 className="font-semibold text-foreground mb-1">Reverse Entry</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Permanently delete{" "}
+              Permanently reverse{" "}
               <span className="text-foreground font-medium">{entry.account_name}</span>{" "}
               (<span className="font-mono text-primary text-xs">{fmt(entry.amount)}</span>)?
               {" "}This cannot be undone.
@@ -314,7 +413,7 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
           <button onClick={onConfirm} disabled={loading}
             className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2">
             {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-            Delete Entry
+            Reverse Entry
           </button>
         </div>
       </motion.div>
@@ -327,7 +426,7 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
 function ProjectCard({ project, onSelect, entryCount }: {
   project: Project; onSelect: (p: Project) => void; entryCount: number;
 }) {
-  const status   = project.status ?? "planning";
+  const status    = project.status ?? "planning";
   const statusCls = STATUS_STYLE[status] ?? STATUS_STYLE.planning;
 
   return (
@@ -382,7 +481,7 @@ function ProjectCard({ project, onSelect, entryCount }: {
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
             </svg>
-            {fmt(project.budget_numeric, project.currency?.trim() || "USD")}
+            {fmt(project.budget_numeric, "Kshs")}
           </span>
         )}
         {project.expected_completion_date && (
@@ -422,6 +521,405 @@ function ProjectCard({ project, onSelect, entryCount }: {
         </svg>
       </div>
     </motion.button>
+  );
+}
+
+// ─── GLOBAL BALANCE SHEET VIEW ────────────────────────────────────────────────
+// Mirrors EntriesView exactly — same collapsible groups, stat cards, accounting-
+// equation bar — but totals ALL entries across every project plus unlinked ones.
+// Adds a "Project" column. No edit button — delete (reverse) only.
+
+function GlobalBalanceSheetView({ canEdit, projects }: {
+  canEdit:  boolean;
+  projects: Project[];
+}) {
+  const [entries,    setEntries]    = useState<BalanceSheetEntry[]>([]);
+  const [fetching,   setFetching]   = useState(false);
+  const [search,     setSearch]     = useState("");
+  const [filterType, setFilterType] = useState<EntryType | "All">("All");
+  const [expanded,   setExpanded]   = useState<Record<string, boolean>>(
+    Object.fromEntries(ENTRY_TYPES.map((t) => [t, true]))
+  );
+  const [showModal, setShowModal] = useState(false);
+  const [deleting,  setDeleting]  = useState<BalanceSheetEntry | null>(null);
+  const [saving,    setSaving]    = useState(false);
+
+  const { toasts, push } = useToast();
+
+  const fetchEntries = useCallback(async () => {
+    setFetching(true);
+    setEntries([]);
+    try {
+      const data = await api.listAll();
+      setEntries(data);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
+    } finally { setFetching(false); }
+  }, [push]);
+
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  const handleCreate = async (form: BSFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      setEntries((p) => [row, ...p]);
+      push("Entry posted successfully.");
+      setShowModal(false);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to post entry.", "error");
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setEntries((p) => p.filter((e) => e.id !== deleting.id));
+      push("Entry reversed.");
+      setDeleting(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to reverse entry.", "error");
+    } finally { setSaving(false); }
+  };
+
+  const projectLabel = (pid: string | null) => {
+    if (!pid) return <span className="italic text-muted-foreground/60 text-xs">Unlinked</span>;
+    const p = projects.find((pr) => pr.id === pid);
+    return p
+      ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
+      : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
+  };
+
+  const filtered = useMemo(() =>
+    entries.filter((e) => {
+      if (filterType !== "All" && e.entry_type !== filterType) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return e.account_name.toLowerCase().includes(q) ||
+          (e.reference_code ?? "").toLowerCase().includes(q) ||
+          (e.description   ?? "").toLowerCase().includes(q);
+      }
+      return true;
+    }),
+  [entries, filterType, search]);
+
+  const grouped = useMemo(() => {
+    const g: Partial<Record<EntryType, BalanceSheetEntry[]>> = {};
+    ENTRY_TYPES.forEach((t) => {
+      const items = filtered.filter((e) => e.entry_type === t);
+      if (items.length) g[t] = items;
+    });
+    return g;
+  }, [filtered]);
+
+  const totals = useMemo(
+    () => Object.fromEntries(
+      ENTRY_TYPES.map((type) => [
+        type,
+        entries.filter((e) => e.entry_type === type).reduce((s, e) => s + Number(e.amount), 0),
+      ])
+    ) as Record<EntryType, number>,
+    [entries]
+  );
+
+  const totalAssets      = totals.Asset     ?? 0;
+  const totalLiabilities = totals.Liability ?? 0;
+  const totalEquity      = totals.Equity    ?? 0;
+  const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
+
+  // cols: Ref / Account Name / Sub-type / Description / Date / Project / Amount / [Actions]
+  // "Actions" column now only has delete — so colSpan before Amount = 6
+  const subtotalColSpan = canEdit ? 6 : 6;
+
+  return (
+    <div className="container mx-auto px-4 pb-20">
+
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div key={t.id}
+              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
+                t.type === "success"
+                  ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
+                  : "bg-rose-950/80 border-rose-500/25 text-rose-300"
+              }`}
+            >{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showModal && (
+          <PostEntryModal
+            initial={makeEmptyForm(null)}
+            onSave={handleCreate}
+            onClose={() => setShowModal(false)}
+            loading={saving}
+            projects={projects}
+            showProjectSelector
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm
+            entry={deleting}
+            onConfirm={handleDelete}
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Section divider + heading */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium px-2">Consolidated View</span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+        <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
+          Global{" "}
+          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+            Balance Sheet
+          </span>
+        </h2>
+        <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
+          Auto-generated from all posted journal entries across every project. Post new entries to update the balance sheet.
+        </p>
+      </motion.div>
+
+      {/* Stat cards */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {ENTRY_TYPES.map((type) => {
+          const s        = TYPE_STYLE[type];
+          const isActive = filterType === type;
+          return (
+            <button key={type}
+              onClick={() => setFilterType(isActive ? "All" : type)}
+              className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 ${
+                isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
+              }`}
+            >
+              <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{type}s</div>
+              <div className="text-3xl font-bold text-foreground tabular-nums">{fmt(totals[type] ?? 0)}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {entries.filter((e) => e.entry_type === type).length} entries
+              </div>
+            </button>
+          );
+        })}
+        <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
+          isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
+        }`}>
+          <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
+          <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
+            {isBalanced ? "Balanced" : "Unbalanced"}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {isBalanced ? "Equation checks out" : `Δ ${fmt(Math.abs(totalAssets - (totalLiabilities + totalEquity)))}`}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Main card */}
+      <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <CardTitle className="text-3xl font-bold">All Posted Entries</CardTitle>
+            {canEdit && (
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
+                style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Post Entry
+              </button>
+            )}
+          </div>
+
+          {/* Toolbar */}
+          <div className="flex flex-col sm:flex-row gap-3 mt-5">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by account name or reference…"
+                className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
+            </div>
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value as EntryType | "All")}
+              className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
+              <option value="All">All Types</option>
+              {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
+            </select>
+            <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+              {filtered.length} / {entries.length} shown
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {fetching ? (
+            <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+              <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+              Loading global balance sheet…
+            </div>
+          ) : Object.keys(grouped).length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+              <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path d="M3 6h18M3 12h18M3 18h18"/>
+              </svg>
+              <p className="text-sm">No entries posted yet.</p>
+              {canEdit && (
+                <button onClick={() => setShowModal(true)} className="text-xs text-primary hover:underline">
+                  Post first entry
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-white/8">
+              {ENTRY_TYPES.filter((t) => grouped[t]).map((entryType) => {
+                const s        = TYPE_STYLE[entryType];
+                const isOpen   = expanded[entryType];
+                const rows     = grouped[entryType]!;
+                const subtotal = rows.reduce((sum, e) => sum + Number(e.amount), 0);
+
+                return (
+                  <div key={entryType}>
+                    <button
+                      onClick={() => setExpanded((p) => ({ ...p, [entryType]: !p[entryType] }))}
+                      className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                        <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{entryType}s</span>
+                        <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
+                        <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path d="m6 9 6 6 6-6"/>
+                        </svg>
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div key="rows"
+                          initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
+                                  {["Ref", "Account Name", "Sub-type", "Description", "Date", "Project", "Amount", ...(canEdit ? ["Actions"] : [])].map((h) => (
+                                    <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((entry, ri) => {
+                                  const subType =
+                                    entry.entry_type === "Asset"     ? entry.asset_type     :
+                                    entry.entry_type === "Liability" ? entry.liability_type :
+                                    entry.equity_type;
+                                  return (
+                                    <motion.tr key={entry.id}
+                                      initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: ri * 0.02, duration: 0.16 }}
+                                      className={`border-b border-white/5 transition-colors ${s.row}`}>
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
+                                      </td>
+                                      <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
+                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
+                                      <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
+                                        <span className="line-clamp-1">{entry.description || "—"}</span>
+                                      </td>
+                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
+                                      <td className="px-5 py-3.5 whitespace-nowrap">{projectLabel(entry.project_id)}</td>
+                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                        <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(entry.amount)}</span>
+                                      </td>
+                                      {canEdit && (
+                                        <td className="px-5 py-3.5 whitespace-nowrap">
+                                          {/* Delete (reverse) only — no edit button */}
+                                          <button onClick={() => setDeleting(entry)} title="Reverse entry"
+                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                              <polyline points="3 6 5 6 21 6"/>
+                                              <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                            </svg>
+                                          </button>
+                                        </td>
+                                      )}
+                                    </motion.tr>
+                                  );
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+                                  <td colSpan={subtotalColSpan}
+                                    className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Total {entryType}s
+                                  </td>
+                                  <td className={`px-5 py-2.5 text-sm font-bold tabular-nums ${s.accent}`}>{fmt(subtotal)}</td>
+                                  {canEdit && <td />}
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+
+              {entries.length > 0 && (
+                <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
+                  <span className="text-muted-foreground">Accounting Equation:</span>
+                  <span className="text-emerald-400">Assets {fmt(totalAssets)}</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className="text-rose-400">Liabilities {fmt(totalLiabilities)}</span>
+                  <span className="text-muted-foreground">+</span>
+                  <span className="text-violet-400">Equity {fmt(totalEquity)}</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className={isBalanced ? "text-emerald-400" : "text-rose-400"}>{fmt(totalLiabilities + totalEquity)}</span>
+                  <Badge className={`ml-auto ${isBalanced
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                    : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
+                    {isBalanced ? "✓ Balanced" : "⚠ Unbalanced"}
+                  </Badge>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!fetching && entries.length > 0 && (
+            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+              <span className="tabular-nums">{entries.length} total entries across all projects</span>
+              <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Refresh
+              </button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -496,7 +994,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 
       <div className="container mx-auto px-4 py-16">
 
-        {/* Hero — exact same as ChartOfAccountsPage */}
+        {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-12 text-center">
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Finance Module</p>
           <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
@@ -510,13 +1008,13 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </p>
         </motion.div>
 
-        {/* Summary stat cards — same pattern as ChartOfAccountsPage category cards */}
+        {/* Summary stat cards */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects",       value: projects.length,                                               sub: "in system"       },
-            { label: "Projects with Entries", value: Object.keys(entryCounts).length,                              sub: "have BS records"  },
-            { label: "Total BS Entries",      value: Object.values(entryCounts).reduce((a, b) => a + b, 0),        sub: "across all projects" },
+            { label: "Total Projects",        value: projects.length,                                         sub: "in system"           },
+            { label: "Projects with Entries",  value: Object.keys(entryCounts).length,                        sub: "have BS records"     },
+            { label: "Total BS Entries",       value: Object.values(entryCounts).reduce((a, b) => a + b, 0),  sub: "across all projects" },
           ].map((card) => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{card.label}</div>
@@ -526,12 +1024,10 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           ))}
         </motion.div>
 
-        {/* Projects table card — same Card structure as ChartOfAccountsPage */}
-        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        {/* Projects card */}
+        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-16">
           <CardHeader className="pb-4">
             <CardTitle className="text-3xl font-bold">Projects</CardTitle>
-
-            {/* Toolbar */}
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -578,7 +1074,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               </div>
             )}
 
-            {/* Footer */}
             {!fetching && projects.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">
@@ -588,12 +1083,18 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             )}
           </CardContent>
         </Card>
+
+        {/* Global balance sheet — below projects grid */}
+        {!fetching && (
+          <GlobalBalanceSheetView canEdit={true} projects={projects} />
+        )}
+
       </div>
     </div>
   );
 }
 
-// ─── ENTRIES VIEW ─────────────────────────────────────────────────────────────
+// ─── ENTRIES VIEW (per-project) ───────────────────────────────────────────────
 
 function EntriesView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
@@ -605,10 +1106,9 @@ function EntriesView({ project, canEdit, onBack }: {
   const [expanded,   setExpanded]   = useState<Record<string, boolean>>(
     Object.fromEntries(ENTRY_TYPES.map((t) => [t, true]))
   );
-  const [modal,    setModal]    = useState<null | "create" | "edit">(null);
-  const [editing,  setEditing]  = useState<BalanceSheetEntry | null>(null);
-  const [deleting, setDeleting] = useState<BalanceSheetEntry | null>(null);
-  const [saving,   setSaving]   = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [deleting,  setDeleting]  = useState<BalanceSheetEntry | null>(null);
+  const [saving,    setSaving]    = useState(false);
 
   const { toasts, push } = useToast();
 
@@ -630,23 +1130,10 @@ function EntriesView({ project, canEdit, onBack }: {
     try {
       const row = await api.create({ ...form, project_id: project.id });
       setEntries((p) => [...p, row]);
-      push("Entry added successfully.");
-      setModal(null);
+      push("Entry posted successfully.");
+      setShowModal(false);
     } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to add entry.", "error");
-    } finally { setSaving(false); }
-  };
-
-  const handleUpdate = async (form: BSFormData) => {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      const row = await api.update(editing.id, form);
-      setEntries((p) => p.map((e) => (e.id === editing.id ? row : e)));
-      push("Entry updated successfully.");
-      setModal(null); setEditing(null);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to update entry.", "error");
+      push(err instanceof Error ? err.message : "Failed to post entry.", "error");
     } finally { setSaving(false); }
   };
 
@@ -656,10 +1143,10 @@ function EntriesView({ project, canEdit, onBack }: {
     try {
       await api.remove(deleting.id);
       setEntries((p) => p.filter((e) => e.id !== deleting.id));
-      push("Entry deleted.");
+      push("Entry reversed.");
       setDeleting(null);
     } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to delete entry.", "error");
+      push(err instanceof Error ? err.message : "Failed to reverse entry.", "error");
     } finally { setSaving(false); }
   };
 
@@ -722,17 +1209,21 @@ function EntriesView({ project, canEdit, onBack }: {
 
       {/* Modals */}
       <AnimatePresence>
-        {modal === "create" && (
-          <EntryModal initial={makeEmptyForm(project.id)} onSave={handleCreate}
-            onClose={() => setModal(null)} loading={saving} />
-        )}
-        {modal === "edit" && editing && (
-          <EntryModal initial={{ ...editing }} onSave={handleUpdate}
-            onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+        {showModal && (
+          <PostEntryModal
+            initial={makeEmptyForm(project.id)}
+            onSave={handleCreate}
+            onClose={() => setShowModal(false)}
+            loading={saving}
+          />
         )}
         {deleting && (
-          <DeleteConfirm entry={deleting} onConfirm={handleDelete}
-            onClose={() => setDeleting(null)} loading={saving} />
+          <DeleteConfirm
+            entry={deleting}
+            onConfirm={handleDelete}
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
         )}
       </AnimatePresence>
 
@@ -740,8 +1231,6 @@ function EntriesView({ project, canEdit, onBack }: {
 
         {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-10">
-
-          {/* Back button */}
           <button onClick={onBack}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
             <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -774,7 +1263,7 @@ function EntriesView({ project, canEdit, onBack }: {
           </div>
         </motion.div>
 
-        {/* Stat cards — same pattern as ChartOfAccountsPage */}
+        {/* Stat cards */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {ENTRY_TYPES.map((type) => {
@@ -795,11 +1284,8 @@ function EntriesView({ project, canEdit, onBack }: {
               </button>
             );
           })}
-          {/* Balanced / Unbalanced card */}
           <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
-            isBalanced
-              ? "bg-emerald-500/5 border-emerald-500/20"
-              : "bg-rose-500/5 border-rose-500/20"
+            isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
           }`}>
             <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
             <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
@@ -811,21 +1297,26 @@ function EntriesView({ project, canEdit, onBack }: {
           </div>
         </motion.div>
 
-        {/* Main card — exact same Card structure as ChartOfAccountsPage */}
+        {/* Main entries card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <CardTitle className="text-3xl font-bold">Balance Sheet Entries</CardTitle>
+              <div>
+                <CardTitle className="text-3xl font-bold">Posted Entries</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Balance sheet is auto-generated from posted journal entries. To adjust, post a new correcting entry.
+                </p>
+              </div>
               {canEdit && (
                 <button
-                  onClick={() => setModal("create")}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
+                  onClick={() => setShowModal(true)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg flex-shrink-0"
                   style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>
-                  New Entry
+                  Post Entry
                 </button>
               )}
             </div>
@@ -862,10 +1353,10 @@ function EntriesView({ project, canEdit, onBack }: {
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M3 6h18M3 12h18M3 18h18"/>
                 </svg>
-                <p className="text-sm">No entries yet for this project.</p>
+                <p className="text-sm">No entries posted yet for this project.</p>
                 {canEdit && (
-                  <button onClick={() => setModal("create")} className="text-xs text-primary hover:underline">
-                    Add first entry
+                  <button onClick={() => setShowModal(true)} className="text-xs text-primary hover:underline">
+                    Post first entry
                   </button>
                 )}
               </div>
@@ -880,7 +1371,6 @@ function EntriesView({ project, canEdit, onBack }: {
 
                   return (
                     <div key={entryType}>
-                      {/* Group toggle — exact same as ChartOfAccountsPage */}
                       <button
                         onClick={() => setExpanded((p) => ({ ...p, [entryType]: !p[entryType] }))}
                         className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
@@ -888,39 +1378,28 @@ function EntriesView({ project, canEdit, onBack }: {
                         <div className="flex items-center gap-3">
                           <span className={`w-2 h-2 rounded-full ${s.dot}`} />
                           <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{entryType}s</span>
-                          <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>
-                            {rows.length}
-                          </Badge>
+                          <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
                         </div>
                         <div className="flex items-center gap-4">
                           <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
-                          <svg
-                            className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
-                          >
+                          <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                             <path d="m6 9 6 6 6-6"/>
                           </svg>
                         </div>
                       </button>
 
-                      {/* Rows — exact same AnimatePresence pattern */}
                       <AnimatePresence initial={false}>
                         {isOpen && (
                           <motion.div key="rows"
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.22 }}
-                            style={{ overflow: "hidden" }}
-                          >
+                            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                                     {["Ref", "Account Name", "Sub-type", "Description", "Date", "Amount", ...(canEdit ? ["Actions"] : [])].map((h) => (
-                                      <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
-                                        {h}
-                                      </th>
+                                      <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -932,60 +1411,37 @@ function EntriesView({ project, canEdit, onBack }: {
                                       entry.equity_type;
                                     return (
                                       <motion.tr key={entry.id}
-                                        initial={{ opacity: 0, x: -6 }}
-                                        animate={{ opacity: 1, x: 0 }}
+                                        initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                                         transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                        className={`border-b border-white/5 transition-colors ${s.row}`}
-                                      >
+                                        className={`border-b border-white/5 transition-colors ${s.row}`}>
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
                                         </td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
-                                          {entry.account_name}
-                                        </td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">
-                                          {subType || "—"}
-                                        </td>
+                                        <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
+                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
                                         <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
                                           <span className="line-clamp-1">{entry.description || "—"}</span>
                                         </td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">
-                                          {fmtDate(entry.entry_date)}
-                                        </td>
+                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(entry.amount)}</span>
                                         </td>
                                         {canEdit && (
                                           <td className="px-5 py-3.5 whitespace-nowrap">
-                                            <div className="flex items-center gap-1.5">
-                                              <button
-                                                onClick={() => { setEditing(entry); setModal("edit"); }}
-                                                title="Edit"
-                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all"
-                                              >
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                                </svg>
-                                              </button>
-                                              <button
-                                                onClick={() => setDeleting(entry)}
-                                                title="Delete"
-                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                              >
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                                  <polyline points="3 6 5 6 21 6"/>
-                                                  <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                                                </svg>
-                                              </button>
-                                            </div>
+                                            {/* Reverse (delete) only — no edit */}
+                                            <button onClick={() => setDeleting(entry)} title="Reverse entry"
+                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                                <polyline points="3 6 5 6 21 6"/>
+                                                <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                              </svg>
+                                            </button>
                                           </td>
                                         )}
                                       </motion.tr>
                                     );
                                   })}
                                 </tbody>
-                                {/* Sub-total footer row */}
                                 <tfoot>
                                   <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
                                     <td colSpan={canEdit ? 5 : 4}
@@ -1005,7 +1461,6 @@ function EntriesView({ project, canEdit, onBack }: {
                   );
                 })}
 
-                {/* Accounting equation summary bar */}
                 {entries.length > 0 && (
                   <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
                     <span className="text-muted-foreground">Accounting Equation:</span>
@@ -1026,7 +1481,6 @@ function EntriesView({ project, canEdit, onBack }: {
               </div>
             )}
 
-            {/* Footer — exact same as ChartOfAccountsPage */}
             {!fetching && entries.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">{entries.length} total entries</span>
@@ -1058,8 +1512,7 @@ export default function BalanceSheetPage({ projectId, canEdit = true }: Props) {
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
       .eq("id", projectId)
       .single()
-      .then(({ data }) => { if (data) setSelectedProject(data as Project); })
-      .catch(console.error);
+      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
   }, [projectId]);
 
   return (

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,33 +28,26 @@ type RateType = "Per Hour" | "Per Week" | "Per Month";
 
 interface PayrollEntry {
   id: number;
-  project_id: string;
+  project_id: string | null;
   job_id: string;
   employee_name: string;
   rate: number;
   rate_type: RateType;
   time_worked: string;
   gross_pay: number;
-  // NSSF
   nssf_tier1: number;
   nssf_tier2: number;
   nssf_total: number;
-  // SHIF (formerly NHIF)
   shif: number;
-  // Affordable Housing Levy
   housing_levy: number;
-  // Pension / OOPRS
   pension: number;
-  // PAYE
   taxable_income: number;
   paye_gross_tax: number;
   personal_relief: number;
   insurance_relief: number;
   paye_net: number;
-  // Totals
   total_deductions: number;
   net_pay: number;
-  // Payment metadata
   due_date: string | null;
   paid_date: string | null;
   payment_status: PaymentStatus;
@@ -93,7 +86,7 @@ const PROJECT_STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
-const makeEmptyForm = (projectId: string): PayrollFormData => ({
+const makeEmptyForm = (projectId: string | null = null): PayrollFormData => ({
   project_id: projectId,
   job_id: "",
   employee_name: "",
@@ -124,177 +117,82 @@ const makeEmptyForm = (projectId: string): PayrollFormData => ({
 });
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-/** Null/NaN-safe currency formatter — always returns a valid KES string */
 const fmt = (n: number | null | undefined) => {
   const safe = typeof n === "number" && isFinite(n) ? n : 0;
   return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: CURRENCY,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    style: "currency", currency: CURRENCY,
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(safe);
 };
 
-/** Null/NaN-safe number coercion — converts null/undefined/NaN → 0 */
 const n0 = (v: number | null | undefined): number =>
   typeof v === "number" && isFinite(v) ? v : 0;
 
-/**
- * Sanitize a PayrollEntry coming from the database.
- * If the statutory columns are null/0 but gross_pay exists
- * (row pre-dates the migration or back-fill hasn't run yet),
- * recompute them client-side so nothing renders as NaN.
- */
 function sanitizeEntry(raw: PayrollEntry): PayrollEntry {
   const gross = n0(raw.gross_pay);
-
-  // If the DB already has proper values, keep them.
   const hasCalc = n0(raw.nssf_total) > 0 || n0(raw.net_pay) > 0 || gross === 0;
   if (hasCalc) {
-    // Still coerce every numeric field to 0 if null, just in case.
     return {
       ...raw,
-      gross_pay:        gross,
-      nssf_tier1:       n0(raw.nssf_tier1),
-      nssf_tier2:       n0(raw.nssf_tier2),
-      nssf_total:       n0(raw.nssf_total),
-      shif:             n0(raw.shif),
-      housing_levy:     n0(raw.housing_levy),
-      pension:          n0(raw.pension),
-      taxable_income:   n0(raw.taxable_income),
-      paye_gross_tax:   n0(raw.paye_gross_tax),
-      personal_relief:  n0(raw.personal_relief) || 2400,
-      insurance_relief: n0(raw.insurance_relief),
-      paye_net:         n0(raw.paye_net),
-      total_deductions: n0(raw.total_deductions),
-      net_pay:          n0(raw.net_pay),
-      rate:             n0(raw.rate),
+      gross_pay: gross,
+      nssf_tier1: n0(raw.nssf_tier1), nssf_tier2: n0(raw.nssf_tier2),
+      nssf_total: n0(raw.nssf_total), shif: n0(raw.shif),
+      housing_levy: n0(raw.housing_levy), pension: n0(raw.pension),
+      taxable_income: n0(raw.taxable_income), paye_gross_tax: n0(raw.paye_gross_tax),
+      personal_relief: n0(raw.personal_relief) || 2400,
+      insurance_relief: n0(raw.insurance_relief), paye_net: n0(raw.paye_net),
+      total_deductions: n0(raw.total_deductions), net_pay: n0(raw.net_pay),
+      rate: n0(raw.rate),
     };
   }
-
-  // Recompute from gross_pay using the same Kenya calculator.
   const pension = n0(raw.pension);
   const insurancePremium = n0(raw.insurance_relief);
   const calc = calculateKenyaPayroll(gross, pension, insurancePremium);
-
-  return {
-    ...raw,
-    gross_pay:        gross,
-    nssf_tier1:       calc.nssf_tier1,
-    nssf_tier2:       calc.nssf_tier2,
-    nssf_total:       calc.nssf_total,
-    shif:             calc.shif,
-    housing_levy:     calc.housing_levy,
-    pension:          pension,
-    taxable_income:   calc.taxable_income,
-    paye_gross_tax:   calc.paye_gross_tax,
-    personal_relief:  calc.personal_relief,
-    insurance_relief: calc.insurance_relief,
-    paye_net:         calc.paye_net,
-    total_deductions: calc.total_deductions,
-    net_pay:          calc.net_pay,
-    rate:             n0(raw.rate),
-  };
+  return { ...raw, gross_pay: gross, ...calc, pension, rate: n0(raw.rate) };
 }
 
-const fmtC = (n: number | null | undefined) => { const safe = (typeof n === "number" && isFinite(n)) ? n : 0; return new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(safe); };
+const fmtC = (n: number | null | undefined) => {
+  const safe = (typeof n === "number" && isFinite(n)) ? n : 0;
+  return new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(safe);
+};
 
 const fmtDate = (d: string | null) =>
-  d
-    ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : "—";
+  d ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
+    day: "2-digit", month: "short", year: "numeric",
+  }) : "—";
+
+const fmtDateTime = (d: string | null | undefined) =>
+  d ? new Date(d).toLocaleDateString("en-KE", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  }) : "—";
 
 // ─── KENYA STATUTORY PAYROLL CALCULATOR ──────────────────────────────────────
-/**
- * Strict Kenya Payroll Calculator – 2026 Rates
- *
- * Statutory deductions applied IN ORDER (each reduces taxable base for PAYE):
- *  1. NSSF          – Tier I: 6% of lower of gross/KES 9,000 (max KES 540)
- *                     Tier II: 6% of (gross − 9,000) capped at KES 99,000 band (max KES 5,940)
- *  2. SHIF          – 2.75% of gross, minimum KES 300
- *  3. AHL           – 1.5% of gross (Affordable Housing Levy)
- *  4. Pension       – Employee voluntary contribution, max KES 30,000 p.m. (tax deductible)
- *
- * PAYE Taxable Income = gross − NSSF − SHIF − AHL − pension
- *
- * PAYE Tax Bands (monthly):
- *  First  KES 24,000            @ 10%
- *  Next   KES 8,333             @ 25%
- *  Next   KES 467,667           @ 30%
- *  Next   KES 300,000           @ 32.5%
- *  Above  KES 800,000           @ 35%
- *
- * PAYE Reliefs:
- *  Personal Relief              KES 2,400 p.m. (fixed)
- *  Insurance Relief             15% of premium paid, max KES 5,000 p.m.
- *
- * PAYE Net = max(PAYE Gross Tax − personal relief − insurance relief, 0)
- *
- * Total Deductions = NSSF + SHIF + AHL + Pension + PAYE Net
- * Net Pay          = Gross − Total Deductions
- */
 interface KenyaPayrollResult {
-  nssf_tier1: number;
-  nssf_tier2: number;
-  nssf_total: number;
-  shif: number;
-  housing_levy: number;
-  taxable_income: number;
-  paye_gross_tax: number;
-  personal_relief: number;
-  insurance_relief: number;
-  paye_net: number;
-  total_deductions: number;
-  net_pay: number;
+  nssf_tier1: number; nssf_tier2: number; nssf_total: number;
+  shif: number; housing_levy: number; taxable_income: number;
+  paye_gross_tax: number; personal_relief: number; insurance_relief: number;
+  paye_net: number; total_deductions: number; net_pay: number;
   effective_tax_rate: number;
 }
 
 function calculateKenyaPayroll(
-  grossPay: number,
-  pensionContrib: number = 0,
-  insurancePremium: number = 0
+  grossPay: number, pensionContrib = 0, insurancePremium = 0
 ): KenyaPayrollResult {
   const gross = Math.max(grossPay, 0);
-
-  // ── 1. NSSF ──────────────────────────────────────────────────────────────
-  const nssfTier1 = +(Math.min(gross, 9_000) * 0.06).toFixed(2);           // max 540
-  const nssfTier2 = gross > 9_000
-    ? +(Math.min(gross - 9_000, 99_000) * 0.06).toFixed(2)                  // max 5,940
-    : 0;
+  const nssfTier1 = +(Math.min(gross, 9_000) * 0.06).toFixed(2);
+  const nssfTier2 = gross > 9_000 ? +(Math.min(gross - 9_000, 99_000) * 0.06).toFixed(2) : 0;
   const nssfTotal = +(nssfTier1 + nssfTier2).toFixed(2);
-
-  // ── 2. SHIF (Social Health Insurance Fund) ───────────────────────────────
   const shif = +Math.max(gross * 0.0275, 300).toFixed(2);
-
-  // ── 3. Affordable Housing Levy ───────────────────────────────────────────
   const housingLevy = +(gross * 0.015).toFixed(2);
-
-  // ── 4. Pension (employer-deducted, capped at KES 30,000 tax-deductible) ──
   const pension = +Math.min(Math.max(pensionContrib, 0), 30_000).toFixed(2);
-
-  // ── 5. PAYE Taxable Income ────────────────────────────────────────────────
-  const taxableIncome = +Math.max(
-    gross - nssfTotal - shif - housingLevy - pension,
-    0
-  ).toFixed(2);
-
-  // ── 6. PAYE Gross Tax (tax bands) ────────────────────────────────────────
+  const taxableIncome = +Math.max(gross - nssfTotal - shif - housingLevy - pension, 0).toFixed(2);
   let payeGrossTax = 0;
   let rem = taxableIncome;
-
   const bands = [
-    { limit: 24_000,  rate: 0.10 },
-    { limit: 8_333,   rate: 0.25 },
-    { limit: 467_667, rate: 0.30 },
-    { limit: 300_000, rate: 0.325 },
+    { limit: 24_000, rate: 0.10 }, { limit: 8_333, rate: 0.25 },
+    { limit: 467_667, rate: 0.30 }, { limit: 300_000, rate: 0.325 },
     { limit: Infinity, rate: 0.35 },
   ];
-
   for (const band of bands) {
     if (rem <= 0) break;
     const taxable = band.limit === Infinity ? rem : Math.min(rem, band.limit);
@@ -302,58 +200,34 @@ function calculateKenyaPayroll(
     rem -= taxable;
   }
   payeGrossTax = +payeGrossTax.toFixed(2);
-
-  // ── 7. PAYE Reliefs ───────────────────────────────────────────────────────
   const personalRelief = 2_400;
-  // Insurance relief = 15% of annual premium / 12, capped at KES 5,000 p.m.
   const insuranceRelief = +Math.min(insurancePremium * 0.15, 5_000).toFixed(2);
-
-  // ── 8. PAYE Net ───────────────────────────────────────────────────────────
   const payeNet = +Math.max(payeGrossTax - personalRelief - insuranceRelief, 0).toFixed(2);
-
-  // ── 9. Totals ─────────────────────────────────────────────────────────────
   const totalDeductions = +(nssfTotal + shif + housingLevy + pension + payeNet).toFixed(2);
   const netPay = +(gross - totalDeductions).toFixed(2);
   const effectiveTaxRate = gross > 0 ? +((totalDeductions / gross) * 100).toFixed(1) : 0;
-
   return {
-    nssf_tier1:       nssfTier1,
-    nssf_tier2:       nssfTier2,
-    nssf_total:       nssfTotal,
-    shif,
-    housing_levy:     housingLevy,
-    taxable_income:   taxableIncome,
-    paye_gross_tax:   payeGrossTax,
-    personal_relief:  personalRelief,
-    insurance_relief: insuranceRelief,
-    paye_net:         payeNet,
-    total_deductions: totalDeductions,
-    net_pay:          netPay,
+    nssf_tier1: nssfTier1, nssf_tier2: nssfTier2, nssf_total: nssfTotal,
+    shif, housing_levy: housingLevy, taxable_income: taxableIncome,
+    paye_gross_tax: payeGrossTax, personal_relief: personalRelief,
+    insurance_relief: insuranceRelief, paye_net: payeNet,
+    total_deductions: totalDeductions, net_pay: netPay,
     effective_tax_rate: effectiveTaxRate,
   };
 }
 
-/** Parse time_worked string into numeric units for gross calc */
 function parseTimeWorked(timeStr: string, rateType: RateType): number {
   const lower = timeStr.toLowerCase().trim();
   if (!lower) return 0;
   const match = lower.match(/([\d.]+)/);
-  const val = match ? parseFloat(match[1]) : 1;
-  switch (rateType) {
-    case "Per Hour":  return val;
-    case "Per Week":  return val;
-    case "Per Month": return val;
-    default:          return val;
-  }
+  return match ? parseFloat(match[1]) : 1;
 }
 
 function computeGrossFromRate(rate: number, rateType: RateType, timeWorked: string): number {
   const units = parseTimeWorked(timeWorked, rateType);
-  // All rate types multiply directly (rate × units = gross)
   return +(rate * units).toFixed(2);
 }
 
-/** Strip server-managed columns before upsert */
 function toWritable(form: PayrollFormData): PayrollFormData {
   const {
     project_id, job_id, employee_name, rate, rate_type, time_worked,
@@ -376,9 +250,7 @@ const api = {
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
-      .select(
-        "id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at"
-      )
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as Project[];
@@ -392,6 +264,23 @@ const api = {
     if (error) throw new Error(error.message);
     return ((data ?? []) as PayrollEntry[]).map(sanitizeEntry);
   },
+  async listAll(): Promise<PayrollEntry[]> {
+    const { data, error } = await supabase
+      .from("payroll_checklist")
+      .select("*")
+      .order("due_date", { ascending: false });
+    if (error) throw new Error(error.message);
+    return ((data ?? []) as PayrollEntry[]).map(sanitizeEntry);
+  },
+  async workerNames(projectId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from("payroll_checklist")
+      .select("employee_name")
+      .eq("project_id", projectId);
+    if (error) return [];
+    const names = [...new Set((data ?? []).map((r: any) => r.employee_name as string).filter(Boolean))];
+    return names.sort();
+  },
   async create(form: PayrollFormData): Promise<PayrollEntry> {
     const { data, error } = await supabase
       .from("payroll_checklist")
@@ -404,7 +293,7 @@ const api = {
   async update(id: number, form: PayrollFormData): Promise<PayrollEntry> {
     const { data, error } = await supabase
       .from("payroll_checklist")
-      .update(toWritable(form))
+      .update({ ...toWritable(form), updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .single();
@@ -419,171 +308,160 @@ const api = {
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function useToast() {
-  const [toasts, setToasts] = useState<
-    { id: number; msg: string; type: "success" | "error" }[]
-  >([]);
-  const push = useCallback(
-    (msg: string, type: "success" | "error" = "success") => {
-      const id = Date.now();
-      setToasts((p) => [...p, { id, msg, type }]);
-      setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
-    },
-    []
-  );
+  const [toasts, setToasts] = useState<{ id: number; msg: string; type: "success" | "error" }[]>([]);
+  const push = useCallback((msg: string, type: "success" | "error" = "success") => {
+    const id = Date.now();
+    setToasts((p) => [...p, { id, msg, type }]);
+    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
+  }, []);
   return { toasts, push };
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
+
+// Base input class — shared by text inputs, textareas
 const inputCls =
   "w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all";
 
-function Field({
-  label,
-  children,
-  className = "",
-  hint,
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-  hint?: string;
+// Select class — uses a solid dark background so the browser chrome renders correctly
+// `color-scheme: dark` ensures native <option> elements also appear dark
+const selectCls =
+  "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all appearance-none pr-9 " +
+  "bg-[#111318] border-white/10 [color-scheme:dark]";
+
+// Chevron SVG used as the dropdown arrow overlay
+const SelectChevron = () => (
+  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  </span>
+);
+
+function Field({ label, children, className = "", hint }: {
+  label: string; children: React.ReactNode; className?: string; hint?: string;
 }) {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em]">
-        {label}
-      </label>
+      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em]">{label}</label>
       {children}
-      {hint && (
-        <span className="text-[9px] text-muted-foreground/60 leading-tight">{hint}</span>
-      )}
+      {hint && <span className="text-[9px] text-muted-foreground/60 leading-tight">{hint}</span>}
     </div>
   );
 }
 
-function SectionLabel({
-  label,
-  dotColor,
-  textColor,
-  sub,
-}: {
-  label: string;
-  dotColor: string;
-  textColor: string;
-  sub?: string;
+function SectionLabel({ label, dotColor, textColor, sub }: {
+  label: string; dotColor: string; textColor: string; sub?: string;
 }) {
   return (
     <div className="flex items-center gap-2 pt-3 pb-1">
       <span className={`w-1.5 h-5 rounded-full ${dotColor} flex-shrink-0`} />
       <div>
-        <span className={`text-[10px] font-black uppercase tracking-[0.18em] ${textColor}`}>
-          {label}
-        </span>
-        {sub && (
-          <span className="ml-2 text-[9px] text-muted-foreground/60 tracking-wide">{sub}</span>
-        )}
+        <span className={`text-[10px] font-black uppercase tracking-[0.18em] ${textColor}`}>{label}</span>
+        {sub && <span className="ml-2 text-[9px] text-muted-foreground/60 tracking-wide">{sub}</span>}
       </div>
       <div className="flex-1 h-px bg-white/8" />
     </div>
   );
 }
 
-// ─── PAYSLIP BREAKDOWN CARD ────────────────────────────────────────────────────
-function PayslipBreakdown({
-  gross,
-  computed,
-  pension,
-  currency = CURRENCY,
-}: {
-  gross: number;
-  computed: KenyaPayrollResult;
-  pension: number;
-  currency?: string;
+// ─── EMPLOYEE NAME AUTOCOMPLETE ───────────────────────────────────────────────
+function EmployeeNameInput({ value, onChange, suggestions }: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const filtered = useMemo(() =>
+    suggestions.filter((s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value),
+    [suggestions, value]
+  );
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <input
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Full Name"
+        className={inputCls}
+        autoComplete="off"
+      />
+      <AnimatePresence>
+        {open && filtered.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
+            className="absolute z-50 top-full left-0 right-0 mt-1 rounded-xl border border-white/15 bg-[#0d0d0d]/95 backdrop-blur-xl shadow-2xl overflow-hidden"
+          >
+            {filtered.map((name) => (
+              <button
+                key={name}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onChange(name); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-white/8 transition-colors flex items-center gap-2 text-foreground"
+              >
+                <span className="w-5 h-5 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0">
+                  {name.charAt(0).toUpperCase()}
+                </span>
+                {name}
+              </button>
+            ))}
+            <div className="px-3 py-1.5 border-t border-white/8 text-[9px] text-muted-foreground/50">
+              Workers registered under this project
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── PAYSLIP BREAKDOWN CARD ───────────────────────────────────────────────────
+function PayslipBreakdown({ gross, computed, pension }: {
+  gross: number; computed: KenyaPayrollResult; pension: number;
 }) {
   const deductionItems = [
-    {
-      label: "NSSF Tier I",
-      sublabel: `6% of min(gross, KES 9,000)`,
-      value: computed.nssf_tier1,
-      color: "bg-blue-400",
-      textColor: "text-blue-300",
-    },
-    {
-      label: "NSSF Tier II",
-      sublabel: `6% of (gross − 9,000) up to KES 99,000`,
-      value: computed.nssf_tier2,
-      color: "bg-blue-500",
-      textColor: "text-blue-300",
-    },
-    {
-      label: "SHIF",
-      sublabel: `2.75% gross (min KES 300)`,
-      value: computed.shif,
-      color: "bg-purple-500",
-      textColor: "text-purple-300",
-    },
-    {
-      label: "Housing Levy (AHL)",
-      sublabel: `1.5% of gross`,
-      value: computed.housing_levy,
-      color: "bg-amber-500",
-      textColor: "text-amber-300",
-    },
-    {
-      label: "Pension",
-      sublabel: `Employee contrib. (max KES 30,000)`,
-      value: pension,
-      color: "bg-sky-500",
-      textColor: "text-sky-300",
-    },
-    {
-      label: "PAYE (Net)",
-      sublabel: `After personal + insurance relief`,
-      value: computed.paye_net,
-      color: "bg-rose-500",
-      textColor: "text-rose-300",
-    },
+    { label: "NSSF Tier I",        sublabel: "6% of min(gross, KES 9,000)",            value: computed.nssf_tier1,   color: "bg-blue-400",   textColor: "text-blue-300"   },
+    { label: "NSSF Tier II",       sublabel: "6% of (gross − 9,000) up to KES 99,000", value: computed.nssf_tier2,   color: "bg-blue-500",   textColor: "text-blue-300"   },
+    { label: "SHIF",               sublabel: "2.75% gross (min KES 300)",               value: computed.shif,         color: "bg-purple-500", textColor: "text-purple-300" },
+    { label: "Housing Levy (AHL)", sublabel: "1.5% of gross",                           value: computed.housing_levy, color: "bg-amber-500",  textColor: "text-amber-300"  },
+    { label: "Pension",            sublabel: "Employee contrib. (max KES 30,000)",      value: pension,               color: "bg-sky-500",    textColor: "text-sky-300"    },
+    { label: "PAYE (Net)",         sublabel: "After personal + insurance relief",       value: computed.paye_net,     color: "bg-rose-500",   textColor: "text-rose-300"   },
   ];
 
   return (
     <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
-      {/* Gross Header */}
       <div className="px-5 pt-5 pb-4 border-b border-white/8">
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Gross Pay
-            </p>
-            <p className="text-3xl font-black tabular-nums tracking-tighter text-foreground mt-0.5">
-              {fmt(gross)}
-            </p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Gross Pay</p>
+            <p className="text-3xl font-black tabular-nums tracking-tighter text-foreground mt-0.5">{fmt(gross)}</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Effective rate</p>
-            <p className="text-lg font-bold text-rose-400 tabular-nums">
-              {computed.effective_tax_rate}%
-            </p>
+            <p className="text-lg font-bold text-rose-400 tabular-nums">{computed.effective_tax_rate}%</p>
           </div>
         </div>
-        {/* Gross → Net visual bar */}
         <div className="mt-3 h-2 bg-white/10 rounded-full overflow-hidden flex">
-          <div
-            className="h-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all duration-500"
-            style={{ width: `${gross > 0 ? (computed.total_deductions / gross) * 100 : 0}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all duration-500"
+            style={{ width: `${gross > 0 ? (computed.total_deductions / gross) * 100 : 0}%` }} />
           <div className="h-full bg-emerald-500 flex-1 transition-all duration-500" />
         </div>
         <div className="flex justify-between mt-1">
-          <span className="text-[9px] text-rose-400">
-            Deductions {fmt(computed.total_deductions)}
-          </span>
-          <span className="text-[9px] text-emerald-400">
-            Net {fmt(computed.net_pay)}
-          </span>
+          <span className="text-[9px] text-rose-400">Deductions {fmt(computed.total_deductions)}</span>
+          <span className="text-[9px] text-emerald-400">Net {fmt(computed.net_pay)}</span>
         </div>
       </div>
-
-      {/* Deduction Rows */}
       <div className="px-5 py-3 space-y-2.5">
         {deductionItems.map((item) => (
           <div key={item.label}>
@@ -592,18 +470,12 @@ function PayslipBreakdown({
                 <span className={`w-1.5 h-1.5 rounded-full ${item.color} flex-shrink-0`} />
                 <span className="text-[11px] font-semibold text-foreground/90">{item.label}</span>
               </div>
-              <span className={`text-[11px] font-mono font-bold ${item.textColor}`}>
-                {fmt(item.value)}
-              </span>
+              <span className={`text-[11px] font-mono font-bold ${item.textColor}`}>{fmt(item.value)}</span>
             </div>
             <div className="ml-3.5 flex items-center gap-2">
               <div className="flex-1 h-1 bg-white/8 rounded-full overflow-hidden">
-                <div
-                  className={`h-full ${item.color} transition-all duration-500`}
-                  style={{
-                    width: `${gross > 0 ? Math.min((item.value / gross) * 100, 100) : 0}%`,
-                  }}
-                />
+                <div className={`h-full ${item.color} transition-all duration-500`}
+                  style={{ width: `${gross > 0 ? Math.min((item.value / gross) * 100, 100) : 0}%` }} />
               </div>
               <span className="text-[9px] text-muted-foreground/50 w-8 text-right">
                 {gross > 0 ? ((item.value / gross) * 100).toFixed(1) : 0}%
@@ -612,50 +484,26 @@ function PayslipBreakdown({
           </div>
         ))}
       </div>
-
-      {/* PAYE Breakdown Detail */}
       <div className="mx-5 mb-4 mt-1 rounded-xl bg-rose-950/30 border border-rose-500/15 px-4 py-3 space-y-1.5 text-[10px]">
         <p className="font-bold uppercase tracking-widest text-rose-400 mb-2">PAYE Detail</p>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Taxable Income</span>
-          <span className="font-mono text-foreground">{fmt(computed.taxable_income)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">PAYE Gross Tax</span>
-          <span className="font-mono text-foreground">{fmt(computed.paye_gross_tax)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Less: Personal Relief</span>
-          <span className="font-mono text-emerald-400">− {fmt(computed.personal_relief)}</span>
-        </div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Taxable Income</span><span className="font-mono text-foreground">{fmt(computed.taxable_income)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">PAYE Gross Tax</span><span className="font-mono text-foreground">{fmt(computed.paye_gross_tax)}</span></div>
+        <div className="flex justify-between"><span className="text-muted-foreground">Less: Personal Relief</span><span className="font-mono text-emerald-400">− {fmt(computed.personal_relief)}</span></div>
         {computed.insurance_relief > 0 && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Less: Insurance Relief</span>
-            <span className="font-mono text-emerald-400">
-              − {fmt(computed.insurance_relief)}
-            </span>
-          </div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Less: Insurance Relief</span><span className="font-mono text-emerald-400">− {fmt(computed.insurance_relief)}</span></div>
         )}
         <div className="border-t border-rose-500/20 pt-1.5 flex justify-between font-bold">
           <span className="text-rose-300">PAYE Net Payable</span>
           <span className="font-mono text-rose-300">{fmt(computed.paye_net)}</span>
         </div>
       </div>
-
-      {/* Net Pay Footer */}
       <div className="px-5 py-4 bg-emerald-950/30 border-t border-emerald-500/15">
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">
-              Take-home (Net Pay)
-            </p>
-            <p className="text-[9px] text-muted-foreground mt-0.5">
-              KRA / NSSF / SHIF / AHL compliant · 2026
-            </p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Take-home (Net Pay)</p>
+            <p className="text-[9px] text-muted-foreground mt-0.5">KRA / NSSF / SHIF / AHL compliant · 2026</p>
           </div>
-          <p className="text-4xl font-black tabular-nums tracking-tighter text-emerald-400">
-            {fmt(computed.net_pay)}
-          </p>
+          <p className="text-4xl font-black tabular-nums tracking-tighter text-emerald-400">{fmt(computed.net_pay)}</p>
         </div>
       </div>
     </div>
@@ -663,85 +511,65 @@ function PayslipBreakdown({
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
-function EntryModal({
-  initial,
-  onSave,
-  onClose,
-  loading,
-}: {
-  initial: PayrollFormData & { id?: number };
+function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loading }: {
+  initial: PayrollFormData & { id?: number; updated_at?: string };
+  projects?: Project[];
+  workerSuggestions?: string[];
   onSave: (d: PayrollFormData) => void;
   onClose: () => void;
   loading: boolean;
 }) {
   const [form, setForm] = useState<PayrollFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
+  const [localSuggestions, setLocalSuggestions] = useState<string[]>(workerSuggestions ?? []);
 
   const set = <K extends keyof PayrollFormData>(k: K, v: PayrollFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  // ── AUTO-CALC GROSS FROM RATE × TIME UNITS ────────────────────────────────
+  useEffect(() => {
+    if (!form.project_id || workerSuggestions) return;
+    api.workerNames(form.project_id).then(setLocalSuggestions);
+  }, [form.project_id, workerSuggestions]);
+
   useEffect(() => {
     if (form.rate <= 0) return;
     const calcGross = computeGrossFromRate(form.rate, form.rate_type, form.time_worked);
-    if (Math.abs(calcGross - form.gross_pay) > 0.005) {
-      set("gross_pay", calcGross);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (Math.abs(calcGross - form.gross_pay) > 0.005) set("gross_pay", calcGross);
   }, [form.rate, form.rate_type, form.time_worked]);
 
-  // ── LIVE KENYA STATUTORY CALC ─────────────────────────────────────────────
   const computed = useMemo(
     () => calculateKenyaPayroll(form.gross_pay, form.pension, form.insurance_relief),
     [form.gross_pay, form.pension, form.insurance_relief]
   );
 
-  // Sync computed values back into form before saving
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
-      nssf_tier1:       computed.nssf_tier1,
-      nssf_tier2:       computed.nssf_tier2,
-      nssf_total:       computed.nssf_total,
-      shif:             computed.shif,
-      housing_levy:     computed.housing_levy,
-      taxable_income:   computed.taxable_income,
-      paye_gross_tax:   computed.paye_gross_tax,
-      personal_relief:  computed.personal_relief,
-      insurance_relief: computed.insurance_relief,
-      paye_net:         computed.paye_net,
-      total_deductions: computed.total_deductions,
-      net_pay:          computed.net_pay,
+      nssf_tier1: computed.nssf_tier1, nssf_tier2: computed.nssf_tier2,
+      nssf_total: computed.nssf_total, shif: computed.shif,
+      housing_levy: computed.housing_levy, taxable_income: computed.taxable_income,
+      paye_gross_tax: computed.paye_gross_tax, personal_relief: computed.personal_relief,
+      insurance_relief: computed.insurance_relief, paye_net: computed.paye_net,
+      total_deductions: computed.total_deductions, net_pay: computed.net_pay,
     }));
   }, [computed]);
 
-  const isValid =
-    form.job_id.trim() !== "" &&
-    form.employee_name.trim() !== "" &&
-    form.gross_pay > 0;
+  const lastUpdatedDisplay = isEdit
+    ? fmtDateTime(initial.updated_at ?? new Date().toISOString())
+    : fmtDateTime(new Date().toISOString());
 
-  const timeWorkedPlaceholder =
-    form.rate_type === "Per Hour"
-      ? "e.g. 160 (hours)"
-      : form.rate_type === "Per Week"
-      ? "e.g. 4 (weeks)"
-      : "e.g. 1 (month)";
+  const isValid = form.job_id.trim() !== "" && form.employee_name.trim() !== "" && form.gross_pay > 0;
+  const timeWorkedPlaceholder = form.rate_type === "Per Hour" ? "e.g. 160 (hours)" : form.rate_type === "Per Week" ? "e.g. 4 (weeks)" : "e.g. 1 (month)";
+  const allSuggestions = localSuggestions;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      <motion.div
-        className="absolute inset-0 bg-black/75 backdrop-blur-sm"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-      />
+      <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
         className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95"
-        initial={{ opacity: 0, scale: 0.96, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 10 }}
-        transition={{ duration: 0.22, ease: "easeOut" }}
+        initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 10 }} transition={{ duration: 0.22, ease: "easeOut" }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/3">
@@ -753,263 +581,170 @@ function EntryModal({
               <h2 className="text-sm font-bold text-foreground tracking-tight">
                 {isEdit ? "Edit Payroll Entry" : "New Payroll Entry"}
               </h2>
-              <p className="text-[10px] text-muted-foreground">
-                Kenya statutory calculations applied automatically
-              </p>
+              <p className="text-[10px] text-muted-foreground">Kenya statutory calculations applied automatically</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-xl hover:bg-white/10"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-bold">Last Updated</p>
+              <p className="text-[10px] font-mono text-muted-foreground">{lastUpdatedDisplay}</p>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-xl hover:bg-white/10">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
         </div>
 
         {/* Body */}
         <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
-          {/* LEFT – Input Fields */}
+          {/* LEFT */}
           <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
+
+            {/* Project Picker — only shown in global modal */}
+            {projects && (
+              <>
+                <SectionLabel label="Linked Project (optional)" dotColor="bg-primary/70" textColor="text-primary/80" sub="Leave blank for standalone entry" />
+                <Field label="Project">
+                  <div className="relative">
+                    <select
+                      value={form.project_id ?? ""}
+                      onChange={(e) => set("project_id", e.target.value || null)}
+                      className={selectCls}
+                    >
+                      <option value="">— Standalone (no project) —</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>
+                      ))}
+                    </select>
+                    <SelectChevron />
+                  </div>
+                </Field>
+              </>
+            )}
+
             {/* Employee */}
             <SectionLabel label="Employee Details" dotColor="bg-sky-400" textColor="text-sky-400" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Job ID *">
-                <input
-                  value={form.job_id}
-                  onChange={(e) => set("job_id", e.target.value)}
-                  placeholder="J-001"
-                  className={inputCls}
-                />
+                <input value={form.job_id} onChange={(e) => set("job_id", e.target.value)}
+                  placeholder="J-001" className={inputCls} />
               </Field>
               <Field label="Employee Name *">
-                <input
+                <EmployeeNameInput
                   value={form.employee_name}
-                  onChange={(e) => set("employee_name", e.target.value)}
-                  placeholder="Full Name"
-                  className={inputCls}
+                  onChange={(v) => set("employee_name", v)}
+                  suggestions={allSuggestions}
                 />
               </Field>
             </div>
 
             {/* Rate */}
-            <SectionLabel
-              label="Pay Rate"
-              dotColor="bg-violet-400"
-              textColor="text-violet-400"
-              sub="Gross auto-calculated from rate × time"
-            />
+            <SectionLabel label="Pay Rate" dotColor="bg-violet-400" textColor="text-violet-400" sub="Gross auto-calculated from rate × time" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label={`Rate (KES) *`} hint="Amount per unit of time">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.rate || ""}
+              <Field label="Rate (KES) *" hint="Amount per unit of time">
+                <input type="number" step="0.01" min="0" value={form.rate || ""}
                   onChange={(e) => set("rate", parseFloat(e.target.value) || 0)}
-                  className={inputCls}
-                  placeholder="0.00"
-                />
+                  className={inputCls} placeholder="0.00" />
               </Field>
               <Field label="Rate Type *">
                 <div className="flex gap-1 h-10 rounded-xl bg-white/5 border border-white/10 p-1">
                   {RATE_TYPES.map((rt) => (
-                    <button
-                      key={rt}
-                      type="button"
-                      onClick={() => set("rate_type", rt)}
+                    <button key={rt} type="button" onClick={() => set("rate_type", rt)}
                       className={`flex-1 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${
-                        form.rate_type === rt
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "hover:bg-white/10 text-muted-foreground"
+                        form.rate_type === rt ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-white/10 text-muted-foreground"
                       }`}
-                    >
-                      {rt.replace("Per ", "")}
-                    </button>
+                    >{rt.replace("Per ", "")}</button>
                   ))}
                 </div>
               </Field>
               <Field label="Time Worked *" hint={timeWorkedPlaceholder}>
-                <input
-                  value={form.time_worked}
-                  onChange={(e) => set("time_worked", e.target.value)}
-                  placeholder={timeWorkedPlaceholder}
-                  className={inputCls}
-                />
+                <input value={form.time_worked} onChange={(e) => set("time_worked", e.target.value)}
+                  placeholder={timeWorkedPlaceholder} className={inputCls} />
               </Field>
             </div>
 
-            <Field
-              label="Gross Pay (KES) *"
-              hint="Auto-calculated or enter manually"
-            >
+            <Field label="Gross Pay (KES) *" hint="Auto-calculated or enter manually">
               <div className="relative">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.gross_pay || ""}
+                <input type="number" step="0.01" min="0" value={form.gross_pay || ""}
                   onChange={(e) => set("gross_pay", parseFloat(e.target.value) || 0)}
-                  className={inputCls + " pr-16 font-bold text-base"}
-                  placeholder="0.00"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">
-                  KES
-                </span>
+                  className={inputCls + " pr-16 font-bold text-base"} placeholder="0.00" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">KES</span>
               </div>
             </Field>
 
-            {/* Voluntary deductions */}
-            <SectionLabel
-              label="Voluntary Deductions"
-              dotColor="bg-sky-400"
-              textColor="text-sky-400"
-              sub="Tax-deductible; updates live"
-            />
+            {/* Voluntary Deductions */}
+            <SectionLabel label="Voluntary Deductions" dotColor="bg-sky-400" textColor="text-sky-400" sub="Tax-deductible; updates live" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field
-                label="Pension Contribution (KES)"
-                hint="Max KES 30,000 p.m. (tax exempt)"
-              >
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="30000"
-                  value={form.pension || ""}
-                  onChange={(e) =>
-                    set("pension", Math.min(parseFloat(e.target.value) || 0, 30_000))
-                  }
-                  placeholder="0.00"
-                  className={inputCls}
-                />
+              <Field label="Pension Contribution (KES)" hint="Max KES 30,000 p.m. (tax exempt)">
+                <input type="number" step="0.01" min="0" max="30000" value={form.pension || ""}
+                  onChange={(e) => set("pension", Math.min(parseFloat(e.target.value) || 0, 30_000))}
+                  placeholder="0.00" className={inputCls} />
               </Field>
-              <Field
-                label="Annual Insurance Premium (KES)"
-                hint="Relief = 15% of premium, max KES 5,000 p.m."
-              >
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.insurance_relief || ""}
-                  onChange={(e) =>
-                    set("insurance_relief", parseFloat(e.target.value) || 0)
-                  }
-                  placeholder="0.00"
-                  className={inputCls}
-                />
+              <Field label="Annual Insurance Premium (KES)" hint="Relief = 15% of premium, max KES 5,000 p.m.">
+                <input type="number" step="0.01" min="0" value={form.insurance_relief || ""}
+                  onChange={(e) => set("insurance_relief", parseFloat(e.target.value) || 0)}
+                  placeholder="0.00" className={inputCls} />
               </Field>
             </div>
 
             {/* Payment & References */}
-            <SectionLabel
-              label="Payment & References"
-              dotColor="bg-rose-400"
-              textColor="text-rose-400"
-            />
+            <SectionLabel label="Payment & References" dotColor="bg-rose-400" textColor="text-rose-400" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Due Date">
-                <input
-                  type="date"
-                  value={form.due_date ?? ""}
+                <input type="date" value={form.due_date ?? ""}
                   onChange={(e) => set("due_date", e.target.value || null)}
-                  className={inputCls}
-                />
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <Field label="Paid Date">
-                <input
-                  type="date"
-                  value={form.paid_date ?? ""}
+                <input type="date" value={form.paid_date ?? ""}
                   onChange={(e) => set("paid_date", e.target.value || null)}
-                  className={inputCls}
-                />
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <Field label="Payment Status *">
-                <select
-                  value={form.payment_status}
-                  onChange={(e) => set("payment_status", e.target.value as PaymentStatus)}
-                  className={inputCls}
-                >
-                  {PAYMENT_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={form.payment_status}
+                    onChange={(e) => set("payment_status", e.target.value as PaymentStatus)}
+                    className={selectCls}
+                  >
+                    {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <SelectChevron />
+                </div>
               </Field>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Bank Code">
-                <input
-                  value={form.bank_code ?? ""}
-                  onChange={(e) => set("bank_code", e.target.value || null)}
-                  placeholder="e.g. 1002"
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="Serial No.">
-                <input
-                  value={form.serial_no ?? ""}
-                  onChange={(e) => set("serial_no", e.target.value || null)}
-                  placeholder="S-1001"
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="eTIMS Code">
-                <input
-                  value={form.etims_code ?? ""}
-                  onChange={(e) => set("etims_code", e.target.value || null)}
-                  placeholder="ETIMS-55555"
-                  className={inputCls}
-                />
-              </Field>
+              <Field label="Bank Code"><input value={form.bank_code ?? ""} onChange={(e) => set("bank_code", e.target.value || null)} placeholder="e.g. 1002" className={inputCls} /></Field>
+              <Field label="Serial No."><input value={form.serial_no ?? ""} onChange={(e) => set("serial_no", e.target.value || null)} placeholder="S-1001" className={inputCls} /></Field>
+              <Field label="eTIMS Code"><input value={form.etims_code ?? ""} onChange={(e) => set("etims_code", e.target.value || null)} placeholder="ETIMS-55555" className={inputCls} /></Field>
             </div>
+
+            <Field label="Last Updated" hint="Auto-filled — cannot be changed manually">
+              <div className={inputCls + " cursor-not-allowed opacity-60 font-mono text-xs select-none bg-white/3"}>
+                {lastUpdatedDisplay}
+              </div>
+            </Field>
+
             <Field label="Notes">
-              <textarea
-                value={form.notes ?? ""}
-                onChange={(e) => set("notes", e.target.value || null)}
-                rows={2}
-                placeholder="Additional remarks…"
-                className={inputCls + " resize-none"}
-              />
+              <textarea value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value || null)}
+                rows={2} placeholder="Additional remarks…" className={inputCls + " resize-none"} />
             </Field>
           </div>
 
           {/* RIGHT – Live Payslip */}
           <div className="lg:col-span-2 px-5 py-5">
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">
-              Live Payslip Preview
-            </p>
-            <PayslipBreakdown
-              gross={form.gross_pay}
-              computed={computed}
-              pension={form.pension}
-            />
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">Live Payslip Preview</p>
+            <PayslipBreakdown gross={form.gross_pay} computed={computed} pension={form.pension} />
           </div>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => onSave(form)}
-            disabled={loading || !isValid}
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
+          <button onClick={() => onSave(form)} disabled={loading || !isValid}
             className="px-6 py-2.5 text-sm font-bold rounded-2xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center gap-2"
-            style={{
-              background:
-                "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))",
-            }}
-          >
-            {loading && (
-              <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            )}
+            style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+            {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             {isEdit ? "Save Changes" : "Add Entry"}
           </button>
         </div>
@@ -1019,42 +754,21 @@ function EntryModal({
 }
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
-function DeleteConfirm({
-  entry,
-  onConfirm,
-  onClose,
-  loading,
-}: {
-  entry: PayrollEntry;
-  onConfirm: () => void;
-  onClose: () => void;
-  loading: boolean;
+function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
+  entry: PayrollEntry; onConfirm: () => void; onClose: () => void; loading: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div
-        className="absolute inset-0 bg-black/75 backdrop-blur-sm"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-      />
+      <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
         className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-2xl bg-[#0d0d0d]/95"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        transition={{ duration: 0.18 }}
+        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.18 }}
       >
         <div className="flex items-start gap-4 mb-6">
           <div className="w-10 h-10 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center flex-shrink-0">
-            <svg
-              className="w-5 h-5 text-rose-400"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             </svg>
           </div>
@@ -1062,28 +776,16 @@ function DeleteConfirm({
             <h3 className="font-bold text-foreground mb-1">Delete Payroll Entry</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Permanently remove the payroll record for{" "}
-              <span className="text-foreground font-semibold">
-                {entry.employee_name}
-              </span>{" "}
+              <span className="text-foreground font-semibold">{entry.employee_name}</span>{" "}
               ({entry.job_id})? This action cannot be undone.
             </p>
           </div>
         </div>
         <div className="flex gap-3 justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition-all disabled:opacity-50 flex items-center gap-2"
-          >
-            {loading && (
-              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            )}
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
+          <button onClick={onConfirm} disabled={loading}
+            className="px-4 py-2 text-sm font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition-all disabled:opacity-50 flex items-center gap-2">
+            {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             Delete Entry
           </button>
         </div>
@@ -1093,100 +795,63 @@ function DeleteConfirm({
 }
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
-function ProjectCard({
-  project,
-  onSelect,
-  counts,
-}: {
-  project: Project;
-  onSelect: (p: Project) => void;
+function ProjectCard({ project, onSelect, counts }: {
+  project: Project; onSelect: (p: Project) => void;
   counts: { total: number; unpaid: number; overdue: number };
 }) {
   const status = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
 
   return (
-    <motion.button
-      onClick={() => onSelect(project)}
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.15 }}
-      className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/4 p-5 hover:border-primary/35 hover:bg-white/7 transition-all duration-200 shadow-sm group"
-    >
+    <motion.button onClick={() => onSelect(project)} whileHover={{ y: -2 }} transition={{ duration: 0.15 }}
+      className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/4 p-5 hover:border-primary/35 hover:bg-white/7 transition-all duration-200 shadow-sm group">
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg tracking-tight">
-            {project.project_number}
-          </span>
-          <span
-            className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusCls}`}
-          >
-            {status.replace(/_/g, " ")}
-          </span>
+          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg tracking-tight">{project.project_number}</span>
+          <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusCls}`}>{status.replace(/_/g, " ")}</span>
         </div>
         {counts.total > 0 && (
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <span className="text-[9px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded-full tabular-nums">
-              {counts.total}
-            </span>
+            <span className="text-[9px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded-full tabular-nums">{counts.total}</span>
             {counts.overdue > 0 && (
-              <span className="text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full">
-                {counts.overdue} overdue
-              </span>
+              <span className="text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full">{counts.overdue} overdue</span>
             )}
           </div>
         )}
       </div>
-
-      <h3 className="font-bold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors line-clamp-1">
-        {project.title}
-      </h3>
+      <h3 className="font-bold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors line-clamp-1">{project.title}</h3>
       {project.description && (
-        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
-          {project.description}
-        </p>
+        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">{project.description}</p>
       )}
-
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
         {project.site_city && (
           <span className="flex items-center gap-1">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-              <circle cx="12" cy="9" r="2.5" />
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/>
             </svg>
             {project.site_city}
           </span>
         )}
         {project.budget_numeric != null && (
           <span className="flex items-center gap-1 text-emerald-400/80">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             {fmt(project.budget_numeric)}
           </span>
         )}
       </div>
-
       {project.progress_percent != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
-            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">
-              Progress
-            </span>
-            <span className="text-[10px] font-mono font-bold text-primary">
-              {project.progress_percent}%
-            </span>
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Progress</span>
+            <span className="text-[10px] font-mono font-bold text-primary">{project.progress_percent}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
-              initial={{ width: 0 }}
-              animate={{ width: `${project.progress_percent}%` }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-            />
+            <motion.div className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
+              initial={{ width: 0 }} animate={{ width: `${project.progress_percent}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }} />
           </div>
         </div>
       )}
-
       <div className="flex items-center gap-1 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity font-semibold">
         Open Payroll Checklist →
       </div>
@@ -1194,298 +859,56 @@ function ProjectCard({
   );
 }
 
-// ─── PROJECT PICKER ───────────────────────────────────────────────────────────
-function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [fetching, setFetching] = useState(true);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [counts, setCounts] = useState<
-    Record<string, { total: number; unpaid: number; overdue: number }>
-  >({});
-  const { toasts, push } = useToast();
-
-  useEffect(() => {
-    api
-      .projects()
-      .then(async (data) => {
-        setProjects(data);
-        if (data.length) {
-          const ids = data.map((p) => p.id);
-          const { data: rows } = await supabase
-            .from("payroll_checklist")
-            .select("project_id,payment_status")
-            .in("project_id", ids);
-          if (rows) {
-            const tally: Record<
-              string,
-              { total: number; unpaid: number; overdue: number }
-            > = {};
-            rows.forEach((r: any) => {
-              if (!tally[r.project_id])
-                tally[r.project_id] = { total: 0, unpaid: 0, overdue: 0 };
-              tally[r.project_id].total++;
-              if (r.payment_status === "Unpaid") tally[r.project_id].unpaid++;
-              if (r.payment_status === "Overdue") tally[r.project_id].overdue++;
-            });
-            setCounts(tally);
-          }
-        }
-      })
-      .catch((err) =>
-        push(err instanceof Error ? err.message : "Failed to load projects", "error")
-      )
-      .finally(() => setFetching(false));
-  }, [push]);
-
-  const filtered = useMemo(() => {
-    return projects.filter((p) => {
-      const matchStatus = statusFilter === "all" || p.status === statusFilter;
-      const matchSearch =
-        !search ||
-        p.title.toLowerCase().includes(search.toLowerCase()) ||
-        p.project_number.toLowerCase().includes(search.toLowerCase()) ||
-        (p.site_city ?? "").toLowerCase().includes(search.toLowerCase());
-      return matchStatus && matchSearch;
-    });
-  }, [projects, search, statusFilter]);
-
-  const totalEntries = Object.values(counts).reduce((a, c) => a + c.total, 0);
-  const totalOverdue = Object.values(counts).reduce((a, c) => a + c.overdue, 0);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((t) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
-              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
-                t.type === "success"
-                  ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300"
-                  : "bg-rose-950/90 border-rose-500/25 text-rose-300"
-              }`}
-            >
-              {t.msg}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      <div className="container mx-auto px-4 py-12 max-w-7xl">
-        {/* Hero */}
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-12"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2 font-bold flex items-center gap-2">
-                <span className="text-base">🇰🇪</span>
-                KENYA PAYROLL · NSSF / SHIF / AHL / PAYE · 2026
-              </p>
-              <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black leading-none tracking-tighter">
-                Payroll{" "}
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-                  Checklist
-                </span>
-              </h1>
-              <p className="text-base sm:text-lg text-muted-foreground mt-3 max-w-xl">
-                Fully compliant statutory payroll calculations — NSSF, SHIF, AHL & PAYE auto-applied.
-              </p>
-            </div>
-            {totalEntries > 0 && (
-              <div className="flex gap-3">
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center min-w-[80px]">
-                  <p className="text-2xl font-black tabular-nums text-foreground">
-                    {totalEntries}
-                  </p>
-                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">
-                    Entries
-                  </p>
-                </div>
-                {totalOverdue > 0 && (
-                  <div className="rounded-2xl border border-orange-500/25 bg-orange-500/8 px-4 py-3 text-center min-w-[80px]">
-                    <p className="text-2xl font-black tabular-nums text-orange-400">
-                      {totalOverdue}
-                    </p>
-                    <p className="text-[9px] uppercase tracking-wider text-orange-400/70 mt-0.5">
-                      Overdue
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="relative flex-1">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.35-4.35" />
-            </svg>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects by name, number or city…"
-              className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-            />
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="all">All Statuses</option>
-            {Array.from(new Set(projects.map((p) => p.status ?? "planning"))).map(
-              (s) => (
-                <option key={s} value={s}>
-                  {s.replace(/_/g, " ").toUpperCase()}
-                </option>
-              )
-            )}
-          </select>
-        </div>
-
-        {/* Project Grid */}
-        {fetching ? (
-          <div className="flex items-center justify-center py-32 text-muted-foreground">
-            <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
-            Loading projects…
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-32 text-muted-foreground">
-            No projects found.
-          </div>
-        ) : (
-          <motion.div
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-            initial="hidden"
-            animate="visible"
-            variants={{
-              visible: { transition: { staggerChildren: 0.05 } },
-              hidden: {},
-            }}
-          >
-            {filtered.map((p) => (
-              <motion.div
-                key={p.id}
-                variants={{
-                  hidden: { opacity: 0, y: 16 },
-                  visible: { opacity: 1, y: 0 },
-                }}
-              >
-                <ProjectCard
-                  project={p}
-                  onSelect={onSelect}
-                  counts={counts[p.id] ?? { total: 0, unpaid: 0, overdue: 0 }}
-                />
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── PAYROLL TABLE ROW ────────────────────────────────────────────────────────
-function PayrollRow({
-  entry,
-  canEdit,
-  onEdit,
-  onDelete,
-}: {
-  entry: PayrollEntry;
-  canEdit: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
+// ─── PAYROLL ROW ──────────────────────────────────────────────────────────────
+function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap }: {
+  entry: PayrollEntry; canEdit: boolean; onEdit: () => void; onDelete: () => void;
+  showProject?: boolean; projectMap?: Record<string, Project>;
 }) {
   const s = STATUS_STYLE[entry.payment_status];
   const [expanded, setExpanded] = useState(false);
 
   return (
     <>
-      <motion.tr
-        className={`border-b border-white/8 cursor-pointer transition-colors ${s.row}`}
-        onClick={() => setExpanded((x) => !x)}
-      >
-        <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">
-          {entry.job_id}
-        </td>
+      <motion.tr className={`border-b border-white/8 cursor-pointer transition-colors ${s.row}`}
+        onClick={() => setExpanded((x) => !x)}>
+        {showProject && (
+          <td className="px-4 py-3.5 whitespace-nowrap">
+            {entry.project_id && projectMap?.[entry.project_id] ? (
+              <div>
+                <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{projectMap[entry.project_id].project_number}</span>
+                <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[100px] truncate">{projectMap[entry.project_id].title}</div>
+              </div>
+            ) : (
+              <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">Standalone</span>
+            )}
+          </td>
+        )}
+        <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">{entry.job_id}</td>
         <td className="px-4 py-3.5 font-semibold text-sm">{entry.employee_name}</td>
-        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold">
-          {fmt(entry.gross_pay)}
+        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold">{fmt(entry.gross_pay)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300 hidden md:table-cell">{fmt(entry.nssf_total)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300 hidden lg:table-cell">{fmt(entry.shif)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300 hidden lg:table-cell">{fmt(entry.housing_levy)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300 hidden xl:table-cell">{fmt(entry.paye_net)}</td>
+        <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm">{fmt(entry.net_pay)}</td>
+        <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell">{fmtDate(entry.due_date)}</td>
+        <td className="px-4 py-3.5 whitespace-nowrap">
+          <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">{fmtDateTime(entry.updated_at ?? entry.created_at)}</span>
         </td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300 hidden md:table-cell">
-          {fmt(entry.nssf_total)}
-        </td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300 hidden lg:table-cell">
-          {fmt(entry.shif)}
-        </td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300 hidden lg:table-cell">
-          {fmt(entry.housing_levy)}
-        </td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300 hidden xl:table-cell">
-          {fmt(entry.paye_net)}
-        </td>
-        <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm">
-          {fmt(entry.net_pay)}
-        </td>
-        <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell">
-          {fmtDate(entry.due_date)}
-        </td>
-        <td className="px-4 py-3.5">
-          <Badge className={`text-[9px] font-bold ${s.badge}`}>
-            {entry.payment_status}
-          </Badge>
-        </td>
+        <td className="px-4 py-3.5"><Badge className={`text-[9px] font-bold ${s.badge}`}>{entry.payment_status}</Badge></td>
         {canEdit && (
           <td className="px-4 py-3.5">
             <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={onEdit}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium"
-              >
-                Edit
-              </button>
-              <button
-                onClick={onDelete}
-                className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium"
-              >
-                Del
-              </button>
+              <button onClick={onEdit} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium">Edit</button>
+              <button onClick={onDelete} className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium">Del</button>
             </div>
           </td>
         )}
       </motion.tr>
-      {/* Expandable detail row */}
       <AnimatePresence>
         {expanded && (
-          <motion.tr
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="bg-white/2"
-          >
-            <td
-              colSpan={canEdit ? 11 : 10}
-              className="px-6 py-4"
-            >
+          <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="bg-white/2">
+            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 12 : 11)} className="px-6 py-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px]">
                 {[
                   { label: "Rate", value: `${fmt(entry.rate)} / ${entry.rate_type}` },
@@ -1505,12 +928,8 @@ function PayrollRow({
                   ...(entry.notes ? [{ label: "Notes", value: entry.notes }] : []),
                 ].map((item) => (
                   <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
-                    <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">
-                      {item.label}
-                    </p>
-                    <p className="font-mono font-semibold text-foreground text-[11px]">
-                      {item.value}
-                    </p>
+                    <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">{item.label}</p>
+                    <p className="font-mono font-semibold text-foreground text-[11px]">{item.value}</p>
                   </div>
                 ))}
               </div>
@@ -1522,58 +941,47 @@ function PayrollRow({
   );
 }
 
-// ─── PAYROLL VIEW ─────────────────────────────────────────────────────────────
-function PayrollView({
-  project,
-  canEdit,
-  onBack,
-}: {
-  project: Project;
-  canEdit: boolean;
-  onBack: () => void;
-}) {
+// ─── GLOBAL PAYROLL TABLE ─────────────────────────────────────────────────────
+function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
   const [entries, setEntries] = useState<PayrollEntry[]>([]);
-  const [fetching, setFetching] = useState(false);
+  const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
+  const [filterProj, setFilterProj] = useState<string>("all");
   const [modal, setModal] = useState<null | "create" | "edit">(null);
   const [editing, setEditing] = useState<PayrollEntry | null>(null);
   const [deleting, setDeleting] = useState<PayrollEntry | null>(null);
   const [saving, setSaving] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Record<PaymentStatus, boolean>>(
-    Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true])) as any
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true]))
   );
-
   const { toasts, push } = useToast();
+
+  const projectMap = useMemo(() =>
+    Object.fromEntries(projects.map((p) => [p.id, p])), [projects]);
 
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     try {
-      const data = await api.list(project.id);
+      const data = await api.listAll();
       setEntries(data);
-    } catch (err: any) {
-      push(err.message || "Failed to load entries", "error");
-    } finally {
-      setFetching(false);
-    }
-  }, [project.id, push]);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
+    } finally { setFetching(false); }
+  }, [push]);
 
-  useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
   const handleCreate = async (form: PayrollFormData) => {
     setSaving(true);
     try {
-      const row = await api.create({ ...form, project_id: project.id });
+      const row = await api.create(form);
       setEntries((p) => [row, ...p]);
       push("Entry added successfully ✓");
       setModal(null);
-    } catch (err: any) {
-      push(err.message || "Failed to add entry", "error");
-    } finally {
-      setSaving(false);
-    }
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to add entry.", "error");
+    } finally { setSaving(false); }
   };
 
   const handleUpdate = async (form: PayrollFormData) => {
@@ -1583,13 +991,530 @@ function PayrollView({
       const row = await api.update(editing.id, form);
       setEntries((p) => p.map((e) => (e.id === editing.id ? row : e)));
       push("Entry updated ✓");
+      setModal(null); setEditing(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update.", "error");
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setEntries((p) => p.filter((e) => e.id !== deleting.id));
+      push("Entry deleted");
+      setDeleting(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete.", "error");
+    } finally { setSaving(false); }
+  };
+
+  const filtered = useMemo(() =>
+    entries.filter((e) => {
+      if (filterStatus !== "All" && e.payment_status !== filterStatus) return false;
+      if (filterProj === "standalone" && e.project_id !== null) return false;
+      if (filterProj !== "all" && filterProj !== "standalone" && e.project_id !== filterProj) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return e.employee_name.toLowerCase().includes(q) ||
+          e.job_id.toLowerCase().includes(q) ||
+          (e.project_id ? (projectMap[e.project_id]?.title ?? "").toLowerCase().includes(q) : false) ||
+          (e.project_id ? (projectMap[e.project_id]?.project_number ?? "").toLowerCase().includes(q) : false);
+      }
+      return true;
+    }), [entries, filterStatus, filterProj, search, projectMap]);
+
+  const grouped = useMemo(() => {
+    const g: Partial<Record<PaymentStatus, PayrollEntry[]>> = {};
+    PAYMENT_STATUSES.forEach((st) => {
+      const items = filtered.filter((e) => e.payment_status === st);
+      if (items.length) g[st] = items;
+    });
+    return g;
+  }, [filtered]);
+
+  const grandGross      = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
+  const grandNet        = entries.reduce((a, e) => a + n0(e.net_pay), 0);
+  const grandNssf       = entries.reduce((a, e) => a + n0(e.nssf_total), 0);
+  const grandShif       = entries.reduce((a, e) => a + n0(e.shif), 0);
+  const grandAhl        = entries.reduce((a, e) => a + n0(e.housing_levy), 0);
+  const grandPaye       = entries.reduce((a, e) => a + n0(e.paye_net), 0);
+  const grandDeductions = entries.reduce((a, e) => a + n0(e.total_deductions), 0);
+  const paidCount       = entries.filter((e) => e.payment_status === "Paid").length;
+  const standaloneCount = entries.filter((e) => !e.project_id).length;
+
+  const statusTotals = useMemo(() =>
+    Object.fromEntries(PAYMENT_STATUSES.map((ps) => [ps, {
+      count: entries.filter((e) => e.payment_status === ps).length,
+      net:   entries.filter((e) => e.payment_status === ps).reduce((a, e) => a + n0(e.net_pay), 0),
+    }])) as Record<PaymentStatus, { count: number; net: number }>,
+  [entries]);
+
+  const TABLE_HEADERS_GLOBAL = [
+    "Project", "Job ID", "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
+    "Net Pay", "Due Date", "Last Updated", "Status",
+    ...(canEdit ? ["Actions"] : []),
+  ];
+
+  return (
+    <>
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
+                t.type === "success" ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300" : "bg-rose-950/90 border-rose-500/25 text-rose-300"
+              }`}>{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {modal === "create" && (
+          <EntryModal initial={makeEmptyForm(null)} projects={projects} onSave={handleCreate}
+            onClose={() => setModal(null)} loading={saving} />
+        )}
+        {modal === "edit" && editing && (
+          <EntryModal initial={{ ...editing }} projects={projects} onSave={handleUpdate}
+            onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+        )}
+        {deleting && (
+          <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+        )}
+      </AnimatePresence>
+
+      <Card className="backdrop-blur-xl bg-white/5 border border-white/12 rounded-2xl shadow-xl overflow-hidden">
+        <CardHeader className="pb-0 border-b border-white/8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+            <div>
+              <CardTitle className="text-3xl font-black">All Payroll Entries</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {entries.length} entries across all projects · {standaloneCount} standalone · Click row to expand
+              </p>
+            </div>
+            {canEdit && (
+              <button onClick={() => setModal("create")}
+                className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
+                style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                New Entry
+              </button>
+            )}
+          </div>
+
+          {/* Status summary pills */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {PAYMENT_STATUSES.map((ps) => {
+              const s = STATUS_STYLE[ps];
+              const t = statusTotals[ps];
+              const isActive = filterStatus === ps;
+              return (
+                <button key={ps} onClick={() => setFilterStatus(isActive ? "All" : ps)}
+                  className={`rounded-xl border p-3 text-left transition-all backdrop-blur-sm bg-white/3 ${
+                    isActive ? "border-white/25 ring-1 ring-white/20 scale-[1.02]" : "border-white/8 hover:border-white/18"
+                  }`}>
+                  <div className={`text-[9px] uppercase tracking-widest font-black mb-1 ${s.accent}`}>{ps}</div>
+                  <div className="text-2xl font-black tabular-nums">{t.count}</div>
+                  <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">KES {fmtC(t.net)} net</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 pb-4">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search employee, job ID or project…"
+                className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
+            </div>
+            <div className="relative">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
+                className={selectCls}
+                style={{ minWidth: "9rem" }}
+              >
+                <option value="All">All Statuses</option>
+                {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <SelectChevron />
+            </div>
+            <div className="relative">
+              <select
+                value={filterProj}
+                onChange={(e) => setFilterProj(e.target.value)}
+                className={selectCls}
+                style={{ minWidth: "9rem", maxWidth: "200px" }}
+              >
+                <option value="all">All Projects</option>
+                <option value="standalone">Standalone only</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>)}
+              </select>
+              <SelectChevron />
+            </div>
+            <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+              {filtered.length} / {entries.length}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {fetching ? (
+            <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+              <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+              Loading all payroll entries…
+            </div>
+          ) : Object.keys(grouped).length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+              <svg className="w-10 h-10 opacity-25" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/>
+              </svg>
+              <p className="text-sm">No payroll entries found.</p>
+              {canEdit && (
+                <button onClick={() => setModal("create")} className="text-xs text-primary hover:underline">Add first entry →</button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-white/8">
+              {PAYMENT_STATUSES.filter((ps) => grouped[ps]).map((payStatus) => {
+                const s = STATUS_STYLE[payStatus];
+                const rows = grouped[payStatus]!;
+                const isOpen = expandedGroups[payStatus];
+                const groupNet   = rows.reduce((a, e) => a + n0(e.net_pay),   0);
+                const groupGross = rows.reduce((a, e) => a + n0(e.gross_pay), 0);
+
+                return (
+                  <div key={payStatus}>
+                    <button
+                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [payStatus]: !prev[payStatus] }))}
+                      className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-white/4 transition-colors group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                        <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${s.accent}`}>{payStatus}</span>
+                        <Badge className={`text-[9px] font-bold ${s.badge}`}>{rows.length}</Badge>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right hidden sm:block">
+                          <p className="text-[9px] text-muted-foreground">Net / Gross</p>
+                          <p className="text-xs font-mono font-bold">
+                            {fmt(groupNet)} / <span className="text-muted-foreground font-normal">{fmt(groupGross)}</span>
+                          </p>
+                        </div>
+                        <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }}
+                          className="overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm min-w-[900px]">
+                              <thead>
+                                <tr className="border-y border-white/8 bg-white/3">
+                                  {TABLE_HEADERS_GLOBAL.map((h) => (
+                                    <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((entry) => (
+                                  <PayrollRow key={entry.id} entry={entry} canEdit={canEdit}
+                                    showProject projectMap={projectMap}
+                                    onEdit={() => { setEditing(entry); setModal("edit"); }}
+                                    onDelete={() => setDeleting(entry)} />
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Grand Total Footer */}
+          {entries.length > 0 && (
+            <div className="border-t border-white/12 bg-white/3">
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                    Grand Total — {entries.length} employees · {standaloneCount} standalone
+                  </span>
+                  <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[9px] font-bold ml-auto">
+                    {entries.length ? Math.round((paidCount / entries.length) * 100) : 0}% paid
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {[
+                    { label: "Gross Pay",  value: grandGross,      color: "text-foreground"  },
+                    { label: "NSSF",       value: grandNssf,       color: "text-blue-300"    },
+                    { label: "SHIF",       value: grandShif,       color: "text-purple-300"  },
+                    { label: "AHL",        value: grandAhl,        color: "text-amber-300"   },
+                    { label: "PAYE",       value: grandPaye,       color: "text-rose-300"    },
+                    { label: "Net Pay",    value: grandNet,        color: "text-emerald-400" },
+                  ].map((item) => (
+                    <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">{item.label}</p>
+                      <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{fmt(item.value)}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] text-muted-foreground/50 mt-3">
+                  Total deductions: {fmt(grandDeductions)} · Effective rate:{" "}
+                  {grandGross > 0 ? ((grandDeductions / grandGross) * 100).toFixed(1) : 0}% · KRA compliant · 2026
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!fetching && entries.length > 0 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-white/8 text-xs text-muted-foreground">
+              <span className="tabular-nums">{entries.length} total entries</span>
+              <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Refresh
+              </button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// ─── PROJECT PICKER ───────────────────────────────────────────────────────────
+function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [counts, setCounts] = useState<Record<string, { total: number; unpaid: number; overdue: number }>>({});
+  const { toasts, push } = useToast();
+
+  useEffect(() => {
+    api.projects()
+      .then(async (data) => {
+        setProjects(data);
+        if (data.length) {
+          const ids = data.map((p) => p.id);
+          const { data: rows } = await supabase
+            .from("payroll_checklist")
+            .select("project_id,payment_status")
+            .in("project_id", ids);
+          if (rows) {
+            const tally: Record<string, { total: number; unpaid: number; overdue: number }> = {};
+            rows.forEach((r: any) => {
+              if (!tally[r.project_id]) tally[r.project_id] = { total: 0, unpaid: 0, overdue: 0 };
+              tally[r.project_id].total++;
+              if (r.payment_status === "Unpaid") tally[r.project_id].unpaid++;
+              if (r.payment_status === "Overdue") tally[r.project_id].overdue++;
+            });
+            setCounts(tally);
+          }
+        }
+      })
+      .catch((err) => push(err instanceof Error ? err.message : "Failed to load projects", "error"))
+      .finally(() => setFetching(false));
+  }, [push]);
+
+  const filtered = useMemo(() =>
+    projects.filter((p) => {
+      const matchStatus = statusFilter === "all" || p.status === statusFilter;
+      const matchSearch = !search ||
+        p.title.toLowerCase().includes(search.toLowerCase()) ||
+        p.project_number.toLowerCase().includes(search.toLowerCase()) ||
+        (p.site_city ?? "").toLowerCase().includes(search.toLowerCase());
+      return matchStatus && matchSearch;
+    }), [projects, search, statusFilter]);
+
+  const totalEntries = Object.values(counts).reduce((a, c) => a + c.total, 0);
+  const totalOverdue = Object.values(counts).reduce((a, c) => a + c.overdue, 0);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
+                t.type === "success" ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300" : "bg-rose-950/90 border-rose-500/25 text-rose-300"
+              }`}>{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      <div className="container mx-auto px-4 py-12 max-w-7xl">
+        {/* Hero */}
+        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-12">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2 font-bold flex items-center gap-2">
+                <span className="text-base">🇰🇪</span>
+                KENYA PAYROLL · NSSF / SHIF / AHL / PAYE · 2026
+              </p>
+              <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black leading-none tracking-tighter">
+                Payroll{" "}
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Checklist</span>
+              </h1>
+              <p className="text-base sm:text-lg text-muted-foreground mt-3 max-w-xl">
+                Fully compliant statutory payroll calculations — NSSF, SHIF, AHL & PAYE auto-applied.
+              </p>
+            </div>
+            {totalEntries > 0 && (
+              <div className="flex gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center min-w-[80px]">
+                  <p className="text-2xl font-black tabular-nums text-foreground">{totalEntries}</p>
+                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">Entries</p>
+                </div>
+                {totalOverdue > 0 && (
+                  <div className="rounded-2xl border border-orange-500/25 bg-orange-500/8 px-4 py-3 text-center min-w-[80px]">
+                    <p className="text-2xl font-black tabular-nums text-orange-400">{totalOverdue}</p>
+                    <p className="text-[9px] uppercase tracking-wider text-orange-400/70 mt-0.5">Overdue</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Filter Bar */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects by name, number or city…"
+              className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
+          </div>
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className={selectCls}
+              style={{ minWidth: "9rem" }}
+            >
+              <option value="all">All Statuses</option>
+              {Array.from(new Set(projects.map((p) => p.status ?? "planning"))).map((s) => (
+                <option key={s} value={s}>{s.replace(/_/g, " ").toUpperCase()}</option>
+              ))}
+            </select>
+            <SelectChevron />
+          </div>
+        </div>
+
+        {/* Project Grid */}
+        {fetching ? (
+          <div className="flex items-center justify-center py-32 text-muted-foreground">
+            <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
+            Loading projects…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-32 text-muted-foreground">No projects found.</div>
+        ) : (
+          <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10"
+            initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.05 } }, hidden: {} }}>
+            {filtered.map((p) => (
+              <motion.div key={p.id} variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}>
+                <ProjectCard project={p} onSelect={onSelect} counts={counts[p.id] ?? { total: 0, unpaid: 0, overdue: 0 }} />
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+
+        {/* ── GLOBAL PAYROLL TABLE ── */}
+        {!fetching && (
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-1 h-6 rounded-full bg-gradient-to-b from-primary to-accent" />
+              <h2 className="text-2xl font-black text-foreground">All Payroll Entries</h2>
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-xs text-muted-foreground">All projects + standalone entries</span>
+            </div>
+            <GlobalPayrollTable projects={projects} canEdit={true} />
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── PAYROLL VIEW (per-project) ───────────────────────────────────────────────
+function PayrollView({ project, canEdit, onBack }: {
+  project: Project; canEdit: boolean; onBack: () => void;
+}) {
+  const [entries, setEntries] = useState<PayrollEntry[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
+  const [modal, setModal] = useState<null | "create" | "edit">(null);
+  const [editing, setEditing] = useState<PayrollEntry | null>(null);
+  const [deleting, setDeleting] = useState<PayrollEntry | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [workerNames, setWorkerNames] = useState<string[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<PaymentStatus, boolean>>(
+    Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true])) as any
+  );
+  const { toasts, push } = useToast();
+
+  const fetchEntries = useCallback(async () => {
+    setFetching(true);
+    try {
+      const data = await api.list(project.id);
+      setEntries(data);
+      const names = [...new Set(data.map((e) => e.employee_name).filter(Boolean))].sort();
+      setWorkerNames(names);
+    } catch (err: any) {
+      push(err.message || "Failed to load entries", "error");
+    } finally { setFetching(false); }
+  }, [project.id, push]);
+
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  const handleCreate = async (form: PayrollFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create({ ...form, project_id: project.id });
+      setEntries((p) => [row, ...p]);
+      if (row.employee_name && !workerNames.includes(row.employee_name)) {
+        setWorkerNames((prev) => [...prev, row.employee_name].sort());
+      }
+      push("Entry added successfully ✓");
       setModal(null);
-      setEditing(null);
+    } catch (err: any) {
+      push(err.message || "Failed to add entry", "error");
+    } finally { setSaving(false); }
+  };
+
+  const handleUpdate = async (form: PayrollFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const row = await api.update(editing.id, form);
+      setEntries((p) => p.map((e) => (e.id === editing.id ? row : e)));
+      push("Entry updated ✓");
+      setModal(null); setEditing(null);
     } catch (err: any) {
       push(err.message || "Failed to update", "error");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
@@ -1602,21 +1527,17 @@ function PayrollView({
       setDeleting(null);
     } catch (err: any) {
       push(err.message || "Failed to delete", "error");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  const filtered = useMemo(() => {
-    return entries.filter((e) => {
+  const filtered = useMemo(() =>
+    entries.filter((e) => {
       const statusMatch = filterStatus === "All" || e.payment_status === filterStatus;
-      const searchMatch =
-        !search ||
+      const searchMatch = !search ||
         e.employee_name.toLowerCase().includes(search.toLowerCase()) ||
         e.job_id.toLowerCase().includes(search.toLowerCase());
       return statusMatch && searchMatch;
-    });
-  }, [entries, filterStatus, search]);
+    }), [entries, filterStatus, search]);
 
   const grouped = useMemo(() => {
     const g: Partial<Record<PaymentStatus, PayrollEntry[]>> = {};
@@ -1627,43 +1548,20 @@ function PayrollView({
     return g;
   }, [filtered]);
 
-  // ── Summary Stats ──────────────────────────────────────────────────────────
-  const grandGross = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
-  const grandNet = entries.reduce((a, e) => a + n0(e.net_pay), 0);
-  const grandNssf = entries.reduce((a, e) => a + n0(e.nssf_total), 0);
-  const grandShif = entries.reduce((a, e) => a + n0(e.shif), 0);
-  const grandAhl = entries.reduce((a, e) => a + n0(e.housing_levy), 0);
-  const grandPaye = entries.reduce((a, e) => a + n0(e.paye_net), 0);
+  const grandGross      = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
+  const grandNet        = entries.reduce((a, e) => a + n0(e.net_pay), 0);
+  const grandNssf       = entries.reduce((a, e) => a + n0(e.nssf_total), 0);
+  const grandShif       = entries.reduce((a, e) => a + n0(e.shif), 0);
+  const grandAhl        = entries.reduce((a, e) => a + n0(e.housing_levy), 0);
+  const grandPaye       = entries.reduce((a, e) => a + n0(e.paye_net), 0);
   const grandDeductions = entries.reduce((a, e) => a + n0(e.total_deductions), 0);
-  const paidCount = entries.filter((e) => e.payment_status === "Paid").length;
-  const paidPct = entries.length ? Math.round((paidCount / entries.length) * 100) : 0;
+  const paidCount       = entries.filter((e) => e.payment_status === "Paid").length;
+  const paidPct         = entries.length ? Math.round((paidCount / entries.length) * 100) : 0;
 
   const TABLE_HEADERS = [
-    "Job ID",
-    "Employee",
-    "Gross",
-    "NSSF",
-    "SHIF",
-    "AHL",
-    "PAYE",
-    "Net Pay",
-    "Due Date",
-    "Status",
+    "Job ID", "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
+    "Net Pay", "Due Date", "Last Updated", "Status",
     ...(canEdit ? ["Actions"] : []),
-  ];
-
-  const HEADER_CLS = [
-    "",
-    "",
-    "",
-    "hidden md:table-cell",
-    "hidden lg:table-cell",
-    "hidden lg:table-cell",
-    "hidden xl:table-cell",
-    "",
-    "hidden sm:table-cell",
-    "",
-    ...(canEdit ? [""] : []),
   ];
 
   return (
@@ -1672,19 +1570,10 @@ function PayrollView({
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
+            <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
-                t.type === "success"
-                  ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300"
-                  : "bg-rose-950/90 border-rose-500/25 text-rose-300"
-              }`}
-            >
-              {t.msg}
-            </motion.div>
+                t.type === "success" ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300" : "bg-rose-950/90 border-rose-500/25 text-rose-300"
+              }`}>{t.msg}</motion.div>
           ))}
         </AnimatePresence>
       </div>
@@ -1692,48 +1581,23 @@ function PayrollView({
       {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal
-            initial={makeEmptyForm(project.id)}
-            onSave={handleCreate}
-            onClose={() => setModal(null)}
-            loading={saving}
-          />
+          <EntryModal initial={makeEmptyForm(project.id)} workerSuggestions={workerNames}
+            onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
         )}
         {modal === "edit" && editing && (
-          <EntryModal
-            initial={{ ...editing }}
-            onSave={handleUpdate}
-            onClose={() => {
-              setModal(null);
-              setEditing(null);
-            }}
-            loading={saving}
-          />
+          <EntryModal initial={{ ...editing }} workerSuggestions={workerNames}
+            onSave={handleUpdate} onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
         )}
         {deleting && (
-          <DeleteConfirm
-            entry={deleting}
-            onConfirm={handleDelete}
-            onClose={() => setDeleting(null)}
-            loading={saving}
-          />
+          <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
         )}
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-10 max-w-[1400px]">
         {/* Back */}
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group"
-        >
-          <svg
-            className="w-4 h-4 transition-transform group-hover:-translate-x-0.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            viewBox="0 0 24 24"
-          >
-            <path d="M19 12H5M12 5l-7 7 7 7" />
+        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group">
+          <svg className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
           </svg>
           All Projects
         </button>
@@ -1741,15 +1605,9 @@ function PayrollView({
         {/* Project Header */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl tracking-tight font-bold">
-              {project.project_number}
-            </span>
+            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl tracking-tight font-bold">{project.project_number}</span>
             {project.status && (
-              <span
-                className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
-                  PROJECT_STATUS_STYLE[project.status] ?? PROJECT_STATUS_STYLE.planning
-                }`}
-              >
+              <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${PROJECT_STATUS_STYLE[project.status] ?? PROJECT_STATUS_STYLE.planning}`}>
                 {project.status.replace(/_/g, " ")}
               </span>
             )}
@@ -1760,11 +1618,10 @@ function PayrollView({
           {project.site_city && (
             <p className="text-base text-muted-foreground mt-2 flex items-center gap-1.5">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-                <circle cx="12" cy="9" r="2.5" />
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                <circle cx="12" cy="9" r="2.5"/>
               </svg>
-              {project.site_city}
-              {project.site_country ? `, ${project.site_country}` : ""}
+              {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
             </p>
           )}
         </div>
@@ -1776,58 +1633,25 @@ function PayrollView({
             const rows = entries.filter((e) => e.payment_status === ps);
             const isActive = filterStatus === ps;
             return (
-              <button
-                key={ps}
-                onClick={() => setFilterStatus(isActive ? "All" : ps)}
+              <button key={ps} onClick={() => setFilterStatus(isActive ? "All" : ps)}
                 className={`rounded-2xl border p-4 text-left transition-all duration-200 ${
-                  isActive
-                    ? "border-white/30 bg-white/8 shadow-lg"
-                    : "border-white/8 hover:border-white/20 bg-white/3 hover:bg-white/5"
-                }`}
-              >
-                <div className={`text-[9px] uppercase tracking-widest font-black mb-1 ${s.accent}`}>
-                  {ps}
-                </div>
+                  isActive ? "border-white/30 bg-white/8 shadow-lg" : "border-white/8 hover:border-white/20 bg-white/3 hover:bg-white/5"
+                }`}>
+                <div className={`text-[9px] uppercase tracking-widest font-black mb-1 ${s.accent}`}>{ps}</div>
                 <div className="text-2xl sm:text-3xl font-black tabular-nums">{rows.length}</div>
-                <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">
-                  KES {fmtC(rows.reduce((a, e) => a + n0(e.net_pay), 0))} net
-                </div>
+                <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">KES {fmtC(rows.reduce((a, e) => a + n0(e.net_pay), 0))} net</div>
               </button>
             );
           })}
-          {/* Paid Rate */}
-          <div
-            className={`rounded-2xl p-4 border transition-all ${
-              paidPct === 100
-                ? "border-emerald-500/30 bg-emerald-500/8"
-                : "border-white/8 bg-white/3"
-            }`}
-          >
-            <div className="text-[9px] uppercase tracking-widest font-black text-emerald-400 mb-1">
-              Paid Rate
-            </div>
-            <div
-              className={`text-2xl sm:text-3xl font-black tabular-nums ${
-                paidPct === 100 ? "text-emerald-400" : ""
-              }`}
-            >
-              {paidPct}%
-            </div>
-            <div className="text-[9px] text-muted-foreground mt-0.5">
-              {paidCount} of {entries.length}
-            </div>
+          <div className={`rounded-2xl p-4 border transition-all ${paidPct === 100 ? "border-emerald-500/30 bg-emerald-500/8" : "border-white/8 bg-white/3"}`}>
+            <div className="text-[9px] uppercase tracking-widest font-black text-emerald-400 mb-1">Paid Rate</div>
+            <div className={`text-2xl sm:text-3xl font-black tabular-nums ${paidPct === 100 ? "text-emerald-400" : ""}`}>{paidPct}%</div>
+            <div className="text-[9px] text-muted-foreground mt-0.5">{paidCount} of {entries.length}</div>
           </div>
-          {/* Net Payable */}
           <div className="rounded-2xl p-4 border border-white/8 bg-white/3 col-span-2 sm:col-span-1">
-            <div className="text-[9px] uppercase tracking-widest font-black text-foreground/60 mb-1">
-              Total Net
-            </div>
-            <div className="text-xl font-black tabular-nums text-emerald-400 tracking-tight">
-              KES {fmtC(grandNet)}
-            </div>
-            <div className="text-[9px] text-muted-foreground mt-0.5">
-              Gross KES {fmtC(grandGross)}
-            </div>
+            <div className="text-[9px] uppercase tracking-widest font-black text-foreground/60 mb-1">Total Net</div>
+            <div className="text-xl font-black tabular-nums text-emerald-400 tracking-tight">KES {fmtC(grandNet)}</div>
+            <div className="text-[9px] text-muted-foreground mt-0.5">Gross KES {fmtC(grandGross)}</div>
           </div>
         </div>
 
@@ -1837,60 +1661,38 @@ function PayrollView({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5">
               <div>
                 <CardTitle className="text-2xl font-black">Payroll Entries</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Click any row to expand full statutory breakdown
-                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Click any row to expand full statutory breakdown</p>
               </div>
               {canEdit && (
-                <button
-                  onClick={() => setModal("create")}
+                <button onClick={() => setModal("create")}
                   className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
-                  style={{
-                    background:
-                      "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))",
-                  }}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
+                  style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                   New Entry
                 </button>
               )}
             </div>
-            {/* Search & Filter */}
             <div className="flex flex-col sm:flex-row gap-3 pb-4">
               <div className="relative flex-1">
-                <svg
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  viewBox="0 0 24 24"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
                 </svg>
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                <input value={search} onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search employee name or job ID…"
-                  className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-                />
+                  className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
               </div>
-              <select
-                value={filterStatus}
-                onChange={(e) =>
-                  setFilterStatus(e.target.value as PaymentStatus | "All")
-                }
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                <option value="All">All Statuses</option>
-                {PAYMENT_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
+                  className={selectCls}
+                  style={{ minWidth: "9rem" }}
+                >
+                  <option value="All">All Statuses</option>
+                  {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <SelectChevron />
+              </div>
             </div>
           </CardHeader>
 
@@ -1903,17 +1705,10 @@ function PayrollView({
             ) : Object.keys(grouped).length === 0 ? (
               <div className="flex flex-col items-center justify-center py-28 text-muted-foreground gap-3">
                 <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/>
                 </svg>
                 <p className="text-sm">No payroll entries yet</p>
-                {canEdit && (
-                  <button
-                    onClick={() => setModal("create")}
-                    className="text-sm text-primary hover:underline"
-                  >
-                    Add the first entry →
-                  </button>
-                )}
+                {canEdit && <button onClick={() => setModal("create")} className="text-sm text-primary hover:underline">Add the first entry →</button>}
               </div>
             ) : (
               <div className="divide-y divide-white/8">
@@ -1921,93 +1716,50 @@ function PayrollView({
                   const s = STATUS_STYLE[payStatus];
                   const rows = grouped[payStatus]!;
                   const isOpen = expandedGroups[payStatus];
-                  const groupNet = rows.reduce((a, e) => a + n0(e.net_pay), 0);
+                  const groupNet   = rows.reduce((a, e) => a + n0(e.net_pay),   0);
                   const groupGross = rows.reduce((a, e) => a + n0(e.gross_pay), 0);
 
                   return (
                     <div key={payStatus}>
-                      {/* Group Header */}
                       <button
-                        onClick={() =>
-                          setExpandedGroups((prev) => ({
-                            ...prev,
-                            [payStatus]: !prev[payStatus],
-                          }))
-                        }
+                        onClick={() => setExpandedGroups((prev) => ({ ...prev, [payStatus]: !prev[payStatus] }))}
                         className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-white/4 transition-colors group"
                       >
                         <div className="flex items-center gap-3">
                           <span className={`w-2 h-2 rounded-full ${s.dot} ring-2 ring-offset-1 ring-offset-background ${s.dot.replace("bg-", "ring-")}`} />
-                          <span
-                            className={`text-[10px] font-black uppercase tracking-[0.2em] ${s.accent}`}
-                          >
-                            {payStatus}
-                          </span>
-                          <Badge className={`text-[9px] font-bold ${s.badge}`}>
-                            {rows.length}
-                          </Badge>
+                          <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${s.accent}`}>{payStatus}</span>
+                          <Badge className={`text-[9px] font-bold ${s.badge}`}>{rows.length}</Badge>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-right hidden sm:block">
-                            <p className="text-[9px] text-muted-foreground">
-                              Net / Gross
-                            </p>
+                            <p className="text-[9px] text-muted-foreground">Net / Gross</p>
                             <p className="text-xs font-mono font-bold">
-                              {fmt(groupNet)} /{" "}
-                              <span className="text-muted-foreground font-normal">
-                                {fmt(groupGross)}
-                              </span>
+                              {fmt(groupNet)} / <span className="text-muted-foreground font-normal">{fmt(groupGross)}</span>
                             </p>
                           </div>
-                          <svg
-                            className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${
-                              isOpen ? "rotate-180" : ""
-                            }`}
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                            viewBox="0 0 24 24"
-                          >
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
+                          <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
                         </div>
                       </button>
 
                       <AnimatePresence initial={false}>
                         {isOpen && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2, ease: "easeInOut" }}
-                            className="overflow-hidden"
-                          >
+                          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="overflow-hidden">
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm min-w-[700px]">
                                 <thead>
                                   <tr className="border-y border-white/8 bg-white/3">
-                                    {TABLE_HEADERS.map((h, i) => (
-                                      <th
-                                        key={h}
-                                        className={`px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap ${HEADER_CLS[i]}`}
-                                      >
-                                        {h}
-                                      </th>
+                                    {TABLE_HEADERS.map((h) => (
+                                      <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
                                     ))}
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {rows.map((entry) => (
-                                    <PayrollRow
-                                      key={entry.id}
-                                      entry={entry}
-                                      canEdit={canEdit}
-                                      onEdit={() => {
-                                        setEditing(entry);
-                                        setModal("edit");
-                                      }}
-                                      onDelete={() => setDeleting(entry)}
-                                    />
+                                    <PayrollRow key={entry.id} entry={entry} canEdit={canEdit}
+                                      onEdit={() => { setEditing(entry); setModal("edit"); }}
+                                      onDelete={() => setDeleting(entry)} />
                                   ))}
                                 </tbody>
                               </table>
@@ -2029,40 +1781,26 @@ function PayrollView({
                     <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
                       Grand Total — {entries.length} employees
                     </span>
-                    <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[9px] font-bold ml-auto">
-                      {paidPct}% paid
-                    </Badge>
+                    <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[9px] font-bold ml-auto">{paidPct}% paid</Badge>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                     {[
-                      { label: "Gross Pay", value: grandGross, color: "text-foreground" },
-                      { label: "NSSF", value: grandNssf, color: "text-blue-300" },
-                      { label: "SHIF", value: grandShif, color: "text-purple-300" },
-                      { label: "AHL", value: grandAhl, color: "text-amber-300" },
-                      { label: "PAYE", value: grandPaye, color: "text-rose-300" },
-                      { label: "Net Pay", value: grandNet, color: "text-emerald-400" },
+                      { label: "Gross Pay",  value: grandGross,      color: "text-foreground"  },
+                      { label: "NSSF",       value: grandNssf,       color: "text-blue-300"    },
+                      { label: "SHIF",       value: grandShif,       color: "text-purple-300"  },
+                      { label: "AHL",        value: grandAhl,        color: "text-amber-300"   },
+                      { label: "PAYE",       value: grandPaye,       color: "text-rose-300"    },
+                      { label: "Net Pay",    value: grandNet,        color: "text-emerald-400" },
                     ].map((item) => (
-                      <div
-                        key={item.label}
-                        className="bg-white/4 rounded-xl p-3 border border-white/8"
-                      >
-                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">
-                          {item.label}
-                        </p>
-                        <p
-                          className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}
-                        >
-                          {fmt(item.value)}
-                        </p>
+                      <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
+                        <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">{item.label}</p>
+                        <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{fmt(item.value)}</p>
                       </div>
                     ))}
                   </div>
                   <p className="text-[9px] text-muted-foreground/50 mt-3">
                     Total deductions: {fmt(grandDeductions)} · Effective rate:{" "}
-                    {grandGross > 0
-                      ? ((grandDeductions / grandGross) * 100).toFixed(1)
-                      : 0}
-                    % · KRA / NSSF / SHIF / AHL compliant · Feb 2026
+                    {grandGross > 0 ? ((grandDeductions / grandGross) * 100).toFixed(1) : 0}% · KRA / NSSF / SHIF / AHL compliant · 2026
                   </p>
                 </div>
               </div>
@@ -2075,48 +1813,27 @@ function PayrollView({
 }
 
 // ─── ROOT COMPONENT ───────────────────────────────────────────────────────────
-export default function PayrollChecklistPage({
-  projectId,
-  canEdit = true,
-}: Props) {
+export default function PayrollChecklistPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    supabase
-      .from("projects")
-      .select("*")
-      .eq("id", projectId)
-      .single()
-      .then(({ data }) => {
-        if (data) setSelectedProject(data as Project);
-      });
+    supabase.from("projects").select("*").eq("id", projectId).single()
+      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
   }, [projectId]);
 
   return (
     <AnimatePresence mode="wait">
       {selectedProject ? (
-        <motion.div
-          key="payroll"
-          initial={{ opacity: 0, x: 40 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -40 }}
-          transition={{ duration: 0.25 }}
-        >
-          <PayrollView
-            project={selectedProject}
-            canEdit={canEdit}
-            onBack={() => setSelectedProject(null)}
-          />
+        <motion.div key="payroll"
+          initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
+          <PayrollView project={selectedProject} canEdit={canEdit} onBack={() => setSelectedProject(null)} />
         </motion.div>
       ) : (
-        <motion.div
-          key="picker"
-          initial={{ opacity: 0, x: -40 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 40 }}
-          transition={{ duration: 0.25 }}
-        >
+        <motion.div key="picker"
+          initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.25 }}>
           <ProjectPickerView onSelect={setSelectedProject} />
         </motion.div>
       )}

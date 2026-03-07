@@ -25,7 +25,7 @@ import roadsAndHighways from "@/assets/roads_and_highways.mp4";
 import restaurant from "@/assets/restaurant.jpg";
 import qualityAssurance from "@/assets/quality_assurance.jpg";
 import { motion } from "framer-motion";
-import { Building2, Home, Factory, Wrench, Paintbrush } from "lucide-react";
+import { Building2, Home, Factory, Wrench, Paintbrush, ChevronRight } from "lucide-react";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { GlassCard } from "@/components/ui/GlassCard";
 import SubServicePopup from "@/components/SubServicePopup";
@@ -36,7 +36,7 @@ interface SubServiceData {
   description: string;
   mediaSrc?: string;
   mediaType?: "image" | "video";
-  customPhases?: string; // Identifier for custom phase filtering
+  customPhases?: string;
 }
 
 const Services = () => {
@@ -58,7 +58,7 @@ const Services = () => {
           description: "Modern townhouse developments featuring contemporary design, efficient layouts, and community-focused amenities. Perfect for families seeking urban convenience with suburban comfort.",
           mediaSrc: townHouses,
           mediaType: "image" as const,
-          customPhases: "default", // Uses default phases
+          customPhases: "default",
         },
         {
           name: "Duplexes",
@@ -188,48 +188,6 @@ const Services = () => {
         },
       ],
     },
-    // {
-    //   icon: Factory,
-    //   title: "Infrastructure",
-    //   description: "Robust infrastructure solutions for public and private sectors, ensuring long-term reliability and efficiency.",
-    //   features: [
-    //     {
-    //       name: "Roads & Highways",
-    //       description: "Design and construction of durable roads, highways, and bridges with a focus on safety, sustainability, and traffic flow.",
-    //       mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620970/roads_and_highways_wamifd.mp4",
-    //       mediaType: "video" as const,
-    //       customPhases: "roads-highways",
-    //     },
-    //     {
-    //       name: "Water Supply & Drainage",
-    //       description: "Comprehensive water supply systems, drainage networks, and sewage treatment plants for urban and rural developments.",
-    //       mediaSrc: waterAndDrainage,
-    //       mediaType: "image" as const,
-    //       customPhases: "water-drainage",
-    //     },
-    //     {
-    //       name: "Power & Energy Infrastructure",
-    //       description: "Construction of substations, power lines, and renewable energy facilities to support growing energy needs.",
-    //       mediaSrc: powerandEnergy,
-    //       mediaType: "image" as const,
-    //       customPhases: "power-energy",
-    //     },
-    //     // {
-    //     //   name: "Telecommunications",
-    //     //   description: "Deployment of telecom towers, fiber optic networks, and digital infrastructure for enhanced connectivity.",
-    //     //   mediaSrc: "https://res.cloudinary.com/dvjm4wcfr/image/upload/v1764792300/telecom-infrastructure-example.jpg",
-    //     //   mediaType: "image" as const,
-    //     //   customPhases: "telecommunications",
-    //     // },
-    //     {
-    //       name: "Public Utilities",
-    //       description: "Development of essential public utilities including gas pipelines, street lighting, and waste management systems.",
-    //       mediaSrc: "https://res.cloudinary.com/dema3kxng/video/upload/v1765620154/138501-769724721_ocpzbr.mp4",
-    //       mediaType: "video" as const,
-    //       customPhases: "public-utilities",
-    //     },
-    //   ],
-    // },
     {
       icon: Wrench,
       title: "Renovations & Remodeling",
@@ -349,7 +307,6 @@ const Services = () => {
 
   // Custom phase configurations
   const customPhaseConfigs = {
-    // Roads & Highways - remove 3.2, 3.3, 3.4, keep only 3.1, 3.5 (electrical and plumbing only), 3.7, 3.8
     "roads-highways": [
       {
         number: "01",
@@ -390,7 +347,6 @@ const Services = () => {
       },
     ],
 
-    // Water Supply & Drainage - remove 3.4, 3.5, 3.6, 3.7, 3.8
     "water-drainage": [
       {
         number: "01",
@@ -430,7 +386,6 @@ const Services = () => {
       },
     ],
 
-    // Power & Energy Infrastructure - retain 3.1-3.3, remove 3.4, keep electrical only in 3.5, modify 3.6 to cladding only, retain 3.7, 3.8
     "power-energy": [
       {
         number: "01",
@@ -474,7 +429,6 @@ const Services = () => {
       },
     ],
 
-    // Telecommunications - remove 3.4, 3.6, 3.8, retain 3.7
     "telecommunications": [
       {
         number: "01",
@@ -516,10 +470,8 @@ const Services = () => {
       },
     ],
 
-    // Public Utilities - retain everything (use default)
     "public-utilities": defaultPhases,
 
-    // Interior Remodeling - remove entire construction phase
     "interior-remodeling": [
       {
         number: "01",
@@ -550,7 +502,6 @@ const Services = () => {
       },
     ],
 
-    // Exterior Upgrades - retain phase 1, 2, 4; under construction remove 3.2, 3.3, 3.6
     "exterior-upgrades": [
       {
         number: "01",
@@ -592,7 +543,6 @@ const Services = () => {
       },
     ],
 
-    // Structural Renovations - remove 3.2
     "structural-renovations": [
       {
         number: "01",
@@ -636,7 +586,6 @@ const Services = () => {
       },
     ],
 
-    // Historic Restoration - retain 3.4, 3.6, 3.8 only under phase 3
     "historic-restoration": [
       {
         number: "01",
@@ -676,7 +625,6 @@ const Services = () => {
       },
     ],
 
-    // Architectural Design - retain phase 1, 2 only
     "architectural-design": [
       {
         number: "01",
@@ -697,7 +645,6 @@ const Services = () => {
       },
     ],
 
-    // Quality Assurance - retain phase 3 and 4 only
     "quality-assurance": [
       {
         number: "03",
@@ -726,7 +673,6 @@ const Services = () => {
     ],
   };
 
-  // Function to get phases based on customPhases identifier
   const getPhasesForSubService = (customPhasesId: string | undefined) => {
     if (!customPhasesId || customPhasesId === "default") {
       return defaultPhases;
@@ -767,25 +713,43 @@ const Services = () => {
                 initial={{ opacity: 0, y: 30 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1, duration: 0.6 }}
+                whileHover={{ scale: 1.03, boxShadow: "0 8px 32px 0 rgba(80,80,160,0.10)" }}
               >
-                <GlassCard className="h-full flex flex-col">
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mb-6">
+                <GlassCard className="h-full flex flex-col group cursor-pointer ring-2 ring-primary/30 hover:ring-primary/50 shadow-lg transition-all duration-200">
+                  {/* Service Icon & Title */}
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mb-6 scale-105 transition-transform">
                     <service.icon className="w-7 h-7 text-primary" />
                   </div>
-                  
-                  <h3 className="text-2xl font-bold mb-3">{service.title}</h3>
+                  <h3 className="text-2xl font-bold mb-3 text-primary underline underline-offset-4">
+                    {service.title}
+                  </h3>
                   <p className="text-muted-foreground mb-6 flex-grow">{service.description}</p>
-                  
-                  <div className="space-y-2">
+
+                  {/* Feature Cards — always visible as clickable items */}
+                  <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                     {service.features.map((feature) => (
-                      <button
+                      <div
                         key={feature.name}
                         onClick={() => openPopup(feature, service.title)}
-                        className="w-full flex items-center text-sm text-muted-foreground hover:text-primary transition-all duration-300 p-2 rounded-md hover:bg-primary/5 group"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            openPopup(feature, service.title);
+                          }
+                        }}
+                        className="flex flex-col items-start text-left py-3 px-4 min-h-[72px] rounded-lg border-2 border-primary/35 bg-primary/5 cursor-pointer transition-all duration-200 hover:border-primary hover:bg-primary/10 hover:shadow-md active:scale-95 focus:outline-none focus:ring-2 focus:ring-primary/60"
                       >
-                        <div className="w-1.5 h-1.5 rounded-full bg-primary mr-3 flex-shrink-0 group-hover:scale-150 transition-transform" />
-                        <span className="group-hover:translate-x-1 transition-transform">{feature.name}</span>
-                      </button>
+                        <div className="flex items-center justify-between w-full mb-1">
+                          <span className="text-sm font-semibold text-primary leading-tight">
+                            {feature.name}
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-primary/60 flex-shrink-0 ml-1" />
+                        </div>
+                        <span className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                          {feature.description}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 </GlassCard>

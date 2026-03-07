@@ -320,10 +320,10 @@ const FinanceDashboardPage = () => {
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-2">
           <div>
             <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground/60 mb-2">
-              Reve Construct — Finance
+              Reve Construct Accounts
             </p>
             <h1 className="text-4xl md:text-5xl font-bold leading-tight">
-              Finance{" "}
+              Accounts{" "}
               <span className="text-primary">Dashboard</span>
             </h1>
           </div>
@@ -410,7 +410,7 @@ const FinanceDashboardPage = () => {
               <TrendingUp className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-foreground">Finance Overview</p>
+              <p className="font-semibold text-foreground">Accounts Overview</p>
               <p className="text-sm text-muted-foreground">
                 All {totalModules} financial modules • Reve Construct Limited
               </p>

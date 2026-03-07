@@ -256,12 +256,12 @@ function EntryModal({ initial, onSave, onClose, loading }: {
             </select>
           </Field>
           <Field label="Book Amount (USD) *">
-            <input type="number" step="0.01" min="0" value={form.book_amount}
-              onChange={(e) => setField("book_amount", parseFloat(e.target.value) || 0)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={form.book_amount === 0 ? (form.book_amount === "" ? "" : "0") : form.book_amount || ""}
+              onChange={e => setField("book_amount", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
           </Field>
           <Field label="Bank Amount (USD) *">
-            <input type="number" step="0.01" min="0" value={form.bank_amount}
-              onChange={(e) => setField("bank_amount", parseFloat(e.target.value) || 0)} className={inputCls} />
+            <input type="number" step="0.01" min="0" value={form.bank_amount === 0 ? (form.bank_amount === "" ? "" : "0") : form.bank_amount || ""}
+              onChange={e => setField("bank_amount", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
           </Field>
 
           {/* Live difference preview */}
