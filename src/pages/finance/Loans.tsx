@@ -77,32 +77,31 @@ const REPAY_FREQS: RepayFrequency[] = ["Monthly","Quarterly","Semi-Annual","Annu
 const PAYMENT_STATUSES: PaymentStatus[] = ["Paid","Partially Paid","Due","Overdue","Waived"];
 
 const KE_WHT_RESIDENT = 15;
-const KE_THIN_CAP_RATIO = 3;
 
 const STATUS_STYLE: Record<string, string> = {
-  planning: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  active: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  on_hold: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
   completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
 const PAYMENT_STATUS_STYLE: Record<PaymentStatus, string> = {
-  "Paid": "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+  "Paid":           "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
   "Partially Paid": "bg-yellow-500/10 border-yellow-500/30 text-yellow-300",
-  "Due": "bg-sky-500/10 border-sky-500/30 text-sky-300",
-  "Overdue": "bg-rose-500/10 border-rose-500/30 text-rose-300",
-  "Waived": "bg-slate-500/10 border-slate-500/30 text-slate-300",
+  "Due":            "bg-sky-500/10 border-sky-500/30 text-sky-300",
+  "Overdue":        "bg-rose-500/10 border-rose-500/30 text-rose-300",
+  "Waived":         "bg-slate-500/10 border-slate-500/30 text-slate-300",
 };
 
 const LOAN_TYPE_STYLE: Record<LoanType, { dot: string; accent: string; badge: string; row: string }> = {
-  "Term Loan":          { dot: "bg-violet-400", accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300",   row: "hover:bg-violet-950/30" },
-  "Asset Finance":      { dot: "bg-amber-400",  accent: "text-amber-400",  badge: "bg-amber-500/10 border-amber-500/30 text-amber-300",       row: "hover:bg-amber-950/30"  },
-  "Overdraft":          { dot: "bg-rose-400",   accent: "text-rose-400",   badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",           row: "hover:bg-rose-950/30"   },
-  "Revolving Credit":   { dot: "bg-cyan-400",   accent: "text-cyan-400",   badge: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300",           row: "hover:bg-cyan-950/30"   },
-  "Mortgage":           { dot: "bg-orange-400", accent: "text-orange-400", badge: "bg-orange-500/10 border-orange-500/30 text-orange-300",     row: "hover:bg-orange-950/30" },
-  "Invoice Discounting":{ dot: "bg-pink-400",   accent: "text-pink-400",   badge: "bg-pink-500/10 border-pink-500/30 text-pink-300",           row: "hover:bg-pink-950/30"   },
-  "Other":              { dot: "bg-slate-400",  accent: "text-slate-400",  badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",         row: "hover:bg-slate-950/30"  },
+  "Term Loan":           { dot: "bg-violet-400", accent: "text-violet-400", badge: "bg-violet-500/10 border-violet-500/30 text-violet-300",   row: "hover:bg-violet-950/30" },
+  "Asset Finance":       { dot: "bg-amber-400",  accent: "text-amber-400",  badge: "bg-amber-500/10 border-amber-500/30 text-amber-300",       row: "hover:bg-amber-950/30"  },
+  "Overdraft":           { dot: "bg-rose-400",   accent: "text-rose-400",   badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",           row: "hover:bg-rose-950/30"   },
+  "Revolving Credit":    { dot: "bg-cyan-400",   accent: "text-cyan-400",   badge: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300",           row: "hover:bg-cyan-950/30"   },
+  "Mortgage":            { dot: "bg-orange-400", accent: "text-orange-400", badge: "bg-orange-500/10 border-orange-500/30 text-orange-300",     row: "hover:bg-orange-950/30" },
+  "Invoice Discounting": { dot: "bg-pink-400",   accent: "text-pink-400",   badge: "bg-pink-500/10 border-pink-500/30 text-pink-300",           row: "hover:bg-pink-950/30"   },
+  "Other":               { dot: "bg-slate-400",  accent: "text-slate-400",  badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",         row: "hover:bg-slate-950/30"  },
 };
 
 // ─── GENERATED COLUMNS — never send to DB ─────────────────────────────────────
@@ -115,9 +114,7 @@ const GENERATED_COLS = [
 
 function stripGenerated(body: Partial<LoanFormData>): Partial<LoanFormData> {
   const clean = { ...body };
-  for (const col of GENERATED_COLS) {
-    delete (clean as any)[col];
-  }
+  for (const col of GENERATED_COLS) delete (clean as any)[col];
   return clean;
 }
 
@@ -137,26 +134,26 @@ function computeClosingBalance(opening: number, principal: number): number {
 }
 
 function deriveComputedFields(f: LoanFormData): LoanFormData {
-  const interestPortion   = Number(f.interest_portion)   || 0;
-  const principalPortion  = Number(f.principal_portion)  || 0;
-  const fees              = Number(f.fees_and_charges)   || 0;
-  const opening           = Number(f.opening_balance)    || 0;
-  const whtRate           = Number(f.withholding_tax_rate) || 0;
-  const wht     = computeWHT(interestPortion, f.withholding_tax_applicable, whtRate);
-  const netInt  = computeNetInterest(interestPortion, wht);
-  const totalDue= computeTotalDue(principalPortion, netInt, fees);
-  const closing = computeClosingBalance(opening, principalPortion);
+  const interestPortion  = Number(f.interest_portion)    || 0;
+  const principalPortion = Number(f.principal_portion)   || 0;
+  const fees             = Number(f.fees_and_charges)    || 0;
+  const opening          = Number(f.opening_balance)     || 0;
+  const whtRate          = Number(f.withholding_tax_rate) || 0;
+  const wht    = computeWHT(interestPortion, f.withholding_tax_applicable, whtRate);
+  const netInt = computeNetInterest(interestPortion, wht);
+  const total  = computeTotalDue(principalPortion, netInt, fees);
+  const closing= computeClosingBalance(opening, principalPortion);
   return {
     ...f,
-    interest_portion:        interestPortion,
-    principal_portion:       principalPortion,
-    fees_and_charges:        fees,
-    opening_balance:         opening,
-    withholding_tax_rate:    whtRate,
-    withholding_tax_amount:  wht,
-    net_interest_payable:    netInt,
-    total_due:               totalDue,
-    closing_balance:         closing,
+    interest_portion:       interestPortion,
+    principal_portion:      principalPortion,
+    fees_and_charges:       fees,
+    opening_balance:        opening,
+    withholding_tax_rate:   whtRate,
+    withholding_tax_amount: wht,
+    net_interest_payable:   netInt,
+    total_due:              total,
+    closing_balance:        closing,
   };
 }
 
@@ -216,7 +213,6 @@ const api = {
     if (error) throwSb(error, "projects");
     return (data ?? []) as Project[];
   },
-
   async loanCounts(ids: string[]): Promise<Record<string, number>> {
     const { data } = await supabase.from("loans").select("project_id").in("project_id", ids);
     const tally: Record<string, number> = {};
@@ -225,49 +221,30 @@ const api = {
     });
     return tally;
   },
-
   async list(projectId: string): Promise<Loan[]> {
     const { data, error } = await supabase
-      .from("loans")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("loan_start_date", { ascending: false });
+      .from("loans").select("*").eq("project_id", projectId).order("loan_start_date", { ascending: false });
     if (error) throwSb(error, "list");
     return (data ?? []) as Loan[];
   },
-
   async listAll(): Promise<Loan[]> {
-    const { data, error } = await supabase
-      .from("loans")
-      .select("*")
-      .order("loan_start_date", { ascending: false });
+    const { data, error } = await supabase.from("loans").select("*").order("loan_start_date", { ascending: false });
     if (error) throwSb(error, "listAll");
     return (data ?? []) as Loan[];
   },
-
   async create(body: LoanFormData): Promise<Loan> {
     const clean = stripGenerated(body);
-    const { data, error } = await supabase
-      .from("loans")
-      .insert([clean])
-      .select("*")
-      .single();
+    const { data, error } = await supabase.from("loans").insert([clean]).select("*").single();
     if (error) throwSb(error, "create");
     return data as Loan;
   },
-
   async update(id: number, body: LoanFormData): Promise<Loan> {
     const clean = stripGenerated(body);
     const { data, error } = await supabase
-      .from("loans")
-      .update({ ...clean, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select("*")
-      .single();
+      .from("loans").update({ ...clean, updated_at: new Date().toISOString() }).eq("id", id).select("*").single();
     if (error) throwSb(error, "update");
     return data as Loan;
   },
-
   async remove(id: number): Promise<void> {
     const { error } = await supabase.from("loans").delete().eq("id", id);
     if (error) throwSb(error, "delete");
@@ -289,6 +266,18 @@ function useToast() {
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
 
+const selectCls =
+  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all appearance-none pr-10 font-medium " +
+  "bg-[#111318] border-white/10 [color-scheme:dark]";
+
+const SelectChevron = () => (
+  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+      <path d="m6 9 6 6 6-6"/>
+    </svg>
+  </span>
+);
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -299,24 +288,133 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function SelectField({ label, hint, value, onChange, options }: {
+function SelectField({ label, hint, value, onChange, options, disabled }: {
   label: string; hint?: string; value: string;
-  onChange: (v: string) => void; options: string[];
+  onChange: (v: string) => void; options: string[]; disabled?: boolean;
 }) {
   return (
     <Field label={label} hint={hint}>
       <div className="relative">
-        <select value={value} onChange={e => onChange(e.target.value)}
-          className={inputCls + " appearance-none pr-10 font-medium text-sm"}>
-          {options.map(o => <option key={o} value={o} className="bg-background text-foreground">{o}</option>)}
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={disabled}
+          className={selectCls + (disabled ? " opacity-50 cursor-not-allowed" : "")}
+        >
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path d="m6 9 6 6 6-6"/>
-          </svg>
-        </span>
+        <SelectChevron />
       </div>
     </Field>
+  );
+}
+
+// ─── NUMERIC INPUT — fixes the sticky-zero bug ────────────────────────────────
+// Keeps a local string so the user can clear/retype freely.
+// Only calls onChange with a parsed number (or 0 if empty/invalid).
+function NumericInput({
+  value,
+  onChange,
+  step = "0.01",
+  min = "0",
+  max,
+  className,
+  disabled,
+  placeholder,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  step?: string;
+  min?: string;
+  max?: string;
+  className?: string;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  // Local display string — lets user clear the field completely
+  const [display, setDisplay] = useState<string>(value === 0 ? "" : String(value));
+
+  // Sync from outside only when the numeric value actually changes
+  useEffect(() => {
+    setDisplay(value === 0 ? "" : String(value));
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDisplay(raw);
+    const parsed = raw === "" ? 0 : parseFloat(raw);
+    onChange(isNaN(parsed) ? 0 : parsed);
+  };
+
+  const handleBlur = () => {
+    // Normalise display on blur
+    const parsed = display === "" ? 0 : parseFloat(display);
+    const safe = isNaN(parsed) ? 0 : parsed;
+    onChange(safe);
+    setDisplay(safe === 0 ? "" : String(safe));
+  };
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      max={max}
+      value={display}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      disabled={disabled}
+      placeholder={placeholder ?? "0"}
+      className={className ?? inputCls}
+    />
+  );
+}
+
+// ─── INTEGER INPUT ────────────────────────────────────────────────────────────
+function IntegerInput({
+  value,
+  onChange,
+  min = "0",
+  className,
+  placeholder,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  min?: string;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [display, setDisplay] = useState<string>(value === 0 ? "" : String(value));
+
+  useEffect(() => {
+    setDisplay(value === 0 ? "" : String(value));
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDisplay(raw);
+    const parsed = raw === "" ? 0 : parseInt(raw, 10);
+    onChange(isNaN(parsed) ? 0 : parsed);
+  };
+
+  const handleBlur = () => {
+    const parsed = display === "" ? 0 : parseInt(display, 10);
+    const safe = isNaN(parsed) ? 0 : parsed;
+    onChange(safe);
+    setDisplay(safe === 0 ? "" : String(safe));
+  };
+
+  return (
+    <input
+      type="number"
+      step="1"
+      min={min}
+      value={display}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      placeholder={placeholder ?? "0"}
+      className={className ?? inputCls}
+    />
   );
 }
 
@@ -330,8 +428,11 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
 }) {
   const [form, setForm] = useState<LoanFormData>(deriveComputedFields({ ...initial }));
   const isEdit = Boolean(initial.id);
-  const set = <K extends keyof LoanFormData>(k: K, v: LoanFormData[K] | "") =>
-    setForm(p => deriveComputedFields({ ...p, [k]: v } as any));
+
+  // Typed setter that always re-derives computed fields
+  const set = <K extends keyof LoanFormData>(k: K, v: LoanFormData[K]) =>
+    setForm(p => deriveComputedFields({ ...p, [k]: v }));
+
   const [tab, setTab] = useState<"facility" | "schedule" | "tax" | "payment">("facility");
   const tabs: { key: typeof tab; label: string }[] = [
     { key: "facility", label: "Facility" },
@@ -345,7 +446,7 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
       <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-white/10"
+        className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-[#0d0d0d]/95"
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 8 }}
@@ -379,10 +480,9 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
 
         <div className="px-6 py-5 max-h-[58vh] overflow-y-auto">
 
-          {/* ── TAB: Facility ───────────────────────────────────────────── */}
+          {/* ── TAB: Facility ── */}
           {tab === "facility" && (
             <div className="grid grid-cols-2 gap-4">
-              {/* Project picker — only shown in global / standalone context */}
               {projects && (
                 <div className="col-span-2">
                   <Field label="Project (optional)" hint="Leave unlinked for standalone loans not tied to a project">
@@ -390,20 +490,14 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
                       <select
                         value={form.project_id ?? ""}
                         onChange={e => set("project_id", e.target.value || null)}
-                        className={inputCls + " appearance-none pr-10 font-medium text-sm"}
+                        className={selectCls}
                       >
                         <option value="">— No project (standalone) —</option>
                         {projects.map(p => (
-                          <option key={p.id} value={p.id} className="bg-background text-foreground">
-                            {p.project_number} — {p.title}
-                          </option>
+                          <option key={p.id} value={p.id}>{p.project_number} — {p.title}</option>
                         ))}
                       </select>
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <path d="m6 9 6 6 6-6"/>
-                        </svg>
-                      </span>
+                      <SelectChevron />
                     </div>
                   </Field>
                 </div>
@@ -425,25 +519,32 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
               </Field>
               <Field label="Loan Start Date *">
                 <input type="date" value={form.loan_start_date}
-                  onChange={e => set("loan_start_date", e.target.value)} className={inputCls} />
+                  onChange={e => set("loan_start_date", e.target.value)}
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <Field label="Tenure (Months) *">
-                <input type="number" min="1" value={form.tenure_months === 0 ? "" : form.tenure_months}
-                  onChange={e => set("tenure_months", e.target.value === "" ? "" : parseInt(e.target.value))} className={inputCls} />
+                <IntegerInput
+                  value={form.tenure_months}
+                  onChange={v => set("tenure_months", v)}
+                  min="1"
+                  placeholder="e.g. 12"
+                />
               </Field>
               <SelectField label="Repayment Frequency *" value={form.repayment_frequency}
                 onChange={v => set("repayment_frequency", v as RepayFrequency)} options={REPAY_FREQS} />
               <Field label="Principal Approved (KES) *">
-                <input type="number" step="0.01" min="0"
-                  value={form.principal_approved_kes === 0 ? "" : form.principal_approved_kes}
-                  onChange={e => set("principal_approved_kes", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.principal_approved_kes}
+                  onChange={v => set("principal_approved_kes", v)}
+                  placeholder="e.g. 5000000"
+                />
               </Field>
               <Field label="Interest Rate % P.A. *">
-                <input type="number" step="0.01" min="0"
-                  value={form.interest_rate_pa === 0 ? "" : form.interest_rate_pa}
-                  onChange={e => set("interest_rate_pa", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.interest_rate_pa}
+                  onChange={v => set("interest_rate_pa", v)}
+                  placeholder="e.g. 13.5"
+                />
               </Field>
               <SelectField label="Interest Type *" value={form.interest_type}
                 onChange={v => set("interest_type", v as InterestType)} options={INTEREST_TYPES} />
@@ -456,55 +557,62 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
             </div>
           )}
 
-          {/* ── TAB: Schedule ───────────────────────────────────────────── */}
+          {/* ── TAB: Schedule ── */}
           {tab === "schedule" && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Opening Balance (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.opening_balance === 0 ? "" : form.opening_balance}
-                  onChange={e => set("opening_balance", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.opening_balance}
+                  onChange={v => set("opening_balance", v)}
+                  placeholder="e.g. 4500000"
+                />
               </Field>
               <Field label="Installment Due (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.installment_due === 0 ? "" : form.installment_due}
-                  onChange={e => set("installment_due", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.installment_due}
+                  onChange={v => set("installment_due", v)}
+                  placeholder="e.g. 120000"
+                />
               </Field>
               <Field label="Principal Portion (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.principal_portion === 0 ? "" : form.principal_portion}
-                  onChange={e => set("principal_portion", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.principal_portion}
+                  onChange={v => set("principal_portion", v)}
+                  placeholder="e.g. 80000"
+                />
               </Field>
               <Field label="Interest Portion (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.interest_portion === 0 ? "" : form.interest_portion}
-                  onChange={e => set("interest_portion", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.interest_portion}
+                  onChange={v => set("interest_portion", v)}
+                  placeholder="e.g. 40000"
+                />
               </Field>
               <Field label="Fees & Charges (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.fees_and_charges === 0 ? "" : form.fees_and_charges}
-                  onChange={e => set("fees_and_charges", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.fees_and_charges}
+                  onChange={v => set("fees_and_charges", v)}
+                  placeholder="e.g. 5000"
+                />
               </Field>
               <Field label="Due Date *">
                 <input type="date" value={form.due_date}
-                  onChange={e => set("due_date", e.target.value)} className={inputCls} />
+                  onChange={e => set("due_date", e.target.value)}
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <Field label="Next Due Date">
                 <input type="date" value={form.next_due_date ?? ""}
-                  onChange={e => set("next_due_date", e.target.value || null)} className={inputCls} />
+                  onChange={e => set("next_due_date", e.target.value || null)}
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <div />
               {/* Computed preview boxes */}
               <div className="col-span-2 grid grid-cols-4 gap-3 mt-2">
                 {[
-                  { label: "WHT Amount",      value: fmtKES(form.withholding_tax_amount), color: "text-amber-400"  },
-                  { label: "Net Interest",     value: fmtKES(form.net_interest_payable),  color: "text-sky-400"    },
-                  { label: "Total Due",        value: fmtKES(form.total_due),             color: "text-emerald-400"},
-                  { label: "Closing Balance",  value: fmtKES(form.closing_balance),       color: "text-primary"    },
+                  { label: "WHT Amount",     value: fmtKES(form.withholding_tax_amount), color: "text-amber-400"   },
+                  { label: "Net Interest",   value: fmtKES(form.net_interest_payable),  color: "text-sky-400"     },
+                  { label: "Total Due",      value: fmtKES(form.total_due),             color: "text-emerald-400" },
+                  { label: "Closing Balance",value: fmtKES(form.closing_balance),       color: "text-primary"     },
                 ].map(box => (
                   <div key={box.label} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{box.label}</div>
@@ -516,7 +624,7 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
             </div>
           )}
 
-          {/* ── TAB: Tax / KRA ──────────────────────────────────────────── */}
+          {/* ── TAB: Tax / KRA ── */}
           {tab === "tax" && (
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
@@ -538,10 +646,11 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
                 options={["Yes", "No"]}
               />
               <Field label="WHT Rate (%)" hint="Resident: 15% | Non-Resident Bank: 15% (ITA s.35)">
-                <input type="number" step="0.01" min="0" max="30"
-                  value={form.withholding_tax_rate === 0 ? "" : form.withholding_tax_rate}
-                  onChange={e => set("withholding_tax_rate", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls}
+                <NumericInput
+                  value={form.withholding_tax_rate}
+                  onChange={v => set("withholding_tax_rate", v)}
+                  max="30"
+                  placeholder="15"
                   disabled={form.withholding_tax_applicable === "No"}
                 />
               </Field>
@@ -600,26 +709,29 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
             </div>
           )}
 
-          {/* ── TAB: Payment ────────────────────────────────────────────── */}
+          {/* ── TAB: Payment ── */}
           {tab === "payment" && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Amount Paid (KES)">
-                <input type="number" step="0.01" min="0"
-                  value={form.amount_paid === 0 ? "" : form.amount_paid}
-                  onChange={e => set("amount_paid", e.target.value === "" ? "" : parseFloat(e.target.value))}
-                  className={inputCls} />
+                <NumericInput
+                  value={form.amount_paid}
+                  onChange={v => set("amount_paid", v)}
+                  placeholder="e.g. 120000"
+                />
               </Field>
               <Field label="Payment Date">
                 <input type="date" value={form.payment_date ?? ""}
-                  onChange={e => set("payment_date", e.target.value || null)} className={inputCls} />
+                  onChange={e => set("payment_date", e.target.value || null)}
+                  className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <SelectField label="Payment Status *" value={form.payment_status}
                 onChange={v => set("payment_status", v as PaymentStatus)} options={PAYMENT_STATUSES} />
               <Field label="Days in Arrears">
-                <input type="number" min="0"
-                  value={form.days_in_arrears === 0 ? "" : form.days_in_arrears}
-                  onChange={e => set("days_in_arrears", e.target.value === "" ? "" : parseInt(e.target.value))}
-                  className={inputCls} />
+                <IntegerInput
+                  value={form.days_in_arrears}
+                  onChange={v => set("days_in_arrears", v)}
+                  placeholder="0"
+                />
               </Field>
               <div className="col-span-2">
                 <Field label="Notes">
@@ -658,14 +770,7 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
               Cancel
             </button>
             <button
-              onClick={() => {
-                const cleaned = { ...form };
-                (["tenure_months","principal_approved_kes","interest_rate_pa","opening_balance",
-                  "installment_due","principal_portion","interest_portion","fees_and_charges",
-                  "withholding_tax_rate","amount_paid","days_in_arrears"] as (keyof LoanFormData)[])
-                  .forEach(key => { if ((cleaned as any)[key] === "") (cleaned as any)[key] = 0; });
-                onSave(cleaned);
-              }}
+              onClick={() => onSave(form)}
               disabled={loading}
               className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
               style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
@@ -689,7 +794,7 @@ function DeleteConfirm({ loan, onConfirm, onClose, loading }: {
       <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-white/10"
+        className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-[#0d0d0d]/95"
         initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.18 }}>
         <div className="flex items-start gap-4 mb-5">
@@ -764,16 +869,31 @@ function LoansTable({
             placeholder="Search by facility ref, lender, purpose or period…"
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
         </div>
-        <select value={filterType} onChange={e => setFilterType(e.target.value as LoanType | "All")}
-          className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
-          <option value="All">All Types</option>
-          {LOAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as PaymentStatus | "All")}
-          className={inputCls + " appearance-none pr-10 font-medium text-sm min-w-[9rem]"}>
-          <option value="All">All Statuses</option>
-          {PAYMENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+
+        <div className="relative" style={{ minWidth: "9rem" }}>
+          <select
+            value={filterType}
+            onChange={e => setFilterType(e.target.value as LoanType | "All")}
+            className={selectCls}
+          >
+            <option value="All">All Types</option>
+            {LOAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <SelectChevron />
+        </div>
+
+        <div className="relative" style={{ minWidth: "9rem" }}>
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value as PaymentStatus | "All")}
+            className={selectCls}
+          >
+            <option value="All">All Statuses</option>
+            {PAYMENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <SelectChevron />
+        </div>
+
         <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
           {filtered.length} / {loans.length} shown
         </div>
@@ -804,11 +924,11 @@ function LoansTable({
             {LOAN_TYPES.filter(lt => grouped[lt]).map(lt => {
               const s    = LOAN_TYPE_STYLE[lt];
               const rows = grouped[lt]!;
-              const isOpen      = expanded[lt] ?? true;
-              const grpPrincipal= rows.reduce((a, l) => a + Number(l.principal_approved_kes), 0);
-              const grpDue      = rows.reduce((a, l) => a + Number(l.total_due), 0);
-              const grpPaid     = rows.reduce((a, l) => a + Number(l.amount_paid), 0);
-              const grpWHT      = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
+              const isOpen       = expanded[lt] ?? true;
+              const grpPrincipal = rows.reduce((a, l) => a + Number(l.principal_approved_kes), 0);
+              const grpDue       = rows.reduce((a, l) => a + Number(l.total_due), 0);
+              const grpPaid      = rows.reduce((a, l) => a + Number(l.amount_paid), 0);
+              const grpWHT       = rows.reduce((a, l) => a + Number(l.withholding_tax_amount), 0);
               return (
                 <div key={lt}>
                   {/* Group header */}
@@ -994,35 +1114,31 @@ function LoansTable({
 
 // ─── GLOBAL LOANS TABLE ───────────────────────────────────────────────────────
 function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
-  const [loans, setLoans]         = useState<Loan[]>([]);
-  const [projects, setProjects]   = useState<Project[]>([]);
-  const [fetching, setFetching]   = useState(true);
-  const [search, setSearch]       = useState("");
+  const [loans, setLoans]               = useState<Loan[]>([]);
+  const [projects, setProjects]         = useState<Project[]>([]);
+  const [fetching, setFetching]         = useState(true);
+  const [search, setSearch]             = useState("");
   const [filterType, setFilterType]     = useState<LoanType | "All">("All");
   const [filterStatus, setFilterStatus] = useState<PaymentStatus | "All">("All");
-  const [expanded, setExpanded]   = useState<Record<string, boolean>>({});
-  const [modal, setModal]         = useState<null | "create" | "edit">(null);
-  const [editing, setEditing]     = useState<Loan | null>(null);
-  const [deleting, setDeleting]   = useState<Loan | null>(null);
-  const [saving, setSaving]       = useState(false);
-  const { toasts, push }          = useToast();
+  const [expanded, setExpanded]         = useState<Record<string, boolean>>({});
+  const [modal, setModal]               = useState<null | "create" | "edit">(null);
+  const [editing, setEditing]           = useState<Loan | null>(null);
+  const [deleting, setDeleting]         = useState<Loan | null>(null);
+  const [saving, setSaving]             = useState(false);
+  const { toasts, push }                = useToast();
 
   const fetchLoans = useCallback(async () => {
     setFetching(true);
     try {
       const data = await api.listAll();
       setLoans(data ?? []);
-      // Auto-expand all groups
       const types = [...new Set((data ?? []).map(l => l.loan_type))];
       setExpanded(Object.fromEntries(types.map(t => [t, true])));
     } catch (err: any) {
       push(err.message || "Failed to load loans", "error");
-    } finally {
-      setFetching(false);
-    }
+    } finally { setFetching(false); }
   }, [push]);
 
-  // Also fetch projects so the modal can show a project picker
   useEffect(() => {
     fetchLoans();
     api.projects().then(setProjects).catch(() => {});
@@ -1043,8 +1159,7 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
       }
       return true;
     }),
-    [loans, filterType, filterStatus, search]
-  );
+  [loans, filterType, filterStatus, search]);
 
   const grouped = useMemo(() => {
     const byType: Partial<Record<LoanType, Loan[]>> = {};
@@ -1103,6 +1218,10 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
     } finally { setSaving(false); }
   };
 
+  // Count standalone vs project-linked
+  const standaloneCount = loans.filter(l => !l.project_id).length;
+  const linkedCount = loans.filter(l => l.project_id).length;
+
   return (
     <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mt-12">
       <CardHeader className="pb-0">
@@ -1110,7 +1229,10 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
           <div>
             <CardTitle className="text-2xl font-bold">All Loans — Global View</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
-              Every loan across all projects, plus standalone loans not linked to any project.
+              Every loan across all projects plus standalone loans not linked to any project.
+              {standaloneCount > 0 && (
+                <span className="ml-2 text-primary font-medium">{standaloneCount} standalone · {linkedCount} project-linked</span>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1135,7 +1257,6 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
 
-        {/* KRA banner */}
         {totals.wht > 0 && (
           <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-4 text-xs font-mono">
             <div className="flex items-center gap-2">
@@ -1169,23 +1290,16 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
         emptyLabel="No loans found across any project."
       />
 
-      {/* Footer count */}
       {!fetching && loans.length > 0 && (
         <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
           <span className="tabular-nums">{loans.length} total loan record{loans.length !== 1 ? "s" : ""}</span>
         </div>
       )}
 
-      {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <LoanModal
-            initial={makeEmptyForm(null)}
-            onSave={handleCreate}
-            onClose={() => setModal(null)}
-            loading={saving}
-            projects={projects}
-          />
+          <LoanModal initial={makeEmptyForm(null)} onSave={handleCreate}
+            onClose={() => setModal(null)} loading={saving} projects={projects} />
         )}
         {modal === "edit" && editing && (
           <LoanModal
@@ -1200,6 +1314,18 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
       {deleting && (
         <DeleteConfirm loan={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
       )}
+
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(t => (
+            <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
+                t.type === "success" ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300" : "bg-rose-950/80 border-rose-500/25 text-rose-300"
+              }`}>{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </Card>
   );
 }
@@ -1288,7 +1414,7 @@ function ProjectCard({ project, onSelect, loanCount }: {
 }
 
 // ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
-function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
+function ProjectPickerView({ onSelect, canEdit }: { onSelect: (p: Project) => void; canEdit: boolean }) {
   const [projects, setProjects]         = useState<Project[]>([]);
   const [fetching, setFetching]         = useState(true);
   const [search, setSearch]             = useState("");
@@ -1361,9 +1487,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects",       value: projects.length,                       sub: "in system" },
-            { label: "Projects with Loans",  value: Object.keys(loanCounts).length,        sub: "have loan records" },
-            { label: "Total Loan Records",   value: totalLoans,                            sub: "across all projects" },
+            { label: "Total Projects",      value: projects.length,                sub: "in system"            },
+            { label: "Projects with Loans", value: Object.keys(loanCounts).length, sub: "have loan records"    },
+            { label: "Total Loan Records",  value: totalLoans,                     sub: "across all projects"  },
           ].map(c => (
             <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -1386,14 +1512,22 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                   placeholder="Search by name, number or city…"
                   className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
               </div>
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
-                {statuses.map(s => (
-                  <option key={s} value={s}>
-                    {s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
-                  </option>
-                ))}
-              </select>
+
+              <div className="relative" style={{ minWidth: "9rem" }}>
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  className={selectCls}
+                >
+                  {statuses.map(s => (
+                    <option key={s} value={s}>
+                      {s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+                <SelectChevron />
+              </div>
+
               <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
                 {filtered.length} / {projects.length} shown
               </div>
@@ -1430,6 +1564,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             )}
           </CardContent>
         </Card>
+
+        {/* ── GLOBAL LOANS TABLE below project picker ── */}
+        <GlobalLoansTable canEdit={canEdit} />
       </div>
     </div>
   );
@@ -1728,29 +1865,24 @@ export default function LoansPage({ projectId, canEdit = true }: Props) {
   }, [projectId]);
 
   return (
-    <>
-      <AnimatePresence mode="wait">
-        {selectedProject ? (
-          <motion.div key={selectedProject.id}
-            initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
-            <LoansView
-              project={selectedProject}
-              canEdit={canEdit}
-              onBack={() => { if (!projectId) setSelectedProject(null); }}
-            />
-          </motion.div>
-        ) : (
-          <motion.div key="picker"
-            initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
-            <ProjectPickerView onSelect={setSelectedProject} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Global loans table — always visible below, shows ALL loans */}
-      <GlobalLoansTable canEdit={canEdit} />
-    </>
+    <AnimatePresence mode="wait">
+      {selectedProject ? (
+        <motion.div key={selectedProject.id}
+          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
+          <LoansView
+            project={selectedProject}
+            canEdit={canEdit}
+            onBack={() => { if (!projectId) setSelectedProject(null); }}
+          />
+        </motion.div>
+      ) : (
+        <motion.div key="picker"
+          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
+          <ProjectPickerView onSelect={setSelectedProject} canEdit={canEdit} />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

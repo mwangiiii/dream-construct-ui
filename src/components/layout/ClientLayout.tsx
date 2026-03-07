@@ -80,7 +80,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
         <div className="p-3 sm:p-6">
           <Link to="/admin" className="flex items-center gap-1 sm:gap-2 mb-6 sm:mb-8">
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center">
-              <span className="text-background font-bold text-base sm:text-xl">DC</span>
+              <span className="text-background font-bold text-base sm:text-xl">RC</span>
             </div>
             {isSidebarOpen && (
               <div className="flex flex-col">

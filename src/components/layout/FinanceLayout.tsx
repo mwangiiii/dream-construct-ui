@@ -59,8 +59,8 @@ const financeRoutes = [
   {
     group: "Operations",
     items: [
-        // { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
-        // { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
+        { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
+        { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
       { label: "Work in Progress",    path: "/finance/work-in-progress",                   icon: HardHat              },
       { label: "Change Orders",       path: "/finance/change-orders-tracking",             icon: GitPullRequestArrow  },
       { label: "Inventory",           path: "/finance/inventory",                          icon: Package              },
