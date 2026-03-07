@@ -1,73 +1,96 @@
-# Welcome to your Lovable project
+# Dream Construct UI
 
-## Project info
+## What is this codebase?
 
-**URL**: https://lovable.dev/projects/60e4aa55-3e43-4269-a098-1c9fdba8db61
+Dream Construct UI is a comprehensive web application designed for construction companies and project managers. It provides tools for managing projects, finances, teams, media galleries, reviews, and more. The codebase is built with modern web technologies and follows a modular architecture for scalability and maintainability.
 
-## How can I edit this code?
+### Architecture Overview
 
-There are several ways of editing your application.
+- **Frontend:** Built with React and TypeScript, using Vite for fast development and Tailwind CSS for responsive design.
+- **Components:** Modular UI components for navigation, dashboards, popups, and forms.
+- **Pages:** Route-based pages for core business functions (Projects, Finance, Team, Contact, etc.).
+- **Hooks & Utilities:** Custom hooks and utility functions to streamline state management and API interactions.
+- **API Integration:** Uses Supabase for authentication, database, and serverless functions.
+- **Database:** SQL migrations and Supabase functions for backend logic and data storage.
+- **Assets:** Organized static files and media for easy access and management.
 
-**Use Lovable**
+### Main Features
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/60e4aa55-3e43-4269-a098-1c9fdba8db61) and start prompting.
+- Project management: Track milestones, updates, approvals, and issues
+- Finance tracking: Manage accounts, balance sheets, cash flow, and reconciliation
+- Team and worker management: Assignments, attendance, and roles
+- Media gallery: Upload and organize project photos and documents
+- Reviews and feedback: Collect and display client and staff reviews
+- Authentication: Secure login, registration, and password management
+- Responsive UI: Works seamlessly across devices
 
-Changes made via Lovable will be committed automatically to this repo.
+This codebase is ideal for construction businesses seeking a digital platform to streamline operations, improve collaboration, and enhance transparency.
 
-**Use your preferred IDE**
+...existing code...
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+# Dream Construct UI
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+This is a modern construction website built with React, TypeScript, Vite, Tailwind CSS, and Supabase. It features modular components, project management, finance tracking, media galleries, and more.
 
-Follow these steps:
+## Project Structure
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+- **src/**: Main application code
+  - **pages/**: Route-based pages (e.g., Projects, Finance, Team, Contact, etc.)
+  - **components/**: Reusable UI and layout components
+  - **api/**: Client-side API utilities
+  - **lib/**: Auth, Supabase client, and utility functions
+  - **hooks/**: Custom React hooks
+  - **types/**: TypeScript type definitions
+- **supabase/**: Serverless functions and SQL migrations for backend/database
+- **public/**: Static assets
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## Getting Started
 
-# Step 3: Install the necessary dependencies.
-npm i
+### Prerequisites
+- Node.js (v18+ recommended)
+- npm (comes with Node.js)
+- [Supabase account](https://supabase.com/) (for backend features)
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+### Setup
 
-**Edit a file directly in GitHub**
+1. Clone the repository:
+	```sh
+	git clone <YOUR_GIT_URL>
+	cd dream-construct-ui
+	```
+2. Install dependencies:
+	```sh
+	npm install
+	```
+3. Configure environment variables:
+	- Create a `.env` file if needed for Supabase keys and other secrets.
+4. Start the development server:
+	```sh
+	npm run dev
+	```
+5. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Features
 
-**Use GitHub Codespaces**
+- Modular React components for construction business workflows
+- Project, finance, and team management
+- Media gallery and reviews
+- Authentication and Supabase integration
+- Responsive UI with Tailwind CSS
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Deployment
 
-## What technologies are used for this project?
+- Deploy with [Vercel](https://vercel.com/) or any static hosting provider
+- For backend, deploy Supabase functions and migrations as needed
+- Optionally, use Lovable or GitHub Codespaces for cloud development
 
-This project is built with:
+## Contribution
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. Fork the repo and create a new branch
+2. Make your changes
+3. Run `npm run lint` and `npm run build` to check for errors
+4. Submit a pull request
 
-## How can I deploy this project?
+## License
 
-Simply open [Lovable](https://lovable.dev/projects/60e4aa55-3e43-4269-a098-1c9fdba8db61) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+MIT
