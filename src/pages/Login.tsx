@@ -147,18 +147,19 @@ const Login = () => {
         return;
       }
 
-      const role = userRoles?.[0]?.role_name;
+      // userRoles is an array of roles
+      const roleNames = userRoles?.map((r: any) => r.role_name) || [];
       let redirectPath = "/client/dashboard"; // default
-      if (role === "client") {
-        redirectPath = "/client/dashboard";
-      } else if (role === "manager") {
-        redirectPath = "/manager";
-      } else if (role === "admin") {
-        redirectPath = "/admin";
-      } else if (role === "project_manager") {
+      if (roleNames.includes("finance")) {
+        redirectPath = "/finance/dashboard";
+      } else if (roleNames.includes("project_manager")) {
         redirectPath = "/pm/dashboard";
-      } else {
-        redirectPath = "/client/dashboard"; // fallback
+      } else if (roleNames.includes("manager")) {
+        redirectPath = "/manager";
+      } else if (roleNames.includes("admin")) {
+        redirectPath = "/admin";
+      } else if (roleNames.includes("client")) {
+        redirectPath = "/client/dashboard";
       }
       navigate(redirectPath, { replace: true });
 
