@@ -206,7 +206,8 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
 // ============================================
 
 export function getPrimaryRole(roles: UserRole[]): UserRole['role_name'] {
-  const priority: UserRole['role_name'][] = ['admin', 'manager', 'project_manager', 'client'];
+  // Add 'finance' to priority and type
+  const priority: UserRole['role_name'][] = ['finance', 'admin', 'manager', 'project_manager', 'client'];
   for (const role of priority) {
     if (roles.some(r => r.role_name === role)) return role;
   }
@@ -215,10 +216,11 @@ export function getPrimaryRole(roles: UserRole[]): UserRole['role_name'] {
 
 export function getDashboardRoute(roles: UserRole[]): string {
   const role = getPrimaryRole(roles);
-  const map: Record<UserRole['role_name'], string> = {
+  const map: Record<string, string> = {
+    finance: '/finance/dashboard',
     admin: '/admin',
     manager: '/manager/dashboard',
-    project_manager: '/projects/dashboard',
+    project_manager: '/pm/dashboard',
     client: '/client/dashboard',
   };
   return map[role] || '/client/dashboard';

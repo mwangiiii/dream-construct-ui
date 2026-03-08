@@ -118,3 +118,5 @@ COMMENT ON TABLE  public.balance_sheet_entries            IS 'Balance sheet entr
 COMMENT ON COLUMN public.balance_sheet_entries.entry_type IS 'Asset | Liability | Equity';
 COMMENT ON COLUMN public.balance_sheet_entries.amount     IS 'Non-negative monetary value in USD';
 COMMENT ON COLUMN public.balance_sheet_entries.entry_date IS 'The date this entry is effective (accounting date)';
+
+ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;

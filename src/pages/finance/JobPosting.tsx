@@ -785,7 +785,7 @@ function PostingsView({ project, canEdit, onBack }: {
     try {
       const row = await api.create({ ...form, project_id: project.id });
       setPostings(p => [...p, row].sort((a, b) => a.phase.localeCompare(b.phase) || a.stage.localeCompare(b.stage)));
-      push("Job posting added."); setModal(null);
+      push("Job Costing added."); setModal(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to add posting.", "error"); }
     finally { setSaving(false); }
   };

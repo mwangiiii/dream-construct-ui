@@ -72,7 +72,7 @@ const ProjectManagerLayout = ({ children }: ProjectManagerLayoutProps) => {
     // { icon: AlertCircle, label: "Problems & Issues", path: "/project_manager/issues" },
     // { icon: BarChart2, label: "Reports", path: "/project_manager/reports" },
     { icon: Settings, label: "Settings", path: "/project_manager/settings" },
-    { icon: ScrollText, label: "Policies", path: "/project_manager/policies" },
+    { icon: ScrollText, label: "Policies", path: "/policies" },
   ];
 
   // Determine sidebar width and margin classes

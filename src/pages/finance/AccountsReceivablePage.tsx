@@ -492,7 +492,7 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
                   onChange={e => set("client", e.target.value)}
                   placeholder="e.g. Acme Corp." className={inputCls} />
               </Field>
-              <Field label="Billing Number *">
+              <Field label="Invoice Number *">
                 <input value={form.billing_number}
                   onChange={e => set("billing_number", e.target.value)}
                   placeholder="e.g. BILL-2026-001" className={inputCls} />

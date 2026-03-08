@@ -39,7 +39,7 @@ const financeRoutes = [
       {
         label: "Dashboard",
         path: "/finance/dashboard",
-        short: "DB",
+        short: "Home",
         icon: LayoutDashboard,
       },
     ],
@@ -47,47 +47,43 @@ const financeRoutes = [
   {
     group: "Accounting",
     items: [
-      { label: "Chart of Accounts",    path: "/finance/chart-of-accounts",              icon: BookOpen            },
-      { label: "Balance Sheet",        path: "/finance/balance-sheet",                   icon: LayoutGrid           },
-      { label: "Income Statement",     path: "/finance/income-statement",                   icon: TrendingUp           },
-      { label: "Cash Flow",            path: "/finance/cash-flow",                          icon: Droplets             },
-      { label: "Statement of Account", path: "/finance/statement-of-account",               icon: FileText             },
-      { label: "Bank Reconciliation",  path: "/finance/bank-reconciliation",                icon: Landmark             },
-
+      { label: "Chart of Accounts",    short: "CoA",  path: "/finance/chart-of-accounts",               icon: BookOpen            },
+      { label: "Balance Sheet",        short: "BS",   path: "/finance/balance-sheet",                    icon: LayoutGrid          },
+      { label: "Income Statement",     short: "IS",   path: "/finance/income-statement",                 icon: TrendingUp          },
+      { label: "Cash Flow",            short: "CF",   path: "/finance/cash-flow",                        icon: Droplets            },
+      { label: "Statement of Account", short: "SA",   path: "/finance/statement-of-account",             icon: FileText            },
+      { label: "Bank Reconciliation",  short: "BR",   path: "/finance/bank-reconciliation",              icon: Landmark            },
     ],
   },
   {
     group: "Operations",
     items: [
-        { label: "Accounts Payable",    path: "/finance/accounts-payable",                   icon: CreditCard           },
-        { label: "Accounts Receivable", path: "/finance/accounts-received",                  icon: ReceiptText          },
-      { label: "Work in Progress",    path: "/finance/work-in-progress",                   icon: HardHat              },
-      { label: "Change Orders",       path: "/finance/change-orders-tracking",             icon: GitPullRequestArrow  },
-      { label: "Inventory",           path: "/finance/inventory",                          icon: Package              },
+      { label: "Accounts Payable",     short: "AP",   path: "/finance/accounts-payable",                 icon: CreditCard          },
+      { label: "Accounts Receivable",  short: "AR",   path: "/finance/accounts-received",                icon: ReceiptText         },
+      { label: "Work in Progress",     short: "WIP",  path: "/finance/work-in-progress",                 icon: HardHat             },
+      { label: "Change Orders",        short: "CO",   path: "/finance/change-orders-tracking",           icon: GitPullRequestArrow },
+      { label: "Inventory",            short: "INV",  path: "/finance/inventory",                        icon: Package             },
     ],
   },
   {
     group: "Assets & Tax",
     items: [
-      { label: "Fixed Assets",        path: "/finance/fixed-asset-equipment-depreciation", short: "FA",  icon: Wrench               },
-      { label: "Loans",               path: "/finance/loans",                              short: "LN",  icon: Banknote             },
-      { label: "Taxes",               path: "/finance/taxes",                              short: "TAX", icon: Receipt              },
+      { label: "Fixed Assets",         short: "FA",   path: "/finance/fixed-asset-equipment-depreciation", icon: Wrench            },
+      { label: "Loans",                short: "LN",   path: "/finance/loans",                            icon: Banknote            },
+      { label: "Taxes",                short: "TAX",  path: "/finance/taxes",                            icon: Receipt             },
     ],
   },
   {
     group: "Payroll",
     items: [
-      { label: "Job Posting",         path: "/finance/job-posting",                        short: "JP",  icon: Briefcase            },
-      { label: "Payroll Checklist",   path: "/finance/payroll-checklist",                  short: "PC",  icon: ClipboardList        },
+      { label: "Job Costing",          short: "JP",   path: "/finance/job-posting",                      icon: Briefcase           },
+      { label: "Payroll Checklist",    short: "PC",   path: "/finance/payroll-checklist",                icon: ClipboardList       },
     ],
   },
   {
     group: "Closing",
     items: [
-      { label: "Month-End Checklist", path: "/finance/end-month-close-checklist",          short: "MEC", icon: CalendarCheck        },
-      
-
-      
+      { label: "Month-End Checklist",  short: "MEC",  path: "/finance/end-month-close-checklist",        icon: CalendarCheck       },
     ],
   },
 ];
@@ -248,7 +244,6 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           {sidebarOpen && <span className="font-medium">View Site</span>}
         </Link>
 
-        {/* Policies link, similar to AdminLayout */}
         <Link
           to="/policies"
           className={`
@@ -409,22 +404,29 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           </div>
         </header>
 
-        {/* Mobile tab strip */}
-        <div className="glass border-b border-border overflow-x-auto">
-          <div className="flex gap-1 px-4 py-2 min-w-max">
+        {/* ── Mobile tab strip ── */}
+        {/* overflow-x-auto on the outer div, min-w-max on inner so pills never wrap or disappear */}
+        <div className="glass border-b border-border" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ display: "flex", gap: "4px", padding: "8px 16px", minWidth: "max-content" }}>
             {allItems.map((item) => {
               const isActive = location.pathname === item.path;
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`
-                    px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-all
-                    ${isActive
-                      ? "bg-primary/20 text-primary border border-primary/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-white/5"
-                    }
-                  `}
+                  style={{
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    transition: "all 0.15s",
+                    border: isActive ? "1px solid rgba(var(--primary), 0.3)" : "1px solid transparent",
+                    backgroundColor: isActive ? "rgba(var(--primary), 0.15)" : "transparent",
+                    color: isActive ? "rgb(var(--primary))" : "#94a3b8",
+                  }}
                 >
                   {item.short}
                 </Link>

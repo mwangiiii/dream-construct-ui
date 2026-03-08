@@ -7,6 +7,16 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 
+// ─── DATABASE MIGRATION NOTE ──────────────────────────────────────────────────
+// To support global (unlinked) entries, run this once in your Supabase SQL editor:
+//
+//   ALTER TABLE balance_sheet_entries
+//     ALTER COLUMN project_id DROP NOT NULL;
+//
+// This allows balance sheet entries that belong to the firm as a whole rather
+// than any specific project (e.g. corporate equity, firm-wide liabilities, etc.).
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 interface Project {
@@ -33,7 +43,7 @@ type EquityType    = "Owner's Capital" | "Retained Earnings" | "Shareholder Equi
 
 interface BalanceSheetEntry {
   id:             number;
-  project_id:     string | null;   // nullable — entries can be unlinked from any project
+  project_id:     string | null;
   entry_type:     EntryType;
   asset_type:     AssetType     | null;
   liability_type: LiabilityType | null;
@@ -79,7 +89,6 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
-// Entry date is always today and cannot be changed by the user
 const todayISO = () => new Date().toISOString().split("T")[0];
 
 const makeEmptyForm = (projectId: string | null = null): BSFormData => ({
@@ -91,7 +100,7 @@ const makeEmptyForm = (projectId: string | null = null): BSFormData => ({
   account_name:   "",
   description:    "",
   amount:         0,
-  entry_date:     todayISO(),   // always today, read-only
+  entry_date:     todayISO(),
   reference_code: "",
   notes:          "",
 });
@@ -115,6 +124,7 @@ const api = {
     if (error) throw new Error(error.message);
     return (data ?? []) as Project[];
   },
+
   async list(projectId: string): Promise<BalanceSheetEntry[]> {
     const { data, error } = await supabase
       .from("balance_sheet_entries")
@@ -125,6 +135,8 @@ const api = {
     if (error) throw new Error(error.message);
     return (data ?? []) as BalanceSheetEntry[];
   },
+
+  // Fetches ALL entries: project-linked AND firm-wide (null project_id)
   async listAll(): Promise<BalanceSheetEntry[]> {
     const { data, error } = await supabase
       .from("balance_sheet_entries")
@@ -134,12 +146,52 @@ const api = {
     if (error) throw new Error(error.message);
     return (data ?? []) as BalanceSheetEntry[];
   },
+
+  // Fetches ONLY entries not linked to any project (firm-wide entries)
+  async listFirmWide(): Promise<BalanceSheetEntry[]> {
+    const { data, error } = await supabase
+      .from("balance_sheet_entries")
+      .select("*")
+      .is("project_id", null)
+      .order("entry_type")
+      .order("entry_date", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []) as BalanceSheetEntry[];
+  },
+
   async create(body: BSFormData): Promise<BalanceSheetEntry> {
-    // Always stamp today as the posting date; strip null project_id
-    const payload: Record<string, unknown> = { ...body, entry_date: todayISO() };
-    if (payload.project_id === null || payload.project_id === "") {
-      delete payload.project_id;
+    const today = todayISO();
+
+    // Build a clean payload — never include project_id key at all when it's null/empty.
+    // This is required because the column may be NOT NULL in the DB.
+    // IMPORTANT: Run `ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;`
+    // in Supabase to allow firm-wide entries without a project link.
+    if (body.project_id === null || body.project_id === "") {
+      // Omit project_id entirely from the insert payload
+      const { project_id: _omit, ...rest } = body;
+      void _omit;
+      const payload = { ...rest, entry_date: today };
+      const { data, error } = await supabase
+        .from("balance_sheet_entries")
+        .insert([payload])
+        .select()
+        .single();
+      if (error) {
+        // Surface a clear message if the column is still NOT NULL
+        if (error.message.includes("not-null") || error.code === "23502") {
+          throw new Error(
+            "Your database requires a project to be selected. " +
+            "To allow firm-wide entries, run this SQL in Supabase:\n\n" +
+            "ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;"
+          );
+        }
+        throw new Error(error.message);
+      }
+      return data as BalanceSheetEntry;
     }
+
+    // Linked to a specific project
+    const payload = { ...body, entry_date: today };
     const { data, error } = await supabase
       .from("balance_sheet_entries")
       .insert([payload])
@@ -148,6 +200,7 @@ const api = {
     if (error) throw new Error(error.message);
     return data as BalanceSheetEntry;
   },
+
   async remove(id: number): Promise<void> {
     const { error } = await supabase.from("balance_sheet_entries").delete().eq("id", id);
     if (error) throw new Error(error.message);
@@ -161,7 +214,7 @@ function useToast() {
   const push = useCallback((msg: string, type: "success" | "error" = "success") => {
     const id = Date.now();
     setToasts((p) => [...p, { id, msg, type }]);
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
+    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 4500);
   }, []);
   return { toasts, push };
 }
@@ -183,14 +236,52 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// ─── POST JOURNAL ENTRY MODAL ─────────────────────────────────────────────────
-// Balance sheets are never directly edited.
-// Users post new journal entries; the balance sheet reflects them automatically.
-// • Entry date is auto-set to today and is READ-ONLY.
-// • Amount field shows a KES prefix instead of a currency symbol icon.
-// • No "edit" mode — this modal is for new entries only.
+// ─── DB MIGRATION BANNER ──────────────────────────────────────────────────────
 
-function PostEntryModal({ initial, onSave, onClose, loading, projects = [], showProjectSelector = false }: {
+function MigrationBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
+    >
+      <div className="flex items-start gap-3">
+        <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <div className="flex-1">
+          <p className="text-amber-300 font-semibold mb-1">Database migration required for firm-wide entries</p>
+          <p className="text-amber-200/70 text-xs mb-2">
+            Run this once in your Supabase SQL editor to allow entries not linked to any project:
+          </p>
+          <code className="block bg-black/30 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-200 font-mono mb-2">
+            ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;
+          </code>
+          <p className="text-amber-200/50 text-xs">
+            This is safe — existing project-linked entries are unaffected.
+          </p>
+        </div>
+        <button onClick={onDismiss} className="text-amber-400/60 hover:text-amber-300 transition-colors p-0.5">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── POST JOURNAL ENTRY MODAL ─────────────────────────────────────────────────
+
+function PostEntryModal({
+  initial,
+  onSave,
+  onClose,
+  loading,
+  projects = [],
+  showProjectSelector = false,
+}: {
   initial:              BSFormData;
   onSave:               (d: BSFormData) => void;
   onClose:              () => void;
@@ -215,6 +306,9 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
   const subKey = form.entry_type === "Asset" ? "asset_type" : form.entry_type === "Liability" ? "liability_type" : "equity_type";
   const subVal = ((form as Record<string, unknown>)[subKey] as string) ?? "";
 
+  // Resolve whether this is a firm-wide entry (no project selected)
+  const isFirmWide = showProjectSelector && (form.project_id === null || form.project_id === "");
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div
@@ -234,7 +328,9 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
           <div>
             <h2 className="text-base font-semibold text-foreground tracking-tight">Post Journal Entry</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Entries are posted today and cannot be back-dated or edited after posting.
+              {isFirmWide
+                ? "This entry will be posted to the firm-wide balance sheet (not linked to any project)."
+                : "Entries are posted today and cannot be back-dated or edited after posting."}
             </p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10 ml-4 flex-shrink-0">
@@ -247,22 +343,28 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
         {/* Body */}
         <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
 
-          {/* Project selector — only in global sheet modal */}
+          {/* Project selector — only shown in global sheet modal */}
           {showProjectSelector && (
             <div className="col-span-2">
-              <Field label="Linked Project (optional)">
+              <Field label="Linked Project">
                 <select
                   value={form.project_id ?? ""}
                   onChange={(e) => setField("project_id", e.target.value === "" ? null : e.target.value)}
                   className={inputCls}
                 >
-                  <option value="">— Not linked to any project —</option>
+                  <option value="">— Firm-wide entry (no project) —</option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.project_number} · {p.title}
                     </option>
                   ))}
                 </select>
+                {/* Contextual hint */}
+                <p className="text-[11px] text-muted-foreground/70 mt-1 leading-relaxed">
+                  {isFirmWide
+                    ? "⬆ This entry will appear only in the consolidated firm balance sheet."
+                    : "This entry will appear in both the project balance sheet and the consolidated view."}
+                </p>
               </Field>
             </div>
           )}
@@ -290,7 +392,7 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
             </Field>
           </div>
 
-          {/* Amount — KES prefix badge, no currency icon */}
+          {/* Amount — KES prefix */}
           <Field label="Amount *">
             <div className="flex items-stretch gap-0">
               <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 border-r-0 whitespace-nowrap select-none">
@@ -311,16 +413,14 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
             </div>
           </Field>
 
-          {/* Posting date — read-only, always today */}
+          {/* Posting date — always today, read-only */}
           <Field label="Posting Date">
-            <div className="relative">
-              <div className={readonlyCls + " flex items-center gap-2"}>
-                <svg className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-                </svg>
-                <span>{fmtDate(form.entry_date)}</span>
-                <span className="ml-auto text-[10px] uppercase tracking-widest text-muted-foreground/40 font-medium">Auto</span>
-              </div>
+            <div className={readonlyCls + " flex items-center gap-2"}>
+              <svg className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+              </svg>
+              <span>{fmtDate(form.entry_date)}</span>
+              <span className="ml-auto text-[10px] uppercase tracking-widest text-muted-foreground/40 font-medium">Auto</span>
             </div>
           </Field>
 
@@ -365,7 +465,7 @@ function PostEntryModal({ initial, onSave, onClose, loading, projects = [], show
           </button>
           <button
             onClick={() => onSave(form)}
-            disabled={loading}
+            disabled={loading || !form.account_name.trim() || !form.amount}
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
           >
@@ -437,7 +537,6 @@ function ProjectCard({ project, onSelect, entryCount }: {
       transition={{ duration: 0.2 }}
       className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/5 p-5 hover:border-primary/30 hover:bg-white/8 transition-all duration-200 shadow-sm group"
     >
-      {/* Top row */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
@@ -454,19 +553,16 @@ function ProjectCard({ project, onSelect, entryCount }: {
         )}
       </div>
 
-      {/* Title */}
       <h3 className="font-semibold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors leading-snug line-clamp-1">
         {project.title}
       </h3>
 
-      {/* Description */}
       {project.description && (
         <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
           {project.description}
         </p>
       )}
 
-      {/* Meta */}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
         {project.site_city && (
           <span className="flex items-center gap-1">
@@ -494,7 +590,6 @@ function ProjectCard({ project, onSelect, entryCount }: {
         )}
       </div>
 
-      {/* Progress bar */}
       {project.progress_percent != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
@@ -513,7 +608,6 @@ function ProjectCard({ project, onSelect, entryCount }: {
         </div>
       )}
 
-      {/* CTA hint */}
       <div className="flex items-center gap-1 text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
         <span>Open Balance Sheet</span>
         <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -524,73 +618,27 @@ function ProjectCard({ project, onSelect, entryCount }: {
   );
 }
 
-// ─── GLOBAL BALANCE SHEET VIEW ────────────────────────────────────────────────
-// Mirrors EntriesView exactly — same collapsible groups, stat cards, accounting-
-// equation bar — but totals ALL entries across every project plus unlinked ones.
-// Adds a "Project" column. No edit button — delete (reverse) only.
+// ─── ENTRIES TABLE ────────────────────────────────────────────────────────────
+// Reusable collapsible table used in both per-project and global views.
 
-function GlobalBalanceSheetView({ canEdit, projects }: {
-  canEdit:  boolean;
-  projects: Project[];
+function EntriesTable({
+  entries,
+  canEdit,
+  onDelete,
+  showProjectCol = false,
+  projects = [],
+}: {
+  entries:         BalanceSheetEntry[];
+  canEdit:         boolean;
+  onDelete:        (e: BalanceSheetEntry) => void;
+  showProjectCol?: boolean;
+  projects?:       Project[];
 }) {
-  const [entries,    setEntries]    = useState<BalanceSheetEntry[]>([]);
-  const [fetching,   setFetching]   = useState(false);
-  const [search,     setSearch]     = useState("");
-  const [filterType, setFilterType] = useState<EntryType | "All">("All");
-  const [expanded,   setExpanded]   = useState<Record<string, boolean>>(
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(
     Object.fromEntries(ENTRY_TYPES.map((t) => [t, true]))
   );
-  const [showModal, setShowModal] = useState(false);
-  const [deleting,  setDeleting]  = useState<BalanceSheetEntry | null>(null);
-  const [saving,    setSaving]    = useState(false);
-
-  const { toasts, push } = useToast();
-
-  const fetchEntries = useCallback(async () => {
-    setFetching(true);
-    setEntries([]);
-    try {
-      const data = await api.listAll();
-      setEntries(data);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
-    } finally { setFetching(false); }
-  }, [push]);
-
-  useEffect(() => { fetchEntries(); }, [fetchEntries]);
-
-  const handleCreate = async (form: BSFormData) => {
-    setSaving(true);
-    try {
-      const row = await api.create(form);
-      setEntries((p) => [row, ...p]);
-      push("Entry posted successfully.");
-      setShowModal(false);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to post entry.", "error");
-    } finally { setSaving(false); }
-  };
-
-  const handleDelete = async () => {
-    if (!deleting) return;
-    setSaving(true);
-    try {
-      await api.remove(deleting.id);
-      setEntries((p) => p.filter((e) => e.id !== deleting.id));
-      push("Entry reversed.");
-      setDeleting(null);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to reverse entry.", "error");
-    } finally { setSaving(false); }
-  };
-
-  const projectLabel = (pid: string | null) => {
-    if (!pid) return <span className="italic text-muted-foreground/60 text-xs">Unlinked</span>;
-    const p = projects.find((pr) => pr.id === pid);
-    return p
-      ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
-      : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
-  };
+  const [search,     setSearch]     = useState("");
+  const [filterType, setFilterType] = useState<EntryType | "All">("All");
 
   const filtered = useMemo(() =>
     entries.filter((e) => {
@@ -614,6 +662,171 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
     return g;
   }, [filtered]);
 
+  const projectLabel = (pid: string | null) => {
+    if (!pid) return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">
+        Firm-wide
+      </span>
+    );
+    const p = projects.find((pr) => pr.id === pid);
+    return p
+      ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
+      : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
+  };
+
+  // Column count for subtotal colSpan
+  // Columns: Ref | Account Name | Sub-type | Description | Date | [Project] | Amount | [Actions]
+  const baseDataCols = showProjectCol ? 6 : 5; // up to and including Amount col index - 1
+
+  return (
+    <>
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 px-6 pt-2 pb-4">
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by account name or reference…"
+            className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
+        </div>
+        <select value={filterType} onChange={(e) => setFilterType(e.target.value as EntryType | "All")}
+          className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
+          <option value="All">All Types</option>
+          {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
+        </select>
+        <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+          {filtered.length} / {entries.length} shown
+        </div>
+      </div>
+
+      {Object.keys(grouped).length === 0 ? null : (
+        <div className="divide-y divide-white/8">
+          {ENTRY_TYPES.filter((t) => grouped[t]).map((entryType) => {
+            const s        = TYPE_STYLE[entryType];
+            const isOpen   = expanded[entryType];
+            const rows     = grouped[entryType]!;
+            const subtotal = rows.reduce((sum, e) => sum + Number(e.amount), 0);
+
+            return (
+              <div key={entryType}>
+                <button
+                  onClick={() => setExpanded((p) => ({ ...p, [entryType]: !p[entryType] }))}
+                  className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                    <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{entryType}s</span>
+                    <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
+                    <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                      fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="m6 9 6 6 6-6"/>
+                    </svg>
+                  </div>
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isOpen && (
+                    <motion.div key="rows"
+                      initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
+                              {[
+                                "Ref",
+                                "Account Name",
+                                "Sub-type",
+                                "Description",
+                                "Date",
+                                ...(showProjectCol ? ["Scope"] : []),
+                                "Amount",
+                                ...(canEdit ? ["Actions"] : []),
+                              ].map((h) => (
+                                <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((entry, ri) => {
+                              const subType =
+                                entry.entry_type === "Asset"     ? entry.asset_type     :
+                                entry.entry_type === "Liability" ? entry.liability_type :
+                                entry.equity_type;
+                              return (
+                                <motion.tr key={entry.id}
+                                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: ri * 0.02, duration: 0.16 }}
+                                  className={`border-b border-white/5 transition-colors ${s.row}`}>
+                                  <td className="px-5 py-3.5 whitespace-nowrap">
+                                    <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
+                                  </td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
+                                  <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
+                                    <span className="line-clamp-1">{entry.description || "—"}</span>
+                                  </td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
+                                  {showProjectCol && (
+                                    <td className="px-5 py-3.5 whitespace-nowrap">{projectLabel(entry.project_id)}</td>
+                                  )}
+                                  <td className="px-5 py-3.5 whitespace-nowrap">
+                                    <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(entry.amount)}</span>
+                                  </td>
+                                  {canEdit && (
+                                    <td className="px-5 py-3.5 whitespace-nowrap">
+                                      <button onClick={() => onDelete(entry)} title="Reverse entry"
+                                        className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                          <polyline points="3 6 5 6 21 6"/>
+                                          <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                        </svg>
+                                      </button>
+                                    </td>
+                                  )}
+                                </motion.tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
+                              <td colSpan={baseDataCols}
+                                className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                Total {entryType}s
+                              </td>
+                              <td className={`px-5 py-2.5 text-sm font-bold tabular-nums ${s.accent}`}>{fmt(subtotal)}</td>
+                              {canEdit && <td />}
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── STAT CARDS ───────────────────────────────────────────────────────────────
+
+function StatCards({
+  entries,
+  filterType,
+  setFilterType,
+}: {
+  entries:       BalanceSheetEntry[];
+  filterType:    EntryType | "All";
+  setFilterType: (t: EntryType | "All") => void;
+}) {
   const totals = useMemo(
     () => Object.fromEntries(
       ENTRY_TYPES.map((type) => [
@@ -629,9 +842,159 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
   const totalEquity      = totals.Equity    ?? 0;
   const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
 
-  // cols: Ref / Account Name / Sub-type / Description / Date / Project / Amount / [Actions]
-  // "Actions" column now only has delete — so colSpan before Amount = 6
-  const subtotalColSpan = canEdit ? 6 : 6;
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
+      className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {ENTRY_TYPES.map((type) => {
+        const s        = TYPE_STYLE[type];
+        const isActive = filterType === type;
+        return (
+          <button key={type}
+            onClick={() => setFilterType(isActive ? "All" : type)}
+            className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 ${
+              isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
+            }`}
+          >
+            <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{type}s</div>
+            <div className="text-3xl font-bold text-foreground tabular-nums">{fmt(totals[type] ?? 0)}</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {entries.filter((e) => e.entry_type === type).length} entries
+            </div>
+          </button>
+        );
+      })}
+      <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
+        isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
+      }`}>
+        <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
+        <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
+          {isBalanced ? "Balanced" : "Unbalanced"}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          {isBalanced ? "Equation checks out" : `Δ ${fmt(Math.abs(totalAssets - (totalLiabilities + totalEquity)))}`}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── ACCOUNTING EQUATION BAR ──────────────────────────────────────────────────
+
+function AccountingBar({ entries }: { entries: BalanceSheetEntry[] }) {
+  const totalAssets      = entries.filter((e) => e.entry_type === "Asset").reduce((s, e) => s + Number(e.amount), 0);
+  const totalLiabilities = entries.filter((e) => e.entry_type === "Liability").reduce((s, e) => s + Number(e.amount), 0);
+  const totalEquity      = entries.filter((e) => e.entry_type === "Equity").reduce((s, e) => s + Number(e.amount), 0);
+  const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
+
+  if (!entries.length) return null;
+
+  return (
+    <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
+      <span className="text-muted-foreground">Accounting Equation:</span>
+      <span className="text-emerald-400">Assets {fmt(totalAssets)}</span>
+      <span className="text-muted-foreground">=</span>
+      <span className="text-rose-400">Liabilities {fmt(totalLiabilities)}</span>
+      <span className="text-muted-foreground">+</span>
+      <span className="text-violet-400">Equity {fmt(totalEquity)}</span>
+      <span className="text-muted-foreground">=</span>
+      <span className={isBalanced ? "text-emerald-400" : "text-rose-400"}>{fmt(totalLiabilities + totalEquity)}</span>
+      <Badge className={`ml-auto ${isBalanced
+        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+        : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
+        {isBalanced ? "✓ Balanced" : "⚠ Unbalanced"}
+      </Badge>
+    </div>
+  );
+}
+
+// ─── GLOBAL BALANCE SHEET VIEW ────────────────────────────────────────────────
+// Shows ALL entries: project-linked + firm-wide, with tabs to toggle between views.
+
+type GlobalTab = "consolidated" | "firm-wide";
+
+function GlobalBalanceSheetView({ canEdit, projects }: {
+  canEdit:  boolean;
+  projects: Project[];
+}) {
+  const [allEntries,      setAllEntries]      = useState<BalanceSheetEntry[]>([]);
+  const [fetching,        setFetching]        = useState(false);
+  const [showModal,       setShowModal]       = useState(false);
+  const [deleting,        setDeleting]        = useState<BalanceSheetEntry | null>(null);
+  const [saving,          setSaving]          = useState(false);
+  const [activeTab,       setActiveTab]       = useState<GlobalTab>("consolidated");
+  const [showMigration,   setShowMigration]   = useState(false);
+  const [filterType,      setFilterType]      = useState<EntryType | "All">("All");
+
+  const { toasts, push } = useToast();
+
+  const fetchEntries = useCallback(async () => {
+    setFetching(true);
+    setAllEntries([]);
+    try {
+      const data = await api.listAll();
+      setAllEntries(data);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
+    } finally { setFetching(false); }
+  }, [push]);
+
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  const handleCreate = async (form: BSFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      setAllEntries((p) => [row, ...p]);
+      push("Entry posted successfully.");
+      setShowModal(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to post entry.";
+      push(msg, "error");
+      // If it's the NOT NULL constraint error, surface the migration banner
+      if (msg.includes("not-null") || msg.includes("migration") || msg.includes("project_id")) {
+        setShowMigration(true);
+      }
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setAllEntries((p) => p.filter((e) => e.id !== deleting.id));
+      push("Entry reversed.");
+      setDeleting(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to reverse entry.", "error");
+    } finally { setSaving(false); }
+  };
+
+  // Consolidated = all entries; firm-wide = only null project_id
+  const displayEntries = useMemo(() =>
+    activeTab === "firm-wide"
+      ? allEntries.filter((e) => e.project_id === null)
+      : allEntries,
+  [allEntries, activeTab]);
+
+  // Tallies for the tab badges
+  const firmWideCount     = allEntries.filter((e) => e.project_id === null).length;
+  const consolidatedCount = allEntries.length;
+
+  const tabs: { key: GlobalTab; label: string; count: number; description: string }[] = [
+    {
+      key:         "consolidated",
+      label:       "Consolidated",
+      count:       consolidatedCount,
+      description: "All entries across every project + firm-wide",
+    },
+    {
+      key:         "firm-wide",
+      label:       "Firm-wide Only",
+      count:       firmWideCount,
+      description: "Entries not linked to any specific project",
+    },
+  ];
 
   return (
     <div className="container mx-auto px-4 pb-20">
@@ -642,7 +1005,7 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
           {toasts.map((t) => (
             <motion.div key={t.id}
               initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
-              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg max-w-sm ${
                 t.type === "success"
                   ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
                   : "bg-rose-950/80 border-rose-500/25 text-rose-300"
@@ -674,67 +1037,47 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
         )}
       </AnimatePresence>
 
-      {/* Section divider + heading */}
+      {/* Section heading */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-px flex-1 bg-white/10" />
-          <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium px-2">Consolidated View</span>
+          <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium px-2">Firm Overview</span>
           <div className="h-px flex-1 bg-white/10" />
         </div>
         <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
-          Global{" "}
+          Consolidated{" "}
           <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
             Balance Sheet
           </span>
         </h2>
         <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
-          Auto-generated from all posted journal entries across every project. Post new entries to update the balance sheet.
+          Auto-generated from all posted journal entries across every project and firm-wide accounts.
+          Post a new entry to update any section of the balance sheet.
         </p>
       </motion.div>
 
-      {/* Stat cards */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
-        className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {ENTRY_TYPES.map((type) => {
-          const s        = TYPE_STYLE[type];
-          const isActive = filterType === type;
-          return (
-            <button key={type}
-              onClick={() => setFilterType(isActive ? "All" : type)}
-              className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 ${
-                isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
-              }`}
-            >
-              <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{type}s</div>
-              <div className="text-3xl font-bold text-foreground tabular-nums">{fmt(totals[type] ?? 0)}</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {entries.filter((e) => e.entry_type === type).length} entries
-              </div>
-            </button>
-          );
-        })}
-        <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
-          isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
-        }`}>
-          <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
-          <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
-            {isBalanced ? "Balanced" : "Unbalanced"}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1">
-            {isBalanced ? "Equation checks out" : `Δ ${fmt(Math.abs(totalAssets - (totalLiabilities + totalEquity)))}`}
-          </div>
-        </div>
-      </motion.div>
+      {/* Migration banner */}
+      <AnimatePresence>
+        {showMigration && <MigrationBanner onDismiss={() => setShowMigration(false)} />}
+      </AnimatePresence>
+
+      {/* Stat cards — always consolidated totals */}
+      <StatCards entries={allEntries} filterType={filterType} setFilterType={setFilterType} />
 
       {/* Main card */}
       <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
         <CardHeader className="pb-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <CardTitle className="text-3xl font-bold">All Posted Entries</CardTitle>
+            <div>
+              <CardTitle className="text-3xl font-bold">All Posted Entries</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                The consolidated view is the authoritative firm-wide balance sheet.
+              </p>
+            </div>
             {canEdit && (
               <button
                 onClick={() => setShowModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg flex-shrink-0"
                 style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -745,39 +1088,52 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
             )}
           </div>
 
-          {/* Toolbar */}
-          <div className="flex flex-col sm:flex-row gap-3 mt-5">
-            <div className="relative flex-1">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-              </svg>
-              <input value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by account name or reference…"
-                className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
-            </div>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value as EntryType | "All")}
-              className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
-              <option value="All">All Types</option>
-              {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
-            </select>
-            <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
-              {filtered.length} / {entries.length} shown
-            </div>
+          {/* Tabs */}
+          <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === tab.key
+                    ? "bg-white/10 text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums font-mono ${
+                  activeTab === tab.key
+                    ? "bg-primary/20 text-primary"
+                    : "bg-white/5 text-muted-foreground"
+                }`}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
           </div>
+
+          {/* Tab description */}
+          <p className="text-xs text-muted-foreground mt-2">
+            {tabs.find((t) => t.key === activeTab)?.description}
+          </p>
         </CardHeader>
 
         <CardContent className="p-0">
           {fetching ? (
             <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
               <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-              Loading global balance sheet…
+              Loading balance sheet…
             </div>
-          ) : Object.keys(grouped).length === 0 ? (
+          ) : displayEntries.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
               <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                 <path d="M3 6h18M3 12h18M3 18h18"/>
               </svg>
-              <p className="text-sm">No entries posted yet.</p>
+              <p className="text-sm">
+                {activeTab === "firm-wide"
+                  ? "No firm-wide entries yet. Post an entry without linking a project."
+                  : "No entries posted yet."}
+              </p>
               {canEdit && (
                 <button onClick={() => setShowModal(true)} className="text-xs text-primary hover:underline">
                   Post first entry
@@ -785,129 +1141,31 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
               )}
             </div>
           ) : (
-            <div className="divide-y divide-white/8">
-              {ENTRY_TYPES.filter((t) => grouped[t]).map((entryType) => {
-                const s        = TYPE_STYLE[entryType];
-                const isOpen   = expanded[entryType];
-                const rows     = grouped[entryType]!;
-                const subtotal = rows.reduce((sum, e) => sum + Number(e.amount), 0);
-
-                return (
-                  <div key={entryType}>
-                    <button
-                      onClick={() => setExpanded((p) => ({ ...p, [entryType]: !p[entryType] }))}
-                      className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className={`w-2 h-2 rounded-full ${s.dot}`} />
-                        <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{entryType}s</span>
-                        <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
-                        <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <path d="m6 9 6 6 6-6"/>
-                        </svg>
-                      </div>
-                    </button>
-
-                    <AnimatePresence initial={false}>
-                      {isOpen && (
-                        <motion.div key="rows"
-                          initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
-                                  {["Ref", "Account Name", "Sub-type", "Description", "Date", "Project", "Amount", ...(canEdit ? ["Actions"] : [])].map((h) => (
-                                    <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {rows.map((entry, ri) => {
-                                  const subType =
-                                    entry.entry_type === "Asset"     ? entry.asset_type     :
-                                    entry.entry_type === "Liability" ? entry.liability_type :
-                                    entry.equity_type;
-                                  return (
-                                    <motion.tr key={entry.id}
-                                      initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                                      transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                      className={`border-b border-white/5 transition-colors ${s.row}`}>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
-                                        <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
-                                      </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
-                                      <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
-                                        <span className="line-clamp-1">{entry.description || "—"}</span>
-                                      </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">{projectLabel(entry.project_id)}</td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
-                                        <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(entry.amount)}</span>
-                                      </td>
-                                      {canEdit && (
-                                        <td className="px-5 py-3.5 whitespace-nowrap">
-                                          {/* Delete (reverse) only — no edit button */}
-                                          <button onClick={() => setDeleting(entry)} title="Reverse entry"
-                                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                              <polyline points="3 6 5 6 21 6"/>
-                                              <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                                            </svg>
-                                          </button>
-                                        </td>
-                                      )}
-                                    </motion.tr>
-                                  );
-                                })}
-                              </tbody>
-                              <tfoot>
-                                <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                  <td colSpan={subtotalColSpan}
-                                    className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Total {entryType}s
-                                  </td>
-                                  <td className={`px-5 py-2.5 text-sm font-bold tabular-nums ${s.accent}`}>{fmt(subtotal)}</td>
-                                  {canEdit && <td />}
-                                </tr>
-                              </tfoot>
-                            </table>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })}
-
-              {entries.length > 0 && (
-                <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
-                  <span className="text-muted-foreground">Accounting Equation:</span>
-                  <span className="text-emerald-400">Assets {fmt(totalAssets)}</span>
-                  <span className="text-muted-foreground">=</span>
-                  <span className="text-rose-400">Liabilities {fmt(totalLiabilities)}</span>
-                  <span className="text-muted-foreground">+</span>
-                  <span className="text-violet-400">Equity {fmt(totalEquity)}</span>
-                  <span className="text-muted-foreground">=</span>
-                  <span className={isBalanced ? "text-emerald-400" : "text-rose-400"}>{fmt(totalLiabilities + totalEquity)}</span>
-                  <Badge className={`ml-auto ${isBalanced
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                    : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
-                    {isBalanced ? "✓ Balanced" : "⚠ Unbalanced"}
-                  </Badge>
-                </div>
-              )}
-            </div>
+            <>
+              <EntriesTable
+                entries={displayEntries}
+                canEdit={canEdit}
+                onDelete={setDeleting}
+                showProjectCol={activeTab === "consolidated"}
+                projects={projects}
+              />
+              <AccountingBar entries={displayEntries} />
+            </>
           )}
 
-          {!fetching && entries.length > 0 && (
+          {!fetching && allEntries.length > 0 && (
             <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
-              <span className="tabular-nums">{entries.length} total entries across all projects</span>
+              <div className="flex items-center gap-4">
+                <span className="tabular-nums">{allEntries.length} total entries</span>
+                {firmWideCount > 0 && (
+                  <span className="tabular-nums text-violet-400/70">
+                    {firmWideCount} firm-wide
+                  </span>
+                )}
+                <span className="tabular-nums text-primary/70">
+                  {allEntries.length - firmWideCount} project-linked
+                </span>
+              </div>
               <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
@@ -931,6 +1189,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   const [search,       setSearch]       = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [entryCounts,  setEntryCounts]  = useState<Record<string, number>>({});
+  const [firmWideCount, setFirmWideCount] = useState(0);
+
   const { toasts, push } = useToast();
 
   useEffect(() => {
@@ -949,6 +1209,12 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             });
             setEntryCounts(tally);
           }
+          // Also count firm-wide entries
+          const { count } = await supabase
+            .from("balance_sheet_entries")
+            .select("id", { count: "exact", head: true })
+            .is("project_id", null);
+          setFirmWideCount(count ?? 0);
         }
       })
       .catch((err: unknown) => push(err instanceof Error ? err.message : "Failed to load projects.", "error"))
@@ -972,6 +1238,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
       return true;
     }),
   [projects, search, statusFilter]);
+
+  const totalEntries = Object.values(entryCounts).reduce((a, b) => a + b, 0) + firmWideCount;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -1004,21 +1272,22 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             </span>
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
-            Select a project to view or manage its balance sheet entries.
+            Select a project to view its balance sheet, or scroll down for the firm-wide consolidated view.
           </p>
         </motion.div>
 
         {/* Summary stat cards */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
-          className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Projects",        value: projects.length,                                         sub: "in system"           },
-            { label: "Projects with Entries",  value: Object.keys(entryCounts).length,                        sub: "have BS records"     },
-            { label: "Total BS Entries",       value: Object.values(entryCounts).reduce((a, b) => a + b, 0),  sub: "across all projects" },
+            { label: "Total Projects",        value: projects.length,                         sub: "in system",                color: "" },
+            { label: "Projects with Entries",  value: Object.keys(entryCounts).length,         sub: "have BS records",          color: "" },
+            { label: "Firm-wide Entries",      value: firmWideCount,                           sub: "not project-linked",       color: "text-violet-400" },
+            { label: "Total BS Entries",        value: totalEntries,                            sub: "across all accounts",      color: "" },
           ].map((card) => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{card.label}</div>
-              <div className="text-3xl font-bold text-foreground tabular-nums">{card.value}</div>
+              <div className={`text-3xl font-bold tabular-nums ${card.color || "text-foreground"}`}>{card.value}</div>
               <div className="text-xs text-muted-foreground mt-1">{card.sub}</div>
             </div>
           ))}
@@ -1078,13 +1347,14 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">
                   {projects.length} total projects · {Object.keys(entryCounts).length} with balance sheet entries
+                  {firmWideCount > 0 && ` · ${firmWideCount} firm-wide entries`}
                 </span>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Global balance sheet — below projects grid */}
+        {/* Global consolidated balance sheet */}
         {!fetching && (
           <GlobalBalanceSheetView canEdit={true} projects={projects} />
         )}
@@ -1099,16 +1369,12 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 function EntriesView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
 }) {
-  const [entries,    setEntries]    = useState<BalanceSheetEntry[]>([]);
-  const [fetching,   setFetching]   = useState(false);
-  const [search,     setSearch]     = useState("");
-  const [filterType, setFilterType] = useState<EntryType | "All">("All");
-  const [expanded,   setExpanded]   = useState<Record<string, boolean>>(
-    Object.fromEntries(ENTRY_TYPES.map((t) => [t, true]))
-  );
+  const [entries,  setEntries]  = useState<BalanceSheetEntry[]>([]);
+  const [fetching, setFetching] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [deleting,  setDeleting]  = useState<BalanceSheetEntry | null>(null);
   const [saving,    setSaving]    = useState(false);
+  const [filterType, setFilterType] = useState<EntryType | "All">("All");
 
   const { toasts, push } = useToast();
 
@@ -1150,43 +1416,7 @@ function EntriesView({ project, canEdit, onBack }: {
     } finally { setSaving(false); }
   };
 
-  const filtered = useMemo(() =>
-    entries.filter((e) => {
-      if (filterType !== "All" && e.entry_type !== filterType) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return e.account_name.toLowerCase().includes(q) ||
-          (e.reference_code ?? "").toLowerCase().includes(q) ||
-          (e.description   ?? "").toLowerCase().includes(q);
-      }
-      return true;
-    }),
-  [entries, filterType, search]);
-
-  const grouped = useMemo(() => {
-    const g: Partial<Record<EntryType, BalanceSheetEntry[]>> = {};
-    ENTRY_TYPES.forEach((t) => {
-      const items = filtered.filter((e) => e.entry_type === t);
-      if (items.length) g[t] = items;
-    });
-    return g;
-  }, [filtered]);
-
-  const totals = useMemo(
-    () => Object.fromEntries(
-      ENTRY_TYPES.map((type) => [
-        type,
-        entries.filter((e) => e.entry_type === type).reduce((s, e) => s + Number(e.amount), 0),
-      ])
-    ) as Record<EntryType, number>,
-    [entries]
-  );
-
-  const totalAssets      = totals.Asset     ?? 0;
-  const totalLiabilities = totals.Liability ?? 0;
-  const totalEquity      = totals.Equity    ?? 0;
-  const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
-  const status           = project.status ?? "planning";
+  const status = project.status ?? "planning";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -1264,38 +1494,7 @@ function EntriesView({ project, canEdit, onBack }: {
         </motion.div>
 
         {/* Stat cards */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
-          className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {ENTRY_TYPES.map((type) => {
-            const s        = TYPE_STYLE[type];
-            const isActive = filterType === type;
-            return (
-              <button key={type}
-                onClick={() => setFilterType(isActive ? "All" : type)}
-                className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 ${
-                  isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
-                }`}
-              >
-                <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{type}s</div>
-                <div className="text-3xl font-bold text-foreground tabular-nums">{fmt(totals[type] ?? 0)}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {entries.filter((e) => e.entry_type === type).length} entries
-                </div>
-              </button>
-            );
-          })}
-          <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
-            isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
-          }`}>
-            <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
-            <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
-              {isBalanced ? "Balanced" : "Unbalanced"}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {isBalanced ? "Equation checks out" : `Δ ${fmt(Math.abs(totalAssets - (totalLiabilities + totalEquity)))}`}
-            </div>
-          </div>
-        </motion.div>
+        <StatCards entries={entries} filterType={filterType} setFilterType={setFilterType} />
 
         {/* Main entries card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
@@ -1304,7 +1503,7 @@ function EntriesView({ project, canEdit, onBack }: {
               <div>
                 <CardTitle className="text-3xl font-bold">Posted Entries</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Balance sheet is auto-generated from posted journal entries. To adjust, post a new correcting entry.
+                  Balance sheet is auto-generated from posted journal entries. To adjust, post a correcting entry.
                 </p>
               </div>
               {canEdit && (
@@ -1320,26 +1519,6 @@ function EntriesView({ project, canEdit, onBack }: {
                 </button>
               )}
             </div>
-
-            {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row gap-3 mt-5">
-              <div className="relative flex-1">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-                </svg>
-                <input value={search} onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by account name or reference…"
-                  className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
-              </div>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value as EntryType | "All")}
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
-                <option value="All">All Types</option>
-                {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
-              </select>
-              <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
-                {filtered.length} / {entries.length} shown
-              </div>
-            </div>
           </CardHeader>
 
           <CardContent className="p-0">
@@ -1348,7 +1527,7 @@ function EntriesView({ project, canEdit, onBack }: {
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
                 Loading balance sheet…
               </div>
-            ) : Object.keys(grouped).length === 0 ? (
+            ) : entries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M3 6h18M3 12h18M3 18h18"/>
@@ -1361,124 +1540,15 @@ function EntriesView({ project, canEdit, onBack }: {
                 )}
               </div>
             ) : (
-              <div className="divide-y divide-white/8">
-
-                {ENTRY_TYPES.filter((t) => grouped[t]).map((entryType) => {
-                  const s        = TYPE_STYLE[entryType];
-                  const isOpen   = expanded[entryType];
-                  const rows     = grouped[entryType]!;
-                  const subtotal = rows.reduce((sum, e) => sum + Number(e.amount), 0);
-
-                  return (
-                    <div key={entryType}>
-                      <button
-                        onClick={() => setExpanded((p) => ({ ...p, [entryType]: !p[entryType] }))}
-                        className="w-full flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className={`w-2 h-2 rounded-full ${s.dot}`} />
-                          <span className={`text-xs font-bold uppercase tracking-[0.12em] ${s.accent}`}>{entryType}s</span>
-                          <Badge className={`text-xs px-2.5 py-0.5 font-mono border rounded-full ${s.badge}`}>{rows.length}</Badge>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
-                          <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                            <path d="m6 9 6 6 6-6"/>
-                          </svg>
-                        </div>
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {isOpen && (
-                          <motion.div key="rows"
-                            initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
-                                    {["Ref", "Account Name", "Sub-type", "Description", "Date", "Amount", ...(canEdit ? ["Actions"] : [])].map((h) => (
-                                      <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {rows.map((entry, ri) => {
-                                    const subType =
-                                      entry.entry_type === "Asset"     ? entry.asset_type     :
-                                      entry.entry_type === "Liability" ? entry.liability_type :
-                                      entry.equity_type;
-                                    return (
-                                      <motion.tr key={entry.id}
-                                        initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                        className={`border-b border-white/5 transition-colors ${s.row}`}>
-                                        <td className="px-5 py-3.5 whitespace-nowrap">
-                                          <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
-                                        </td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
-                                        <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
-                                          <span className="line-clamp-1">{entry.description || "—"}</span>
-                                        </td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
-                                        <td className="px-5 py-3.5 whitespace-nowrap">
-                                          <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(entry.amount)}</span>
-                                        </td>
-                                        {canEdit && (
-                                          <td className="px-5 py-3.5 whitespace-nowrap">
-                                            {/* Reverse (delete) only — no edit */}
-                                            <button onClick={() => setDeleting(entry)} title="Reverse entry"
-                                              className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
-                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                                <polyline points="3 6 5 6 21 6"/>
-                                                <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                                              </svg>
-                                            </button>
-                                          </td>
-                                        )}
-                                      </motion.tr>
-                                    );
-                                  })}
-                                </tbody>
-                                <tfoot>
-                                  <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                    <td colSpan={canEdit ? 5 : 4}
-                                      className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                      Total {entryType}s
-                                    </td>
-                                    <td className={`px-5 py-2.5 text-sm font-bold tabular-nums ${s.accent}`}>{fmt(subtotal)}</td>
-                                    {canEdit && <td />}
-                                  </tr>
-                                </tfoot>
-                              </table>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
-
-                {entries.length > 0 && (
-                  <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
-                    <span className="text-muted-foreground">Accounting Equation:</span>
-                    <span className="text-emerald-400">Assets {fmt(totalAssets)}</span>
-                    <span className="text-muted-foreground">=</span>
-                    <span className="text-rose-400">Liabilities {fmt(totalLiabilities)}</span>
-                    <span className="text-muted-foreground">+</span>
-                    <span className="text-violet-400">Equity {fmt(totalEquity)}</span>
-                    <span className="text-muted-foreground">=</span>
-                    <span className={isBalanced ? "text-emerald-400" : "text-rose-400"}>{fmt(totalLiabilities + totalEquity)}</span>
-                    <Badge className={`ml-auto ${isBalanced
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                      : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
-                      {isBalanced ? "✓ Balanced" : "⚠ Unbalanced"}
-                    </Badge>
-                  </div>
-                )}
-              </div>
+              <>
+                <EntriesTable
+                  entries={entries}
+                  canEdit={canEdit}
+                  onDelete={setDeleting}
+                  showProjectCol={false}
+                />
+                <AccountingBar entries={entries} />
+              </>
             )}
 
             {!fetching && entries.length > 0 && (

@@ -209,6 +209,10 @@ const financeGroups = [
   },
 ];
 
+// All short tags in order for the footer bar
+const allTags = financeGroups.flatMap((g) => g.items.map((i) => i.short));
+const highlightedTags = ["CoA", "BS", "IS", "CF", "AP", "AR", "WIP"];
+
 // ─── Stagger animation variants ───────────────────────────────────────────────
 const containerVariants = {
   hidden: {},
@@ -404,9 +408,10 @@ const FinanceDashboardPage = () => {
         transition={{ delay: 0.3 }}
         className="mt-16 pt-8 border-t border-border"
       >
-        <GlassCard className="flex flex-col sm:flex-row items-center justify-between gap-4 p-6">
+        {/* Info row inside GlassCard — no scrollable content here so overflow:hidden is safe */}
+        <GlassCard className="p-6 mb-3">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary/20 to-accent/20 rounded-xl flex items-center justify-center">
+            <div className="w-12 h-12 bg-gradient-to-br from-primary/20 to-accent/20 rounded-xl flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-6 h-6 text-primary" />
             </div>
             <div>
@@ -416,20 +421,55 @@ const FinanceDashboardPage = () => {
               </p>
             </div>
           </div>
-          <div className="flex gap-3 flex-wrap justify-center">
-            {["CoA", "BS", "IS", "CF", "AP", "AR", "WIP"].map((tag) => (
+        </GlassCard>
+
+        {/*
+          ── Tags bar ──
+          Lives OUTSIDE GlassCard so no parent overflow:hidden can clip it.
+          Uses fully hardcoded inline styles (no CSS variables) so colors are
+          guaranteed to render visibly on every screen size and theme.
+        */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "nowrap",
+            gap: "8px",
+            overflowX: "auto",
+            paddingBottom: "8px",
+            WebkitOverflowScrolling: "touch",
+            msOverflowStyle: "none",
+          }}
+        >
+          {allTags.map((tag) => {
+            const isHighlighted = highlightedTags.includes(tag);
+            return (
               <span
                 key={tag}
-                className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold border border-primary/20"
+                style={{
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  padding: "4px 12px",
+                  borderRadius: "9999px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  letterSpacing: "0.05em",
+                  border: isHighlighted
+                    ? "1px solid rgba(234, 179, 8, 0.6)"
+                    : "1px solid rgba(148, 163, 184, 0.3)",
+                  backgroundColor: isHighlighted
+                    ? "rgba(234, 179, 8, 0.15)"
+                    : "rgba(148, 163, 184, 0.08)",
+                  color: isHighlighted
+                    ? "#eab308"
+                    : "#94a3b8",
+                  display: "inline-block",
+                }}
               >
                 {tag}
               </span>
-            ))}
-            <span className="px-3 py-1 rounded-full bg-white/5 text-muted-foreground text-xs border border-border">
-              +{totalModules - 7} more
-            </span>
-          </div>
-        </GlassCard>
+            );
+          })}
+        </div>
       </motion.div>
     </div>
   );
