@@ -23,6 +23,13 @@ interface Project {
   created_at: string;
 }
 
+interface Worker {
+  id: string;
+  name: string;
+  trade?: string | null;
+  phone?: string | null;
+}
+
 type PaymentStatus = "Paid" | "Unpaid" | "Pending" | "Overdue";
 type RateType = "Per Hour" | "Per Week" | "Per Month";
 
@@ -216,7 +223,7 @@ function calculateKenyaPayroll(
   };
 }
 
-function parseTimeWorked(timeStr: string, rateType: RateType): number {
+function parseTimeWorked(timeStr: string, _rateType: RateType): number {
   const lower = timeStr.toLowerCase().trim();
   if (!lower) return 0;
   const match = lower.match(/([\d.]+)/);
@@ -255,6 +262,37 @@ const api = {
     if (error) throw new Error(error.message);
     return (data ?? []) as Project[];
   },
+
+  // Fetch workers assigned to a specific project via worker_assignments → workers join
+  async workersForProject(projectId: string): Promise<Worker[]> {
+    const { data, error } = await supabase
+      .from("worker_assignments")
+      .select("workers(id, name, trade, phone)")
+      .eq("project_id", projectId);
+    if (error) return [];
+    // Deduplicate by worker id
+    const seen = new Set<string>();
+    const workers: Worker[] = [];
+    for (const row of (data ?? []) as any[]) {
+      const w = row.workers;
+      if (w && !seen.has(w.id)) {
+        seen.add(w.id);
+        workers.push({ id: w.id, name: w.name, trade: w.trade, phone: w.phone });
+      }
+    }
+    return workers.sort((a, b) => a.name.localeCompare(b.name));
+  },
+
+  // Fetch ALL workers across all projects (for global/company payroll)
+  async allWorkers(): Promise<Worker[]> {
+    const { data, error } = await supabase
+      .from("workers")
+      .select("id, name, trade, phone")
+      .order("name", { ascending: true });
+    if (error) return [];
+    return (data ?? []) as Worker[];
+  },
+
   async list(projectId: string): Promise<PayrollEntry[]> {
     const { data, error } = await supabase
       .from("payroll_checklist")
@@ -264,6 +302,7 @@ const api = {
     if (error) throw new Error(error.message);
     return ((data ?? []) as PayrollEntry[]).map(sanitizeEntry);
   },
+
   async listAll(): Promise<PayrollEntry[]> {
     const { data, error } = await supabase
       .from("payroll_checklist")
@@ -272,24 +311,22 @@ const api = {
     if (error) throw new Error(error.message);
     return ((data ?? []) as PayrollEntry[]).map(sanitizeEntry);
   },
-  async workerNames(projectId: string): Promise<string[]> {
-    const { data, error } = await supabase
-      .from("payroll_checklist")
-      .select("employee_name")
-      .eq("project_id", projectId);
-    if (error) return [];
-    const names = [...new Set((data ?? []).map((r: any) => r.employee_name as string).filter(Boolean))];
-    return names.sort();
-  },
+
   async create(form: PayrollFormData): Promise<PayrollEntry> {
+    const writable = toWritable(form);
+    // project_id is nullable — only include if not null
+    const payload = writable.project_id
+      ? writable
+      : { ...writable, project_id: null };
     const { data, error } = await supabase
       .from("payroll_checklist")
-      .insert([toWritable(form)])
+      .insert([payload])
       .select()
       .single();
     if (error) throw new Error(error.message);
     return sanitizeEntry(data as PayrollEntry);
   },
+
   async update(id: number, form: PayrollFormData): Promise<PayrollEntry> {
     const { data, error } = await supabase
       .from("payroll_checklist")
@@ -300,6 +337,7 @@ const api = {
     if (error) throw new Error(error.message);
     return sanitizeEntry(data as PayrollEntry);
   },
+
   async remove(id: number): Promise<void> {
     const { error } = await supabase.from("payroll_checklist").delete().eq("id", id);
     if (error) throw new Error(error.message);
@@ -318,18 +356,13 @@ function useToast() {
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
-
-// Base input class — shared by text inputs, textareas
 const inputCls =
   "w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all";
 
-// Select class — uses a solid dark background so the browser chrome renders correctly
-// `color-scheme: dark` ensures native <option> elements also appear dark
 const selectCls =
   "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all appearance-none pr-9 " +
   "bg-[#111318] border-white/10 [color-scheme:dark]";
 
-// Chevron SVG used as the dropdown arrow overlay
 const SelectChevron = () => (
   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -366,17 +399,35 @@ function SectionLabel({ label, dotColor, textColor, sub }: {
 }
 
 // ─── EMPLOYEE NAME AUTOCOMPLETE ───────────────────────────────────────────────
-function EmployeeNameInput({ value, onChange, suggestions }: {
+// Now accepts Worker[] for rich suggestions with trade info
+function EmployeeNameInput({ value, onChange, workers, plainSuggestions }: {
   value: string;
   onChange: (v: string) => void;
-  suggestions: string[];
+  workers?: Worker[];          // rich: from worker_assignments
+  plainSuggestions?: string[]; // fallback: plain name strings
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const filtered = useMemo(() =>
-    suggestions.filter((s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value),
-    [suggestions, value]
-  );
+
+  const filteredWorkers = useMemo(() => {
+    if (workers && workers.length > 0) {
+      return workers.filter(
+        (w) => w.name.toLowerCase().includes(value.toLowerCase()) && w.name !== value
+      );
+    }
+    return [];
+  }, [workers, value]);
+
+  const filteredPlain = useMemo(() => {
+    if (!workers || workers.length === 0) {
+      return (plainSuggestions ?? []).filter(
+        (s) => s.toLowerCase().includes(value.toLowerCase()) && s !== value
+      );
+    }
+    return [];
+  }, [workers, plainSuggestions, value]);
+
+  const hasResults = filteredWorkers.length > 0 || filteredPlain.length > 0;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -397,13 +448,29 @@ function EmployeeNameInput({ value, onChange, suggestions }: {
         autoComplete="off"
       />
       <AnimatePresence>
-        {open && filtered.length > 0 && (
+        {open && hasResults && (
           <motion.div
             initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
-            className="absolute z-50 top-full left-0 right-0 mt-1 rounded-xl border border-white/15 bg-[#0d0d0d]/95 backdrop-blur-xl shadow-2xl overflow-hidden"
+            className="absolute z-50 top-full left-0 right-0 mt-1 rounded-xl border border-white/15 bg-[#0d0d0d]/95 backdrop-blur-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto"
           >
-            {filtered.map((name) => (
+            {filteredWorkers.map((worker) => (
+              <button
+                key={worker.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onChange(worker.name); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-white/8 transition-colors flex items-center gap-2 text-foreground"
+              >
+                <span className="w-5 h-5 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0">
+                  {worker.name.charAt(0).toUpperCase()}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate font-medium">{worker.name}</p>
+                  {worker.trade && <p className="text-[10px] text-muted-foreground truncate">{worker.trade}</p>}
+                </div>
+              </button>
+            ))}
+            {filteredPlain.map((name) => (
               <button
                 key={name}
                 type="button"
@@ -417,7 +484,7 @@ function EmployeeNameInput({ value, onChange, suggestions }: {
               </button>
             ))}
             <div className="px-3 py-1.5 border-t border-white/8 text-[9px] text-muted-foreground/50">
-              Workers registered under this project
+              {workers && workers.length > 0 ? "Workers assigned to this project" : "Previously recorded employees"}
             </div>
           </motion.div>
         )}
@@ -511,25 +578,39 @@ function PayslipBreakdown({ gross, computed, pension }: {
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
-function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loading }: {
+// isGlobal = true means this is for the company-wide payroll (no project required)
+// isGlobal = false means project-level payroll (project is pre-set, not changeable)
+function EntryModal({ initial, projects, projectWorkers, allWorkers, isGlobal = false, onSave, onClose, loading }: {
   initial: PayrollFormData & { id?: number; updated_at?: string };
   projects?: Project[];
-  workerSuggestions?: string[];
+  projectWorkers?: Worker[];   // workers from worker_assignments for selected project
+  allWorkers?: Worker[];       // all workers in the company
+  isGlobal?: boolean;
   onSave: (d: PayrollFormData) => void;
   onClose: () => void;
   loading: boolean;
 }) {
   const [form, setForm] = useState<PayrollFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
-  const [localSuggestions, setLocalSuggestions] = useState<string[]>(workerSuggestions ?? []);
+
+  // For global modal: track workers based on selected project
+  const [dynamicProjectWorkers, setDynamicProjectWorkers] = useState<Worker[]>([]);
+  const [loadingWorkers, setLoadingWorkers] = useState(false);
 
   const set = <K extends keyof PayrollFormData>(k: K, v: PayrollFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
+  // When project selection changes in global modal, fetch project workers
   useEffect(() => {
-    if (!form.project_id || workerSuggestions) return;
-    api.workerNames(form.project_id).then(setLocalSuggestions);
-  }, [form.project_id, workerSuggestions]);
+    if (!isGlobal || !form.project_id) {
+      setDynamicProjectWorkers([]);
+      return;
+    }
+    setLoadingWorkers(true);
+    api.workersForProject(form.project_id)
+      .then(setDynamicProjectWorkers)
+      .finally(() => setLoadingWorkers(false));
+  }, [form.project_id, isGlobal]);
 
   useEffect(() => {
     if (form.rate <= 0) return;
@@ -560,7 +641,16 @@ function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loa
 
   const isValid = form.job_id.trim() !== "" && form.employee_name.trim() !== "" && form.gross_pay > 0;
   const timeWorkedPlaceholder = form.rate_type === "Per Hour" ? "e.g. 160 (hours)" : form.rate_type === "Per Week" ? "e.g. 4 (weeks)" : "e.g. 1 (month)";
-  const allSuggestions = localSuggestions;
+
+  // Determine which workers to show in autocomplete
+  const workerSuggestionsForModal: Worker[] = (() => {
+    if (isGlobal) {
+      // If a project is selected, show that project's workers; otherwise all company workers
+      if (form.project_id && dynamicProjectWorkers.length > 0) return dynamicProjectWorkers;
+      return allWorkers ?? [];
+    }
+    return projectWorkers ?? [];
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -579,9 +669,11 @@ function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loa
             </div>
             <div>
               <h2 className="text-sm font-bold text-foreground tracking-tight">
-                {isEdit ? "Edit Payroll Entry" : "New Payroll Entry"}
+                {isEdit ? "Edit Payroll Entry" : isGlobal ? "New Company Payroll Entry" : "New Project Payroll Entry"}
               </h2>
-              <p className="text-[10px] text-muted-foreground">Kenya statutory calculations applied automatically</p>
+              <p className="text-[10px] text-muted-foreground">
+                {isGlobal ? "Company-wide entry — project link is optional" : "Kenya statutory calculations applied automatically"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -600,24 +692,48 @@ function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loa
           {/* LEFT */}
           <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
 
-            {/* Project Picker — only shown in global modal */}
-            {projects && (
+            {/* ── Project Link (global modal only, fully optional) ── */}
+            {isGlobal && projects && (
               <>
-                <SectionLabel label="Linked Project (optional)" dotColor="bg-primary/70" textColor="text-primary/80" sub="Leave blank for standalone entry" />
-                <Field label="Project">
+                <SectionLabel
+                  label="Link to Project"
+                  dotColor="bg-primary/50"
+                  textColor="text-primary/70"
+                  sub="Optional — leave blank for company-wide entry"
+                />
+                <Field label="Project (optional)" hint="Linking a project will filter the employee list to that project's assigned workers">
                   <div className="relative">
                     <select
                       value={form.project_id ?? ""}
-                      onChange={(e) => set("project_id", e.target.value || null)}
+                      onChange={(e) => {
+                        set("project_id", e.target.value || null);
+                        set("employee_name", ""); // reset name when project changes
+                      }}
                       className={selectCls}
                     >
-                      <option value="">— Standalone (no project) —</option>
+                      <option value="">— No project (company-wide entry) —</option>
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>
                       ))}
                     </select>
                     <SelectChevron />
                   </div>
+                  {form.project_id && loadingWorkers && (
+                    <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 border border-white/20 border-t-primary rounded-full animate-spin inline-block" />
+                      Loading project workers…
+                    </p>
+                  )}
+                  {form.project_id && !loadingWorkers && dynamicProjectWorkers.length > 0 && (
+                    <p className="text-[10px] text-emerald-400/80 mt-1">
+                      ✓ {dynamicProjectWorkers.length} workers found for this project
+                    </p>
+                  )}
+                  {form.project_id && !loadingWorkers && dynamicProjectWorkers.length === 0 && (
+                    <p className="text-[10px] text-amber-400/80 mt-1">
+                      No assigned workers found — showing all company workers
+                    </p>
+                  )}
                 </Field>
               </>
             )}
@@ -629,11 +745,20 @@ function EntryModal({ initial, projects, workerSuggestions, onSave, onClose, loa
                 <input value={form.job_id} onChange={(e) => set("job_id", e.target.value)}
                   placeholder="J-001" className={inputCls} />
               </Field>
-              <Field label="Employee Name *">
+              <Field
+                label="Employee Name *"
+                hint={
+                  isGlobal
+                    ? form.project_id
+                      ? "Showing workers assigned to selected project"
+                      : "Showing all company workers"
+                    : "Showing workers assigned to this project"
+                }
+              >
                 <EmployeeNameInput
                   value={form.employee_name}
                   onChange={(v) => set("employee_name", v)}
-                  suggestions={allSuggestions}
+                  workers={workerSuggestionsForModal}
                 />
               </Field>
             </div>
@@ -879,7 +1004,7 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
                 <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[100px] truncate">{projectMap[entry.project_id].title}</div>
               </div>
             ) : (
-              <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">Standalone</span>
+              <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">Company</span>
             )}
           </td>
         )}
@@ -941,8 +1066,10 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
   );
 }
 
-// ─── GLOBAL PAYROLL TABLE ─────────────────────────────────────────────────────
-function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
+// ─── COMPANY PAYROLL TABLE (redesigned global) ─────────────────────────────────
+// This is a COMPANY-WIDE payroll table. Entries here are NOT required to be
+// project-linked — they represent the entire company's payroll obligations.
+function CompanyPayrollTable({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
   const [entries, setEntries] = useState<PayrollEntry[]>([]);
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
@@ -952,6 +1079,7 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
   const [editing, setEditing] = useState<PayrollEntry | null>(null);
   const [deleting, setDeleting] = useState<PayrollEntry | null>(null);
   const [saving, setSaving] = useState(false);
+  const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true]))
   );
@@ -971,6 +1099,11 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
   }, [push]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  // Load all company workers for the global modal
+  useEffect(() => {
+    api.allWorkers().then(setAllWorkers);
+  }, []);
 
   const handleCreate = async (form: PayrollFormData) => {
     setSaving(true);
@@ -1013,8 +1146,8 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
   const filtered = useMemo(() =>
     entries.filter((e) => {
       if (filterStatus !== "All" && e.payment_status !== filterStatus) return false;
-      if (filterProj === "standalone" && e.project_id !== null) return false;
-      if (filterProj !== "all" && filterProj !== "standalone" && e.project_id !== filterProj) return false;
+      if (filterProj === "company" && e.project_id !== null) return false;
+      if (filterProj !== "all" && filterProj !== "company" && e.project_id !== filterProj) return false;
       if (search) {
         const q = search.toLowerCase();
         return e.employee_name.toLowerCase().includes(q) ||
@@ -1042,7 +1175,8 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
   const grandPaye       = entries.reduce((a, e) => a + n0(e.paye_net), 0);
   const grandDeductions = entries.reduce((a, e) => a + n0(e.total_deductions), 0);
   const paidCount       = entries.filter((e) => e.payment_status === "Paid").length;
-  const standaloneCount = entries.filter((e) => !e.project_id).length;
+  const companyCount    = entries.filter((e) => !e.project_id).length;
+  const projectCount    = entries.filter((e) => !!e.project_id).length;
 
   const statusTotals = useMemo(() =>
     Object.fromEntries(PAYMENT_STATUSES.map((ps) => [ps, {
@@ -1052,7 +1186,7 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
   [entries]);
 
   const TABLE_HEADERS_GLOBAL = [
-    "Project", "Job ID", "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
+    "Scope", "Job ID", "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
     "Net Pay", "Due Date", "Last Updated", "Status",
     ...(canEdit ? ["Actions"] : []),
   ];
@@ -1071,33 +1205,67 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
         </AnimatePresence>
       </div>
 
-      {/* Modals */}
+      {/* Modals — isGlobal=true so project is optional */}
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal initial={makeEmptyForm(null)} projects={projects} onSave={handleCreate}
-            onClose={() => setModal(null)} loading={saving} />
+          <EntryModal
+            initial={makeEmptyForm(null)}
+            projects={projects}
+            allWorkers={allWorkers}
+            isGlobal={true}
+            onSave={handleCreate}
+            onClose={() => setModal(null)}
+            loading={saving}
+          />
         )}
         {modal === "edit" && editing && (
-          <EntryModal initial={{ ...editing }} projects={projects} onSave={handleUpdate}
-            onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+          <EntryModal
+            initial={{ ...editing }}
+            projects={projects}
+            allWorkers={allWorkers}
+            isGlobal={true}
+            onSave={handleUpdate}
+            onClose={() => { setModal(null); setEditing(null); }}
+            loading={saving}
+          />
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
         )}
       </AnimatePresence>
 
-      <Card className="backdrop-blur-xl bg-white/5 border border-white/12 rounded-2xl shadow-xl overflow-hidden">
-        <CardHeader className="pb-0 border-b border-white/8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+      {/* ── Company Payroll Hero Banner ── */}
+      <div className="relative rounded-2xl overflow-hidden mb-6 border border-white/10">
+        {/* Background texture */}
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />
+        <div className="absolute inset-0 opacity-30"
+          style={{
+            backgroundImage: "radial-gradient(circle at 20% 50%, rgba(var(--primary-rgb, 99,102,241), 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(16,185,129,0.2) 0%, transparent 40%)",
+          }} />
+        {/* Subtle grid */}
+        <div className="absolute inset-0 opacity-5"
+          style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+
+        <div className="relative px-6 py-6 sm:px-8 sm:py-7">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-3xl font-black">All Payroll Entries</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">
-                {entries.length} entries across all projects · {standaloneCount} standalone · Click row to expand
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">🇰🇪</span>
+                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/70">
+                  Reve Construct Limited · Company Payroll
+                </span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
+                Company-Wide Payroll Register
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-lg">
+                All payroll obligations across the company — including project-linked and standalone entries.
+                KRA / NSSF / SHIF / AHL compliant · 2026
               </p>
             </div>
             {canEdit && (
               <button onClick={() => setModal("create")}
-                className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
+                className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-lg"
                 style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                 New Entry
@@ -1105,8 +1273,29 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
             )}
           </div>
 
+          {/* Quick stat pills */}
+          <div className="flex flex-wrap gap-2 mt-5">
+            {[
+              { label: "Total Entries",     value: entries.length,  color: "text-foreground",   bg: "bg-white/8"              },
+              { label: "Company-wide",      value: companyCount,    color: "text-sky-300",       bg: "bg-sky-500/10"           },
+              { label: "Project-linked",    value: projectCount,    color: "text-violet-300",    bg: "bg-violet-500/10"        },
+              { label: "Gross Payroll",     value: `KES ${fmtC(grandGross)}`, color: "text-foreground", bg: "bg-white/8"      },
+              { label: "Net Payroll",       value: `KES ${fmtC(grandNet)}`,   color: "text-emerald-300", bg: "bg-emerald-500/10" },
+              { label: "% Paid",            value: `${entries.length ? Math.round((paidCount / entries.length) * 100) : 0}%`, color: paidCount === entries.length && entries.length > 0 ? "text-emerald-400" : "text-amber-300", bg: "bg-white/8" },
+            ].map((stat) => (
+              <div key={stat.label} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 ${stat.bg}`}>
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">{stat.label}</span>
+                <span className={`text-xs font-black tabular-nums ${stat.color}`}>{stat.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <Card className="backdrop-blur-xl bg-white/5 border border-white/12 rounded-2xl shadow-xl overflow-hidden">
+        <CardHeader className="pb-0 border-b border-white/8">
           {/* Status summary pills */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 pt-4">
             {PAYMENT_STATUSES.map((ps) => {
               const s = STATUS_STYLE[ps];
               const t = statusTotals[ps];
@@ -1116,7 +1305,10 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
                   className={`rounded-xl border p-3 text-left transition-all backdrop-blur-sm bg-white/3 ${
                     isActive ? "border-white/25 ring-1 ring-white/20 scale-[1.02]" : "border-white/8 hover:border-white/18"
                   }`}>
-                  <div className={`text-[9px] uppercase tracking-widest font-black mb-1 ${s.accent}`}>{ps}</div>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                    <span className={`text-[9px] uppercase tracking-widest font-black ${s.accent}`}>{ps}</span>
+                  </div>
                   <div className="text-2xl font-black tabular-nums">{t.count}</div>
                   <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">KES {fmtC(t.net)} net</div>
                 </button>
@@ -1151,10 +1343,10 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
                 value={filterProj}
                 onChange={(e) => setFilterProj(e.target.value)}
                 className={selectCls}
-                style={{ minWidth: "9rem", maxWidth: "200px" }}
+                style={{ minWidth: "10rem", maxWidth: "200px" }}
               >
-                <option value="all">All Projects</option>
-                <option value="standalone">Standalone only</option>
+                <option value="all">All Entries</option>
+                <option value="company">Company-wide only</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>)}
               </select>
               <SelectChevron />
@@ -1169,7 +1361,7 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
           {fetching ? (
             <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
               <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-              Loading all payroll entries…
+              Loading company payroll register…
             </div>
           ) : Object.keys(grouped).length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
@@ -1252,7 +1444,7 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
               <div className="px-5 py-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                    Grand Total — {entries.length} employees · {standaloneCount} standalone
+                    Company Grand Total · {entries.length} payroll records
                   </span>
                   <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[9px] font-bold ml-auto">
                     {entries.length ? Math.round((paidCount / entries.length) * 100) : 0}% paid
@@ -1275,7 +1467,7 @@ function GlobalPayrollTable({ projects, canEdit }: { projects: Project[]; canEdi
                 </div>
                 <p className="text-[9px] text-muted-foreground/50 mt-3">
                   Total deductions: {fmt(grandDeductions)} · Effective rate:{" "}
-                  {grandGross > 0 ? ((grandDeductions / grandGross) * 100).toFixed(1) : 0}% · KRA compliant · 2026
+                  {grandGross > 0 ? ((grandDeductions / grandGross) * 100).toFixed(1) : 0}% · KRA / NSSF / SHIF / AHL compliant · 2026
                 </p>
               </div>
             </div>
@@ -1321,6 +1513,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           if (rows) {
             const tally: Record<string, { total: number; unpaid: number; overdue: number }> = {};
             rows.forEach((r: any) => {
+              if (!r.project_id) return;
               if (!tally[r.project_id]) tally[r.project_id] = { total: 0, unpaid: 0, overdue: 0 };
               tally[r.project_id].total++;
               if (r.payment_status === "Unpaid") tally[r.project_id].unpaid++;
@@ -1375,14 +1568,15 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                 <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Checklist</span>
               </h1>
               <p className="text-base sm:text-lg text-muted-foreground mt-3 max-w-xl">
-                Fully compliant statutory payroll calculations — NSSF, SHIF, AHL & PAYE auto-applied.
+                Fully compliant statutory payroll NSSF, SHIF, AHL & PAYE auto-applied.
+                Select a project below for project-level payroll, or use the company register at the bottom.
               </p>
             </div>
             {totalEntries > 0 && (
               <div className="flex gap-3">
                 <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center min-w-[80px]">
                   <p className="text-2xl font-black tabular-nums text-foreground">{totalEntries}</p>
-                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">Entries</p>
+                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">Project Entries</p>
                 </div>
                 {totalOverdue > 0 && (
                   <div className="rounded-2xl border border-orange-500/25 bg-orange-500/8 px-4 py-3 text-center min-w-[80px]">
@@ -1394,6 +1588,14 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             )}
           </div>
         </motion.div>
+
+        {/* ── Section: Project Payrolls ── */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-1 h-6 rounded-full bg-gradient-to-b from-violet-400 to-primary" />
+          <h2 className="text-xl font-black text-foreground">Project Payrolls</h2>
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-xs text-muted-foreground">Click a project to manage its payroll</span>
+        </div>
 
         {/* Filter Bar */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
@@ -1430,7 +1632,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         ) : filtered.length === 0 ? (
           <div className="text-center py-32 text-muted-foreground">No projects found.</div>
         ) : (
-          <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10"
+          <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-14"
             initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.05 } }, hidden: {} }}>
             {filtered.map((p) => (
               <motion.div key={p.id} variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}>
@@ -1440,16 +1642,16 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </motion.div>
         )}
 
-        {/* ── GLOBAL PAYROLL TABLE ── */}
+        {/* ── Section: Company-Wide Payroll Register ── */}
         {!fetching && (
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-1 h-6 rounded-full bg-gradient-to-b from-primary to-accent" />
-              <h2 className="text-2xl font-black text-foreground">All Payroll Entries</h2>
+              <div className="w-1 h-6 rounded-full bg-gradient-to-b from-emerald-400 to-sky-500" />
+              <h2 className="text-xl font-black text-foreground">Company Payroll Register</h2>
               <div className="flex-1 h-px bg-white/10" />
-              <span className="text-xs text-muted-foreground">All projects + standalone entries</span>
+              <span className="text-xs text-muted-foreground">All entries — project-linked + company-wide</span>
             </div>
-            <GlobalPayrollTable projects={projects} canEdit={true} />
+            <CompanyPayrollTable projects={projects} canEdit={true} />
           </motion.div>
         )}
       </div>
@@ -1469,7 +1671,8 @@ function PayrollView({ project, canEdit, onBack }: {
   const [editing, setEditing] = useState<PayrollEntry | null>(null);
   const [deleting, setDeleting] = useState<PayrollEntry | null>(null);
   const [saving, setSaving] = useState(false);
-  const [workerNames, setWorkerNames] = useState<string[]>([]);
+  // Workers fetched from worker_assignments for this specific project
+  const [projectWorkers, setProjectWorkers] = useState<Worker[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<PaymentStatus, boolean>>(
     Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true])) as any
   );
@@ -1480,8 +1683,6 @@ function PayrollView({ project, canEdit, onBack }: {
     try {
       const data = await api.list(project.id);
       setEntries(data);
-      const names = [...new Set(data.map((e) => e.employee_name).filter(Boolean))].sort();
-      setWorkerNames(names);
     } catch (err: any) {
       push(err.message || "Failed to load entries", "error");
     } finally { setFetching(false); }
@@ -1489,14 +1690,16 @@ function PayrollView({ project, canEdit, onBack }: {
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
+  // Fetch workers assigned to this project from worker_assignments
+  useEffect(() => {
+    api.workersForProject(project.id).then(setProjectWorkers);
+  }, [project.id]);
+
   const handleCreate = async (form: PayrollFormData) => {
     setSaving(true);
     try {
       const row = await api.create({ ...form, project_id: project.id });
       setEntries((p) => [row, ...p]);
-      if (row.employee_name && !workerNames.includes(row.employee_name)) {
-        setWorkerNames((prev) => [...prev, row.employee_name].sort());
-      }
       push("Entry added successfully ✓");
       setModal(null);
     } catch (err: any) {
@@ -1578,15 +1781,27 @@ function PayrollView({ project, canEdit, onBack }: {
         </AnimatePresence>
       </div>
 
-      {/* Modals */}
+      {/* Modals — isGlobal=false, workers come from worker_assignments for this project */}
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal initial={makeEmptyForm(project.id)} workerSuggestions={workerNames}
-            onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
+          <EntryModal
+            initial={makeEmptyForm(project.id)}
+            projectWorkers={projectWorkers}
+            isGlobal={false}
+            onSave={handleCreate}
+            onClose={() => setModal(null)}
+            loading={saving}
+          />
         )}
         {modal === "edit" && editing && (
-          <EntryModal initial={{ ...editing }} workerSuggestions={workerNames}
-            onSave={handleUpdate} onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+          <EntryModal
+            initial={{ ...editing }}
+            projectWorkers={projectWorkers}
+            isGlobal={false}
+            onSave={handleUpdate}
+            onClose={() => { setModal(null); setEditing(null); }}
+            loading={saving}
+          />
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
@@ -1609,6 +1824,11 @@ function PayrollView({ project, canEdit, onBack }: {
             {project.status && (
               <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${PROJECT_STATUS_STYLE[project.status] ?? PROJECT_STATUS_STYLE.planning}`}>
                 {project.status.replace(/_/g, " ")}
+              </span>
+            )}
+            {projectWorkers.length > 0 && (
+              <span className="text-[9px] bg-sky-500/10 border border-sky-500/20 text-sky-300 px-2 py-0.5 rounded-full font-bold">
+                {projectWorkers.length} workers assigned
               </span>
             )}
           </div>
@@ -1661,7 +1881,9 @@ function PayrollView({ project, canEdit, onBack }: {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5">
               <div>
                 <CardTitle className="text-2xl font-black">Payroll Entries</CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Click any row to expand full statutory breakdown</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Click any row to expand · Employee list drawn from project worker assignments
+                </p>
               </div>
               {canEdit && (
                 <button onClick={() => setModal("create")}

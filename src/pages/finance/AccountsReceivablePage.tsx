@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -28,13 +29,20 @@ import { supabase } from "@/lib/supabaseClient";
 //                          ])),
 //   account_received     TEXT,
 //   date_received        DATE,
+//   receipt_reference    TEXT,
 //   notes                TEXT,
 //   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 //   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 //   CONSTRAINT accounts_receivable_pkey PRIMARY KEY (id)
 // );
 //
-// -- Auto-update updated_at (reuses the same set_updated_at() function)
+// -- Make project_id nullable (standalone / firm-wide billings)
+// ALTER TABLE public.accounts_receivable ALTER COLUMN project_id DROP NOT NULL;
+//
+// -- Add receipt_reference if not already present
+// ALTER TABLE public.accounts_receivable ADD COLUMN IF NOT EXISTS receipt_reference TEXT;
+//
+// -- Auto-update updated_at
 // CREATE TRIGGER trg_ar_updated_at
 //   BEFORE UPDATE ON public.accounts_receivable
 //   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -46,50 +54,25 @@ import { supabase } from "@/lib/supabaseClient";
 // CREATE POLICY "Auth update AR" ON public.accounts_receivable FOR UPDATE USING (auth.role()='authenticated');
 // CREATE POLICY "Auth delete AR" ON public.accounts_receivable FOR DELETE USING (auth.role()='authenticated');
 //
-// ─── ALTER TABLE (if table already exists with a different schema) ─────────────
-//
-// -- Make project_id nullable (standalone billings)
-// ALTER TABLE public.accounts_receivable ALTER COLUMN project_id DROP NOT NULL;
-//
-// -- Make etims_code nullable
-// ALTER TABLE public.accounts_receivable ALTER COLUMN etims_code DROP NOT NULL;
-//
-// -- Make account_received nullable
-// ALTER TABLE public.accounts_receivable ALTER COLUMN account_received DROP NOT NULL;
-//
-// -- Add purpose if missing
-// ALTER TABLE public.accounts_receivable ADD COLUMN IF NOT EXISTS purpose TEXT;
-//
-// -- Add aging_days if missing (replaces free-text aging string)
-// ALTER TABLE public.accounts_receivable ADD COLUMN IF NOT EXISTS aging_days INTEGER NOT NULL DEFAULT 0;
-//
-// -- Add retaining_amount generated column if missing
-// ALTER TABLE public.accounts_receivable
-//   ADD COLUMN IF NOT EXISTS retaining_amount NUMERIC(15,2)
-//     GENERATED ALWAYS AS (amount_billed * retaining_percent / 100) STORED;
-//
-// -- Add status column if missing
-// ALTER TABLE public.accounts_receivable
-//   ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'unpaid'
-//     CHECK (status = ANY (ARRAY['unpaid','partial','paid','overdue','disputed','written_off']));
-//
-// -- Add date_received if missing
-// ALTER TABLE public.accounts_receivable ADD COLUMN IF NOT EXISTS date_received DATE;
-//
-// -- Expand status check constraint if it already exists with fewer values
-// ALTER TABLE public.accounts_receivable DROP CONSTRAINT IF EXISTS accounts_receivable_status_check;
-// ALTER TABLE public.accounts_receivable
-//   ADD CONSTRAINT accounts_receivable_status_check
-//     CHECK (status = ANY (ARRAY['unpaid','partial','paid','overdue','disputed','written_off']));
-//
-// -- Fix balance column if it has malformed syntax
-// ALTER TABLE public.accounts_receivable DROP COLUMN IF EXISTS balance;
-// ALTER TABLE public.accounts_receivable
-//   ADD COLUMN balance NUMERIC(15,2)
-//     GENERATED ALWAYS AS (amount_billed - amount_received) STORED;
-//
-// -- RLS (if not already enabled)
-// ALTER TABLE public.accounts_receivable ENABLE ROW LEVEL SECURITY;
+// ─── audit_logs (must already exist) ─────────────────────────────────────────
+// create table public.audit_logs (
+//   id bigserial not null,
+//   table_name text not null,
+//   record_id uuid null,
+//   action text not null,
+//   old_data jsonb null,
+//   new_data jsonb null,
+//   changed_by uuid null,
+//   changed_at timestamptz not null default now(),
+//   constraint audit_logs_pkey primary key (id),
+//   constraint audit_logs_changed_by_fkey foreign key (changed_by) references auth.users (id),
+//   constraint audit_logs_action_check check (
+//     action = any (array['INSERT'::text, 'UPDATE'::text, 'DELETE'::text])
+//   )
+// );
+// create index if not exists idx_audit_table      on public.audit_logs using btree (table_name);
+// create index if not exists idx_audit_changed_by on public.audit_logs using btree (changed_by);
+// create index if not exists idx_audit_changed_at on public.audit_logs using btree (changed_at desc);
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -97,7 +80,14 @@ interface Project {
   id: string;
   project_number: string;
   title: string;
+  description: string | null;
   status: string | null;
+  progress_percent: number | null;
+  budget_numeric: number | null;
+  site_city: string | null;
+  site_country: string | null;
+  expected_completion_date: string | null;
+  created_at: string;
 }
 
 type ARStatus =
@@ -109,7 +99,7 @@ type ARStatus =
   | "written_off";
 
 interface AccountsReceivable {
-  id: string;                      // uuid
+  id: string;
   project_id: string | null;
   client: string;
   billing_number: string;
@@ -119,13 +109,14 @@ interface AccountsReceivable {
   due_date: string;
   amount_billed: number;
   amount_received: number;
-  balance: number;                 // DB generated
+  balance: number;
   aging_days: number;
   retaining_percent: number;
-  retaining_amount: number;        // DB generated
+  retaining_amount: number;
   status: ARStatus;
   account_received: string | null;
   date_received: string | null;
+  receipt_reference: string | null;
   notes: string | null;
   created_at?: string;
   updated_at?: string;
@@ -150,17 +141,17 @@ const GENERATED_COLS = ["balance", "retaining_amount"] as const;
 
 function stripGenerated(body: Partial<ARFormData>): Partial<ARFormData> {
   const clean = { ...body };
-  for (const col of GENERATED_COLS) delete (clean as any)[col];
+  for (const col of GENERATED_COLS) delete (clean as Record<string, unknown>)[col];
   return clean;
 }
 
 const STATUS_STYLE: Record<ARStatus, { badge: string; row: string }> = {
-  unpaid:     { badge: "bg-yellow-500/10 border-yellow-500/30 text-yellow-300",    row: "hover:bg-yellow-950/20"  },
-  partial:    { badge: "bg-sky-500/10 border-sky-500/30 text-sky-300",              row: "hover:bg-sky-950/20"     },
-  paid:       { badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",  row: "hover:bg-emerald-950/20" },
-  overdue:    { badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",           row: "hover:bg-rose-950/20"    },
-  disputed:   { badge: "bg-orange-500/10 border-orange-500/30 text-orange-300",     row: "hover:bg-orange-950/20"  },
-  written_off:{ badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",        row: "hover:bg-slate-950/20"   },
+  unpaid:      { badge: "bg-yellow-500/10 border-yellow-500/30 text-yellow-300",    row: "hover:bg-yellow-950/20"  },
+  partial:     { badge: "bg-sky-500/10 border-sky-500/30 text-sky-300",             row: "hover:bg-sky-950/20"     },
+  paid:        { badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300", row: "hover:bg-emerald-950/20" },
+  overdue:     { badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",          row: "hover:bg-rose-950/20"    },
+  disputed:    { badge: "bg-orange-500/10 border-orange-500/30 text-orange-300",    row: "hover:bg-orange-950/20"  },
+  written_off: { badge: "bg-slate-500/10 border-slate-500/30 text-slate-300",       row: "hover:bg-slate-950/20"   },
 };
 
 const STATUS_LABEL: Record<ARStatus, string> = {
@@ -168,9 +159,18 @@ const STATUS_LABEL: Record<ARStatus, string> = {
   overdue: "Overdue", disputed: "Disputed", written_off: "Written Off",
 };
 
+const PROJECT_STATUS_STYLE: Record<string, string> = {
+  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
+  cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+};
+
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
 const fmtKES = (n: number) =>
   `KES ${new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2 }).format(n)}`;
+
 const fmtDate = (d: string | null) =>
   d
     ? new Date(d + "T00:00:00").toLocaleDateString("en-KE", {
@@ -190,22 +190,48 @@ function deriveAR(f: ARFormData): ARFormData {
 }
 
 const makeEmpty = (projectId: string | null): ARFormData => ({
-  project_id:       projectId,
-  client:           "",
-  billing_number:   "",
-  etims_code:       null,
-  purpose:          null,
-  date:             new Date().toISOString().split("T")[0],
-  due_date:         "",
-  amount_billed:    0,
-  amount_received:  0,
-  aging_days:       0,
-  retaining_percent:0,
-  status:           "unpaid",
-  account_received: null,
-  date_received:    null,
-  notes:            null,
+  project_id:        projectId,
+  client:            "",
+  billing_number:    "",
+  etims_code:        null,
+  purpose:           null,
+  date:              new Date().toISOString().split("T")[0],
+  due_date:          "",
+  amount_billed:     0,
+  amount_received:   0,
+  aging_days:        0,
+  retaining_percent: 0,
+  status:            "unpaid",
+  account_received:  null,
+  date_received:     null,
+  receipt_reference: null,
+  notes:             null,
 });
+
+// ─── AUDIT HELPER ─────────────────────────────────────────────────────────────
+async function writeAudit(params: {
+  table_name: string;
+  record_id: string | null;
+  action: "INSERT" | "UPDATE" | "DELETE";
+  old_data?: Record<string, unknown> | null;
+  new_data?: Record<string, unknown> | null;
+}) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("audit_logs").insert([{
+      table_name: params.table_name,
+      record_id:  params.record_id,
+      action:     params.action,
+      old_data:   params.old_data  ?? null,
+      new_data:   params.new_data  ?? null,
+      changed_by: user?.id         ?? null,
+      changed_at: new Date().toISOString(),
+    }]);
+  } catch {
+    // Audit failures must never block the main operation
+    console.warn("[audit] failed to write audit log", params);
+  }
+}
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 function throwSb(error: { message?: string } | null, ctx: string): never {
@@ -216,11 +242,12 @@ const api = {
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
-      .select("id,project_number,title,status")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
       .order("created_at", { ascending: false });
     if (error) throwSb(error, "projects");
     return (data ?? []) as Project[];
   },
+
   async list(projectId: string): Promise<AccountsReceivable[]> {
     const { data, error } = await supabase
       .from("accounts_receivable")
@@ -230,6 +257,7 @@ const api = {
     if (error) throwSb(error, "list");
     return (data ?? []) as AccountsReceivable[];
   },
+
   async listAll(): Promise<AccountsReceivable[]> {
     const { data, error } = await supabase
       .from("accounts_receivable")
@@ -238,6 +266,7 @@ const api = {
     if (error) throwSb(error, "listAll");
     return (data ?? []) as AccountsReceivable[];
   },
+
   async create(body: ARFormData): Promise<AccountsReceivable> {
     const clean = stripGenerated(body);
     const { data, error } = await supabase
@@ -246,9 +275,18 @@ const api = {
       .select("*")
       .single();
     if (error) throwSb(error, "create");
-    return data as AccountsReceivable;
+    const row = data as AccountsReceivable;
+    await writeAudit({
+      table_name: "accounts_receivable",
+      record_id:  row.id,
+      action:     "INSERT",
+      old_data:   null,
+      new_data:   row as unknown as Record<string, unknown>,
+    });
+    return row;
   },
-  async update(id: string, body: ARFormData): Promise<AccountsReceivable> {
+
+  async update(id: string, body: ARFormData, oldRow: AccountsReceivable): Promise<AccountsReceivable> {
     const clean = stripGenerated(body);
     const { data, error } = await supabase
       .from("accounts_receivable")
@@ -257,14 +295,30 @@ const api = {
       .select("*")
       .single();
     if (error) throwSb(error, "update");
-    return data as AccountsReceivable;
+    const row = data as AccountsReceivable;
+    await writeAudit({
+      table_name: "accounts_receivable",
+      record_id:  id,
+      action:     "UPDATE",
+      old_data:   oldRow as unknown as Record<string, unknown>,
+      new_data:   row    as unknown as Record<string, unknown>,
+    });
+    return row;
   },
-  async remove(id: string): Promise<void> {
+
+  async remove(row: AccountsReceivable): Promise<void> {
     const { error } = await supabase
       .from("accounts_receivable")
       .delete()
-      .eq("id", id);
+      .eq("id", row.id);
     if (error) throwSb(error, "delete");
+    await writeAudit({
+      table_name: "accounts_receivable",
+      record_id:  row.id,
+      action:     "DELETE",
+      old_data:   row as unknown as Record<string, unknown>,
+      new_data:   null,
+    });
   },
 };
 
@@ -284,7 +338,7 @@ function useToast() {
   return { toasts, push };
 }
 
-// ─── SHARED UI ────────────────────────────────────────────────────────────────
+// ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground " +
   "placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 " +
@@ -295,6 +349,7 @@ const selectCls =
   "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
   "appearance-none pr-10 font-medium bg-[#111318] border-white/10 [color-scheme:dark]";
 
+// ─── SHARED UI ────────────────────────────────────────────────────────────────
 const SelectChevron = () => (
   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -308,9 +363,7 @@ function Field({ label, hint, children }: {
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-        {label}
-      </label>
+      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</label>
       {children}
       {hint && <span className="text-[10px] text-muted-foreground/60 italic">{hint}</span>}
     </div>
@@ -332,9 +385,7 @@ function SelectField({ label, hint, value, onChange, options, disabled }: {
           disabled={disabled}
           className={selectCls + (disabled ? " opacity-50 cursor-not-allowed" : "")}
         >
-          {options.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <SelectChevron />
       </div>
@@ -342,7 +393,6 @@ function SelectField({ label, hint, value, onChange, options, disabled }: {
   );
 }
 
-// ─── NUMERIC INPUT — no sticky-zero ──────────────────────────────────────────
 function NumericInput({ value, onChange, step = "0.01", min = "0", max, placeholder, disabled }: {
   value: number; onChange: (n: number) => void;
   step?: string; min?: string; max?: string;
@@ -395,13 +445,36 @@ function IntegerInput({ value, onChange, min = "0", placeholder }: {
   );
 }
 
+function ToastStack({ toasts }: { toasts: { id: number; msg: string; type: "success" | "error" }[] }) {
+  return (
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+      <AnimatePresence>
+        {toasts.map(t => (
+          <motion.div key={t.id}
+            initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+            className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
+              t.type === "success"
+                ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
+                : "bg-rose-950/80 border-rose-500/25 text-rose-300"
+            }`}>{t.msg}</motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ─── AR MODAL ─────────────────────────────────────────────────────────────────
-function ARModal({ initial, onSave, onClose, loading, projects }: {
+// showProjectSelector = true  →  global modal: project linking is optional
+// showProjectSelector = false →  per-project modal: project_id is fixed, not shown
+function ARModal({
+  initial, onSave, onClose, loading, projects = [], showProjectSelector = false,
+}: {
   initial: ARFormData & { id?: string };
   onSave: (d: ARFormData) => void;
   onClose: () => void;
   loading: boolean;
   projects?: Project[];
+  showProjectSelector?: boolean;
 }) {
   const [form, setForm] = useState<ARFormData>(deriveAR({ ...initial }));
   const isEdit = Boolean(initial.id);
@@ -412,6 +485,7 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
 
   const balance      = (Number(form.amount_billed) || 0) - (Number(form.amount_received) || 0);
   const retainingAmt = ((Number(form.amount_billed) || 0) * (Number(form.retaining_percent) || 0)) / 100;
+  const isStandalone = showProjectSelector && (!form.project_id || form.project_id === "");
 
   const tabs = [
     { key: "billing"  as const, label: "Billing"  },
@@ -435,9 +509,16 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-base font-semibold text-foreground tracking-tight">
-            {isEdit ? "Edit AR Record" : "New AR Record"}
-          </h2>
+          <div>
+            <h2 className="text-base font-semibold text-foreground tracking-tight">
+              {isEdit ? "Edit AR Record" : "New AR Record"}
+            </h2>
+            {isStandalone && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Not linked to any project — this will appear in the firm-wide register.
+              </p>
+            )}
+          </div>
           <button onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -465,16 +546,18 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
           {/* ── TAB: Billing ── */}
           {tab === "billing" && (
             <div className="grid grid-cols-2 gap-4">
-              {projects && (
+
+              {/* Project selector — only in global modal */}
+              {showProjectSelector && (
                 <div className="col-span-2">
-                  <Field label="Project (optional)" hint="Leave blank for standalone billings">
+                  <Field label="Linked Project" hint="Leave blank to post as a firm-wide (standalone) billing">
                     <div className="relative">
                       <select
                         value={form.project_id ?? ""}
                         onChange={e => set("project_id", e.target.value || null)}
                         className={selectCls}
                       >
-                        <option value="">— No project (standalone) —</option>
+                        <option value="">— No project (firm-wide / standalone) —</option>
                         {projects.map(p => (
                           <option key={p.id} value={p.id}>
                             {p.project_number} — {p.title}
@@ -483,6 +566,11 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
                       </select>
                       <SelectChevron />
                     </div>
+                    {isStandalone && (
+                      <p className="text-[10px] text-violet-400/70 mt-1">
+                        Entry will appear only in the consolidated firm-wide AR register.
+                      </p>
+                    )}
                   </Field>
                 </div>
               )}
@@ -539,7 +627,7 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
               {/* Computed preview */}
               <div className="col-span-2 grid grid-cols-3 gap-3 mt-1">
                 {[
-                  { label: "Retaining Amount", value: fmtKES(retainingAmt), color: "text-amber-400"   },
+                  { label: "Retaining Amount", value: fmtKES(retainingAmt), color: "text-amber-400" },
                   { label: "Balance Due",       value: fmtKES(balance),      color: balance > 0 ? "text-rose-400" : "text-emerald-400" },
                   { label: "Received",          value: fmtKES(Number(form.amount_received)), color: "text-emerald-400" },
                 ].map(box => (
@@ -565,13 +653,19 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
                   onChange={e => set("date_received", e.target.value || null)}
                   className={inputCls + " [color-scheme:dark]"} />
               </Field>
-              <div className="col-span-2">
-                <Field label="Account Received" hint="Chart of accounts code for this receipt">
-                  <input value={form.account_received ?? ""}
-                    onChange={e => set("account_received", e.target.value || null)}
-                    placeholder="e.g. 1002" className={inputCls} />
-                </Field>
-              </div>
+              <Field label="Receipt Reference" hint="Cheque no., EFT ref., M-Pesa code, bank slip, etc.">
+                <input
+                  value={form.receipt_reference ?? ""}
+                  onChange={e => set("receipt_reference", e.target.value || null)}
+                  placeholder="e.g. EFT-20260301-00123"
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Account Received" hint="Chart of accounts code for this receipt">
+                <input value={form.account_received ?? ""}
+                  onChange={e => set("account_received", e.target.value || null)}
+                  placeholder="e.g. 1002" className={inputCls} />
+              </Field>
 
               {/* Receipt summary */}
               <div className="col-span-2 grid grid-cols-3 gap-3 mt-2">
@@ -593,14 +687,12 @@ function ARModal({ initial, onSave, onClose, loading, projects }: {
 
           {/* ── TAB: Notes ── */}
           {tab === "notes" && (
-            <div className="grid grid-cols-1 gap-4">
-              <Field label="Notes">
-                <textarea value={form.notes ?? ""} rows={6}
-                  placeholder="Any additional notes about this billing or receipt…"
-                  onChange={e => set("notes", e.target.value || null)}
-                  className={inputCls + " resize-none"} />
-              </Field>
-            </div>
+            <Field label="Notes">
+              <textarea value={form.notes ?? ""} rows={6}
+                placeholder="Any additional notes about this billing or receipt…"
+                onChange={e => set("notes", e.target.value || null)}
+                className={inputCls + " resize-none"} />
+            </Field>
           )}
         </div>
 
@@ -678,11 +770,110 @@ function DeleteConfirm({ row, onConfirm, onClose, loading }: {
   );
 }
 
-// ─── AR TABLE ─────────────────────────────────────────────────────────────────
+// ─── PROJECT CARD ─────────────────────────────────────────────────────────────
+function ProjectCard({ project, onSelect, billingCount }: {
+  project: Project; onSelect: (p: Project) => void; billingCount: number;
+}) {
+  const status    = project.status ?? "planning";
+  const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
+
+  return (
+    <motion.button
+      onClick={() => onSelect(project)}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/5 p-5 hover:border-primary/30 hover:bg-white/8 transition-all duration-200 shadow-sm group"
+    >
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
+            {project.project_number}
+          </span>
+          <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>
+            {status.replace(/_/g, " ")}
+          </span>
+        </div>
+        {billingCount > 0 && (
+          <span className="text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full shrink-0 tabular-nums">
+            {billingCount} {billingCount === 1 ? "billing" : "billings"}
+          </span>
+        )}
+      </div>
+
+      <h3 className="font-semibold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors leading-snug line-clamp-1">
+        {project.title}
+      </h3>
+
+      {project.description && (
+        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
+          {project.description}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
+        {project.site_city && (
+          <span className="flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+              <circle cx="12" cy="9" r="2.5"/>
+            </svg>
+            {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
+          </span>
+        )}
+        {project.budget_numeric != null && (
+          <span className="flex items-center gap-1 text-emerald-400/80">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+            {fmtKES(project.budget_numeric)}
+          </span>
+        )}
+        {project.expected_completion_date && (
+          <span className="flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+            </svg>
+            Due {fmtDate(project.expected_completion_date)}
+          </span>
+        )}
+      </div>
+
+      {project.progress_percent != null && (
+        <div className="mb-3">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-[10px] text-muted-foreground">Progress</span>
+            <span className="text-[10px] font-mono text-primary">{project.progress_percent}%</span>
+          </div>
+          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full rounded-full"
+              style={{ background: "linear-gradient(90deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+              initial={{ width: 0 }}
+              animate={{ width: `${project.progress_percent}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-1 text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+        <span>Open AR Register</span>
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+          <path d="m9 18 6-6-6-6"/>
+        </svg>
+      </div>
+    </motion.button>
+  );
+}
+
+// ─── AR TABLE (shared) ────────────────────────────────────────────────────────
 function ARTable({
   rows, filtered, totals, canEdit, fetching,
   search, filterStatus, setSearch, setFilterStatus,
   onEdit, onDelete, onCreate,
+  showProjectCol = false,
+  projects = [],
   emptyLabel = "No accounts receivable records found.",
 }: {
   rows: AccountsReceivable[];
@@ -695,8 +886,31 @@ function ARTable({
   onEdit: (r: AccountsReceivable) => void;
   onDelete: (r: AccountsReceivable) => void;
   onCreate: () => void;
+  showProjectCol?: boolean;
+  projects?: Project[];
   emptyLabel?: string;
 }) {
+  const projectLabel = (pid: string | null) => {
+    if (!pid) return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">
+        Standalone
+      </span>
+    );
+    const p = projects.find(pr => pr.id === pid);
+    return p
+      ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
+      : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
+  };
+
+  const headers = [
+    "Client", "Billing #", "eTIMS Code", "Purpose", "Date", "Due Date",
+    "Billed", "Received", "Balance", "Aging", "Retaining", "Ret. Amount",
+    "Status", "Date Received", "Receipt Ref", "Account",
+    ...(showProjectCol ? ["Scope"] : []),
+    "Notes",
+    ...(canEdit ? ["Actions"] : []),
+  ];
+
   return (
     <>
       {/* Toolbar */}
@@ -707,7 +921,7 @@ function ARTable({
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search client, billing number, eTIMS code, purpose…"
+            placeholder="Search client, billing #, eTIMS code, purpose…"
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
         </div>
         <div className="relative" style={{ minWidth: "9rem" }}>
@@ -752,12 +966,7 @@ function ARTable({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
-                    {[
-                      "Client","Billing #","eTIMS Code","Purpose","Date","Due Date",
-                      "Billed","Received","Balance","Aging","Retaining","Ret. Amount",
-                      "Status","Date Received","Account","Notes",
-                      ...(canEdit ? ["Actions"] : []),
-                    ].map(h => (
+                    {headers.map(h => (
                       <th key={h}
                         className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         {h}
@@ -767,16 +976,14 @@ function ARTable({
                 </thead>
                 <tbody>
                   {filtered.map((row, ri) => {
-                    const ss = STATUS_STYLE[row.status];
+                    const ss  = STATUS_STYLE[row.status];
                     const bal = Number(row.balance) ?? (Number(row.amount_billed) - Number(row.amount_received));
                     return (
                       <motion.tr key={row.id}
                         initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: ri * 0.02, duration: 0.16 }}
                         className={`border-b border-white/5 transition-colors ${ss.row}`}>
-                        <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">
-                          {row.client}
-                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">{row.client}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span className="font-mono text-xs font-semibold text-primary">{row.billing_number}</span>
                         </td>
@@ -788,9 +995,7 @@ function ARTable({
                         <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[110px]">
                           <span className="line-clamp-1">{row.purpose || "—"}</span>
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">
-                          {fmtDate(row.date)}
-                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(row.date)}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono">
                           <span className={row.status === "overdue" ? "text-rose-400 font-semibold" : "text-muted-foreground"}>
                             {fmtDate(row.due_date)}
@@ -803,15 +1008,12 @@ function ARTable({
                           {fmtKES(Number(row.amount_received))}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs">
-                          <span className={bal > 0 ? "text-rose-400 font-semibold" : "text-emerald-400"}>
-                            {fmtKES(bal)}
-                          </span>
+                          <span className={bal > 0 ? "text-rose-400 font-semibold" : "text-emerald-400"}>{fmtKES(bal)}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs text-center">
                           {row.aging_days > 0
                             ? <span className={`font-mono font-bold ${row.aging_days > 60 ? "text-rose-400" : row.aging_days > 30 ? "text-amber-400" : "text-muted-foreground"}`}>{row.aging_days}d</span>
-                            : <span className="text-emerald-400 text-xs">—</span>
-                          }
+                            : <span className="text-emerald-400 text-xs">—</span>}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs text-center text-muted-foreground">
                           {row.retaining_percent > 0 ? `${row.retaining_percent}%` : "—"}
@@ -826,14 +1028,20 @@ function ARTable({
                             {STATUS_LABEL[row.status]}
                           </Badge>
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">
-                          {fmtDate(row.date_received)}
+                        <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(row.date_received)}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {row.receipt_reference
+                            ? <span className="font-mono text-xs text-sky-300">{row.receipt_reference}</span>
+                            : <span className="text-xs text-muted-foreground/40">—</span>}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {row.account_received
                             ? <Badge variant="outline" className="font-mono text-[10px] px-2 py-0.5">{row.account_received}</Badge>
                             : <span className="text-xs text-muted-foreground/40">—</span>}
                         </td>
+                        {showProjectCol && (
+                          <td className="px-4 py-3.5 whitespace-nowrap">{projectLabel(row.project_id)}</td>
+                        )}
                         <td className="px-4 py-3.5 text-xs text-muted-foreground max-w-[140px]">
                           <span className="line-clamp-1">{row.notes || "—"}</span>
                         </td>
@@ -880,7 +1088,7 @@ function ARTable({
                     <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">
                       {fmtKES(filtered.reduce((a, r) => a + (Number(r.retaining_amount) || 0), 0))}
                     </td>
-                    <td colSpan={canEdit ? 5 : 4} />
+                    <td colSpan={showProjectCol ? (canEdit ? 7 : 6) : (canEdit ? 6 : 5)} />
                   </tr>
                 </tfoot>
               </table>
@@ -910,46 +1118,192 @@ function ARTable({
   );
 }
 
-// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
-export default function AccountsReceivablePage({ projectId, canEdit = true }: Props) {
-  const [rows, setRows]                 = useState<AccountsReceivable[]>([]);
-  const [projects, setProjects]         = useState<Project[]>([]);
-  const [fetching, setFetching]         = useState(true);
-  const [search, setSearch]             = useState("");
+// ─── STAT CARDS ───────────────────────────────────────────────────────────────
+function StatCards({ totals, rows }: {
+  totals: { billed: number; received: number; balance: number; retaining: number; overdue: number };
+  rows: AccountsReceivable[];
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.08 }}
+      className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+    >
+      {[
+        { label: "Total Billed",   value: fmtKES(totals.billed),    color: "text-foreground",  sub: `${rows.length} billings` },
+        { label: "Total Received", value: fmtKES(totals.received),  color: "text-emerald-400", sub: `${rows.filter(r => r.status === "paid").length} settled` },
+        { label: "Outstanding",    value: fmtKES(totals.balance),   color: totals.balance > 0 ? "text-rose-400" : "text-emerald-400", sub: "balance due" },
+        { label: "Retention Held", value: fmtKES(totals.retaining), color: "text-amber-400",   sub: "across all billings" },
+      ].map(c => (
+        <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
+          <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
+          <div className={`text-lg font-bold tabular-nums font-mono ${c.color}`}>{c.value}</div>
+          <div className="text-xs text-muted-foreground mt-1">{c.sub}</div>
+        </div>
+      ))}
+    </motion.div>
+  );
+}
+
+// ─── STATUS PILLS ─────────────────────────────────────────────────────────────
+function StatusPills({
+  rows, filterStatus, setFilterStatus,
+}: {
+  rows: AccountsReceivable[];
+  filterStatus: ARStatus | "All";
+  setFilterStatus: (s: ARStatus | "All") => void;
+}) {
+  const statusCounts = useMemo(() => {
+    const c: Partial<Record<ARStatus, number>> = {};
+    rows.forEach(r => { c[r.status] = (c[r.status] ?? 0) + 1; });
+    return c;
+  }, [rows]);
+
+  if (!rows.length) return null;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.12 }}
+      className="flex flex-wrap gap-2 mb-8">
+      {AR_STATUSES.filter(s => statusCounts[s]).map(s => {
+        const ss = STATUS_STYLE[s];
+        const isActive = filterStatus === s;
+        return (
+          <button key={s}
+            onClick={() => setFilterStatus(isActive ? "All" : s)}
+            className={`rounded-2xl border px-4 py-3 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 min-w-[7rem] ${
+              isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
+            }`}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] uppercase tracking-widest font-semibold">{STATUS_LABEL[s]}</span>
+            </div>
+            <div className="text-lg font-bold tabular-nums text-foreground">{statusCounts[s]}</div>
+            <div>
+              <Badge className={`text-[9px] px-1.5 py-0 border rounded-full mt-1 ${ss.badge}`}>
+                {fmtKES(rows.filter(r => r.status === s).reduce((a, r) => a + Number(r.amount_billed), 0))}
+              </Badge>
+            </div>
+          </button>
+        );
+      })}
+    </motion.div>
+  );
+}
+
+// ─── OVERDUE ALERT ────────────────────────────────────────────────────────────
+function OverdueAlert({ rows }: { rows: AccountsReceivable[] }) {
+  const overdueRows = rows.filter(r => r.status === "overdue");
+  if (!overdueRows.length) return null;
+  const overdueBalance = overdueRows.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0);
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.14 }}
+      className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/5 px-5 py-4 flex flex-wrap items-center gap-4 text-xs font-mono">
+      <div className="flex items-center gap-2">
+        <svg className="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <span className="text-rose-300 font-semibold font-sans text-[11px] uppercase tracking-wider">Overdue Billings</span>
+      </div>
+      <span className="text-rose-300">
+        {overdueRows.length} billing{overdueRows.length > 1 ? "s" : ""} overdue ·{" "}
+        <strong>{fmtKES(overdueBalance)}</strong> outstanding
+      </span>
+    </motion.div>
+  );
+}
+
+// ─── CRUD HOOK ────────────────────────────────────────────────────────────────
+function useARCrud(push: (msg: string, type?: "success" | "error") => void) {
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = useCallback(async (
+    form: ARFormData,
+    onSuccess: (row: AccountsReceivable) => void,
+    onDone: () => void,
+  ) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      onSuccess(row);
+      push("Billing added.");
+      onDone();
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to add billing.", "error");
+    } finally { setSaving(false); }
+  }, [push]);
+
+  const handleUpdate = useCallback(async (
+    id: string,
+    form: ARFormData,
+    oldRow: AccountsReceivable,
+    onSuccess: (row: AccountsReceivable) => void,
+    onDone: () => void,
+  ) => {
+    setSaving(true);
+    try {
+      const row = await api.update(id, form, oldRow);
+      onSuccess(row);
+      push("Billing updated.");
+      onDone();
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update billing.", "error");
+    } finally { setSaving(false); }
+  }, [push]);
+
+  const handleDelete = useCallback(async (
+    row: AccountsReceivable,
+    onSuccess: () => void,
+    onDone: () => void,
+  ) => {
+    setSaving(true);
+    try {
+      await api.remove(row);
+      onSuccess();
+      push("Billing deleted.");
+      onDone();
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete billing.", "error");
+    } finally { setSaving(false); }
+  }, [push]);
+
+  return { saving, handleCreate, handleUpdate, handleDelete };
+}
+
+// ─── PER-PROJECT AR VIEW ──────────────────────────────────────────────────────
+// Exactly as the original — project is always linked, no project selector in modal
+function ProjectARView({ project, canEdit, onBack }: {
+  project: Project; canEdit: boolean; onBack: () => void;
+}) {
+  const [rows,         setRows]         = useState<AccountsReceivable[]>([]);
+  const [fetching,     setFetching]     = useState(false);
+  const [modal,        setModal]        = useState<null | "create" | "edit">(null);
+  const [editing,      setEditing]      = useState<AccountsReceivable | null>(null);
+  const [deleting,     setDeleting]     = useState<AccountsReceivable | null>(null);
+  const [search,       setSearch]       = useState("");
   const [filterStatus, setFilterStatus] = useState<ARStatus | "All">("All");
-  const [modal, setModal]               = useState<null | "create" | "edit">(null);
-  const [editing, setEditing]           = useState<AccountsReceivable | null>(null);
-  const [deleting, setDeleting]         = useState<AccountsReceivable | null>(null);
-  const [saving, setSaving]             = useState(false);
-  const { toasts, push }                = useToast();
+  const { toasts, push }               = useToast();
+  const { saving, handleCreate, handleUpdate, handleDelete } = useARCrud(push);
 
   const fetchRows = useCallback(async () => {
     setFetching(true);
-    try {
-      const data = projectId ? await api.list(projectId) : await api.listAll();
-      setRows(data ?? []);
-    } catch (err: any) {
-      push(err.message || "Failed to load records", "error");
-    } finally { setFetching(false); }
-  }, [projectId, push]);
+    setRows([]);
+    try { setRows(await api.list(project.id)); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load.", "error"); }
+    finally { setFetching(false); }
+  }, [project.id, push]);
 
-  useEffect(() => {
-    fetchRows();
-    api.projects().then(setProjects).catch(() => {});
-  }, [fetchRows]);
+  useEffect(() => { fetchRows(); }, [fetchRows]);
 
   const filtered = useMemo(() =>
     rows.filter(r => {
       if (filterStatus !== "All" && r.status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
-        return (
-          r.client.toLowerCase().includes(q) ||
+        return r.client.toLowerCase().includes(q) ||
           r.billing_number.toLowerCase().includes(q) ||
           (r.etims_code ?? "").toLowerCase().includes(q) ||
-          (r.purpose ?? "").toLowerCase().includes(q) ||
-          (r.account_received ?? "").toLowerCase().includes(q)
-        );
+          (r.purpose ?? "").toLowerCase().includes(q);
       }
       return true;
     }),
@@ -963,202 +1317,113 @@ export default function AccountsReceivablePage({ projectId, canEdit = true }: Pr
     overdue:  rows.filter(r => r.status === "overdue").length,
   }), [rows]);
 
-  const statusCounts = useMemo(() => {
-    const c: Partial<Record<ARStatus, number>> = {};
-    rows.forEach(r => { c[r.status] = (c[r.status] ?? 0) + 1; });
-    return c;
-  }, [rows]);
-
-  const handleCreate = async (form: ARFormData) => {
-    setSaving(true);
-    try {
-      const row = await api.create({ ...form, project_id: form.project_id || null });
-      setRows(p => [row, ...p]);
-      push("Billing added.");
-      setModal(null);
-    } catch (err: any) {
-      push(err.message || "Failed to add billing", "error");
-    } finally { setSaving(false); }
-  };
-
-  const handleUpdate = async (form: ARFormData) => {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      const row = await api.update(editing.id, form);
-      setRows(p => p.map(r => r.id === editing.id ? row : r));
-      push("Billing updated.");
-      setModal(null); setEditing(null);
-    } catch (err: any) {
-      push(err.message || "Failed to update billing", "error");
-    } finally { setSaving(false); }
-  };
-
-  const handleDelete = async () => {
-    if (!deleting) return;
-    setSaving(true);
-    try {
-      await api.remove(deleting.id);
-      setRows(p => p.filter(r => r.id !== deleting.id));
-      push("Billing deleted.");
-      setDeleting(null);
-    } catch (err: any) {
-      push(err.message || "Failed to delete billing", "error");
-    } finally { setSaving(false); }
-  };
+  const status    = project.status ?? "planning";
+  const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
-        <AnimatePresence>
-          {toasts.map(t => (
-            <motion.div key={t.id}
-              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
-              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
-                t.type === "success"
-                  ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
-                  : "bg-rose-950/80 border-rose-500/25 text-rose-300"
-              }`}>{t.msg}</motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      <ToastStack toasts={toasts} />
 
-      {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
           <ARModal
-            initial={makeEmpty(projectId ?? null)}
-            onSave={handleCreate}
+            initial={makeEmpty(project.id)}
+            onSave={form =>
+              handleCreate(
+                { ...form, project_id: project.id },
+                row => setRows(p => [row, ...p]),
+                () => setModal(null),
+              )
+            }
             onClose={() => setModal(null)}
             loading={saving}
-            projects={projects}
+            showProjectSelector={false}
           />
         )}
         {modal === "edit" && editing && (
           <ARModal
-            initial={(({ id: _id, balance: _b, retaining_amount: _ra, created_at: _ca, updated_at: _ua, ...rest }) => rest)(editing)}
-            onSave={handleUpdate}
+            initial={(({ id: _i, balance: _b, retaining_amount: _r, created_at: _c, updated_at: _u, ...rest }) =>
+              ({ ...rest, id: editing.id }))(editing)}
+            onSave={form =>
+              handleUpdate(
+                editing.id, form, editing,
+                row => setRows(p => p.map(r => r.id === editing.id ? row : r)),
+                () => { setModal(null); setEditing(null); },
+              )
+            }
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
-            projects={projects}
+            showProjectSelector={false}
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm
+            row={deleting}
+            onConfirm={() =>
+              handleDelete(
+                deleting,
+                () => setRows(p => p.filter(r => r.id !== deleting.id)),
+                () => setDeleting(null),
+              )
+            }
+            onClose={() => setDeleting(null)}
+            loading={saving}
           />
         )}
       </AnimatePresence>
 
-      {deleting && (
-        <DeleteConfirm row={deleting} onConfirm={handleDelete}
-          onClose={() => setDeleting(null)} loading={saving} />
-      )}
-
       <div className="container mx-auto px-4 py-16">
-        {/* Hero */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7 }} className="mb-12 text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">
-            Finance Module
-          </p>
-          <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
-            Accounts{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              Receivable
-            </span>
-          </h1>
-          <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
-            Track client billings, receipts, retentions and outstanding balances.
-          </p>
+        {/* Back button + hero */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-10">
+          <button onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
+            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path d="m15 18-6-6 6-6"/>
+            </svg>
+            All Projects
+          </button>
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Accounts Receivable</p>
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
+                  {project.project_number}
+                </span>
+                <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>
+                  {status.replace(/_/g, " ")}
+                </span>
+              </div>
+              <h1 className="text-5xl md:text-7xl font-bold leading-tight">
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+                  {project.title}
+                </span>
+              </h1>
+              {project.site_city && (
+                <p className="text-xl text-muted-foreground mt-2">
+                  {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
+                </p>
+              )}
+            </div>
+          </div>
         </motion.div>
 
-        {/* Summary stat cards */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.08 }}
-          className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: "Total Billed",    value: fmtKES(totals.billed),    color: "text-foreground",  sub: `${rows.length} billings`                               },
-            { label: "Total Received",  value: fmtKES(totals.received),  color: "text-emerald-400", sub: `${rows.filter(r => r.status === "paid").length} settled` },
-            { label: "Outstanding",     value: fmtKES(totals.balance),   color: totals.balance > 0 ? "text-rose-400" : "text-emerald-400", sub: "balance due"   },
-            { label: "Retention Held",  value: fmtKES(totals.retaining), color: "text-amber-400",   sub: "across all billings"                                    },
-          ].map(c => (
-            <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
-              <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
-              <div className={`text-lg font-bold tabular-nums font-mono ${c.color}`}>{c.value}</div>
-              <div className="text-xs text-muted-foreground mt-1">{c.sub}</div>
-            </div>
-          ))}
-        </motion.div>
+        <StatCards totals={totals} rows={rows} />
+        <StatusPills rows={rows} filterStatus={filterStatus} setFilterStatus={setFilterStatus} />
+        <OverdueAlert rows={rows} />
 
-        {/* Status quick-filter pills */}
-        {rows.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.12 }}
-            className="flex flex-wrap gap-2 mb-8">
-            {AR_STATUSES.filter(s => statusCounts[s]).map(s => {
-              const ss = STATUS_STYLE[s];
-              const isActive = filterStatus === s;
-              return (
-                <button key={s}
-                  onClick={() => setFilterStatus(isActive ? "All" : s)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 min-w-[7rem] ${
-                    isActive
-                      ? "border-white/20 ring-1 ring-white/20 scale-[1.02]"
-                      : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
-                  }`}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[10px] uppercase tracking-widest font-semibold">{STATUS_LABEL[s]}</span>
-                  </div>
-                  <div className="text-lg font-bold tabular-nums text-foreground">{statusCounts[s]}</div>
-                  <div>
-                    <Badge className={`text-[9px] px-1.5 py-0 border rounded-full mt-1 ${ss.badge}`}>
-                      {fmtKES(rows.filter(r => r.status === s).reduce((a, r) => a + Number(r.amount_billed), 0))}
-                    </Badge>
-                  </div>
-                </button>
-              );
-            })}
-          </motion.div>
-        )}
-
-        {/* Overdue alert */}
-        {totals.overdue > 0 && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.14 }}
-            className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/5 px-5 py-4 flex flex-wrap items-center gap-4 text-xs font-mono">
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              </svg>
-              <span className="text-rose-300 font-semibold font-sans text-[11px] uppercase tracking-wider">
-                Overdue Billings
-              </span>
-            </div>
-            <span className="text-rose-300">
-              {totals.overdue} billing{totals.overdue > 1 ? "s" : ""} overdue ·{" "}
-              <strong>
-                {fmtKES(rows.filter(r => r.status === "overdue").reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0))}
-              </strong>{" "}
-              outstanding
-            </span>
-          </motion.div>
-        )}
-
-        {/* Main card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <CardTitle className="text-3xl font-bold">Accounts Receivable</CardTitle>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {projectId
-                    ? "Billings linked to this project."
-                    : "All billings across all projects and standalone records."}
-                </p>
+                <CardTitle className="text-3xl font-bold">AR Register</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">All billings linked to this project.</p>
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={fetchRows}
                   className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                   </svg>
                   Refresh
                 </button>
@@ -1167,7 +1432,7 @@ export default function AccountsReceivablePage({ projectId, canEdit = true }: Pr
                     className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
                     style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path d="M12 5v14M5 12h14" />
+                      <path d="M12 5v14M5 12h14"/>
                     </svg>
                     New Billing
                   </button>
@@ -1184,17 +1449,492 @@ export default function AccountsReceivablePage({ projectId, canEdit = true }: Pr
             onEdit={row => { setEditing(row); setModal("edit"); }}
             onDelete={setDeleting}
             onCreate={() => setModal("create")}
+            showProjectCol={false}
           />
 
           {!fetching && rows.length > 0 && (
             <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
-              <span className="tabular-nums">
-                {rows.length} total billing{rows.length !== 1 ? "s" : ""}
-              </span>
+              <span className="tabular-nums">{rows.length} total billing{rows.length !== 1 ? "s" : ""}</span>
+              <button onClick={fetchRows} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Refresh
+              </button>
             </div>
           )}
         </Card>
       </div>
     </div>
   );
-}	
+}
+
+// ─── GLOBAL AR VIEW ───────────────────────────────────────────────────────────
+// Mirrors GlobalBalanceSheetView exactly:
+//   - Consolidated tab: all billings (project-linked + standalone)
+//   - Standalone tab: only billings with project_id = null
+//   - Project selector in modal (optional linking)
+//   - "Scope" column in consolidated view
+type GlobalARTab = "consolidated" | "standalone";
+
+function GlobalARView({ canEdit, projects }: {
+  canEdit: boolean;
+  projects: Project[];
+}) {
+  const [allRows,      setAllRows]      = useState<AccountsReceivable[]>([]);
+  const [fetching,     setFetching]     = useState(false);
+  const [modal,        setModal]        = useState<null | "create" | "edit">(null);
+  const [editing,      setEditing]      = useState<AccountsReceivable | null>(null);
+  const [deleting,     setDeleting]     = useState<AccountsReceivable | null>(null);
+  const [activeTab,    setActiveTab]    = useState<GlobalARTab>("consolidated");
+  const [search,       setSearch]       = useState("");
+  const [filterStatus, setFilterStatus] = useState<ARStatus | "All">("All");
+  const { toasts, push }               = useToast();
+  const { saving, handleCreate, handleUpdate, handleDelete } = useARCrud(push);
+
+  const fetchRows = useCallback(async () => {
+    setFetching(true);
+    setAllRows([]);
+    try { setAllRows(await api.listAll()); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load.", "error"); }
+    finally { setFetching(false); }
+  }, [push]);
+
+  useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const displayRows = useMemo(
+    () => activeTab === "standalone" ? allRows.filter(r => r.project_id === null) : allRows,
+    [allRows, activeTab]
+  );
+
+  const filtered = useMemo(() =>
+    displayRows.filter(r => {
+      if (filterStatus !== "All" && r.status !== filterStatus) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return r.client.toLowerCase().includes(q) ||
+          r.billing_number.toLowerCase().includes(q) ||
+          (r.etims_code ?? "").toLowerCase().includes(q) ||
+          (r.purpose ?? "").toLowerCase().includes(q);
+      }
+      return true;
+    }),
+  [displayRows, filterStatus, search]);
+
+  const totals = useMemo(() => ({
+    billed:   displayRows.reduce((a, r) => a + Number(r.amount_billed), 0),
+    received: displayRows.reduce((a, r) => a + Number(r.amount_received), 0),
+    balance:  displayRows.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0),
+    retaining:displayRows.reduce((a, r) => a + (Number(r.retaining_amount) || 0), 0),
+    overdue:  displayRows.filter(r => r.status === "overdue").length,
+  }), [displayRows]);
+
+  const standaloneCount   = allRows.filter(r => r.project_id === null).length;
+  const consolidatedCount = allRows.length;
+
+  const tabs: { key: GlobalARTab; label: string; count: number; description: string }[] = [
+    { key: "consolidated", label: "Consolidated",    count: consolidatedCount, description: "All billings across every project plus standalone firm-wide records" },
+    { key: "standalone",   label: "Standalone Only", count: standaloneCount,   description: "Billings not linked to any specific project" },
+  ];
+
+  return (
+    <div className="container mx-auto px-4 pb-20">
+      <ToastStack toasts={toasts} />
+
+      <AnimatePresence>
+        {modal === "create" && (
+          <ARModal
+            initial={makeEmpty(null)}
+            onSave={form =>
+              handleCreate(
+                { ...form, project_id: form.project_id || null },
+                row => setAllRows(p => [row, ...p]),
+                () => setModal(null),
+              )
+            }
+            onClose={() => setModal(null)}
+            loading={saving}
+            projects={projects}
+            showProjectSelector={true}
+          />
+        )}
+        {modal === "edit" && editing && (
+          <ARModal
+            initial={(({ id: _i, balance: _b, retaining_amount: _r, created_at: _c, updated_at: _u, ...rest }) =>
+              ({ ...rest, id: editing.id }))(editing)}
+            onSave={form =>
+              handleUpdate(
+                editing.id, form, editing,
+                row => setAllRows(p => p.map(r => r.id === editing.id ? row : r)),
+                () => { setModal(null); setEditing(null); },
+              )
+            }
+            onClose={() => { setModal(null); setEditing(null); }}
+            loading={saving}
+            projects={projects}
+            showProjectSelector={true}
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm
+            row={deleting}
+            onConfirm={() =>
+              handleDelete(
+                deleting,
+                () => setAllRows(p => p.filter(r => r.id !== deleting.id)),
+                () => setDeleting(null),
+              )
+            }
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Section heading — same pattern as Global Balance Sheet */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground px-2">Firm Overview</span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+        <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
+          Global{" "}
+          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+            Accounts Receivable
+          </span>
+        </h2>
+        <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
+          Consolidated view of all billings across every project and standalone firm-wide records.
+          Project linking is optional — leave blank to post a standalone billing.
+        </p>
+      </motion.div>
+
+      <StatCards totals={totals} rows={displayRows} />
+      <StatusPills rows={displayRows} filterStatus={filterStatus} setFilterStatus={setFilterStatus} />
+      <OverdueAlert rows={displayRows} />
+
+      <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        <CardHeader className="pb-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-3xl font-bold">All Billings</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                The consolidated view is the authoritative firm-wide AR register.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={fetchRows}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                Refresh
+              </button>
+              {canEdit && (
+                <button onClick={() => setModal("create")}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg shrink-0"
+                  style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                  New Billing
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
+            {tabs.map(tab => (
+              <button key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
+                  activeTab === tab.key
+                    ? "bg-white/10 text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}>
+                {tab.label}
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${
+                  activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground"
+                }`}>{tab.count}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-2 mb-1">
+            {tabs.find(t => t.key === activeTab)?.description}
+          </p>
+        </CardHeader>
+
+        <ARTable
+          rows={displayRows}
+          filtered={filtered}
+          totals={totals}
+          canEdit={canEdit}
+          fetching={fetching}
+          search={search}
+          filterStatus={filterStatus}
+          setSearch={setSearch}
+          setFilterStatus={setFilterStatus}
+          onEdit={row => { setEditing(row); setModal("edit"); }}
+          onDelete={setDeleting}
+          onCreate={() => setModal("create")}
+          showProjectCol={activeTab === "consolidated"}
+          projects={projects}
+          emptyLabel={
+            activeTab === "standalone"
+              ? "No standalone billings yet. Add a billing without linking a project."
+              : "No billings posted yet."
+          }
+        />
+
+        {!fetching && allRows.length > 0 && (
+          <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span className="tabular-nums">{allRows.length} total billings</span>
+              {standaloneCount > 0 && <span className="tabular-nums text-violet-400/70">{standaloneCount} standalone</span>}
+              <span className="tabular-nums text-primary/70">{allRows.length - standaloneCount} project-linked</span>
+            </div>
+            <button onClick={fetchRows} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+              Refresh
+            </button>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
+// Landing page — grid of project cards → click to drill into per-project AR
+// Below the grid: GlobalARView (same pattern as balance sheet)
+function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
+  const [projects,        setProjects]        = useState<Project[]>([]);
+  const [fetching,        setFetching]        = useState(true);
+  const [search,          setSearch]          = useState("");
+  const [statusFilter,    setStatusFilter]    = useState("all");
+  const [billingCounts,   setBillingCounts]   = useState<Record<string, number>>({});
+  const [standaloneCount, setStandaloneCount] = useState(0);
+  const { toasts, push } = useToast();
+
+  useEffect(() => {
+    setFetching(true);
+    api.projects()
+      .then(async data => {
+        setProjects(data);
+        if (data.length > 0) {
+          const ids = data.map(p => p.id);
+          const { data: counts } = await supabase
+            .from("accounts_receivable").select("project_id").in("project_id", ids);
+          if (counts) {
+            const tally: Record<string, number> = {};
+            (counts as { project_id: string }[]).forEach(r => {
+              tally[r.project_id] = (tally[r.project_id] ?? 0) + 1;
+            });
+            setBillingCounts(tally);
+          }
+          const { count } = await supabase
+            .from("accounts_receivable")
+            .select("id", { count: "exact", head: true })
+            .is("project_id", null);
+          setStandaloneCount(count ?? 0);
+        }
+      })
+      .catch((err: unknown) => push(err instanceof Error ? err.message : "Failed to load projects.", "error"))
+      .finally(() => setFetching(false));
+  }, [push]);
+
+  const statuses = useMemo(() => {
+    const s = new Set(projects.map(p => p.status ?? "planning"));
+    return ["all", ...Array.from(s)];
+  }, [projects]);
+
+  const filtered = useMemo(() =>
+    projects.filter(p => {
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return p.title.toLowerCase().includes(q) ||
+          p.project_number.toLowerCase().includes(q) ||
+          (p.site_city ?? "").toLowerCase().includes(q);
+      }
+      return true;
+    }),
+  [projects, search, statusFilter]);
+
+  const totalBillings = Object.values(billingCounts).reduce((a, b) => a + b, 0) + standaloneCount;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+      <ToastStack toasts={toasts} />
+
+      <div className="container mx-auto px-4 py-16">
+
+        {/* Hero */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}
+          className="mb-12 text-center"
+        >
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Finance Module</p>
+          <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
+            Accounts{" "}
+            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+              Receivable
+            </span>
+          </h1>
+          <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
+            Select a project to view its AR register, or scroll down for the firm-wide consolidated view.
+          </p>
+        </motion.div>
+
+        {/* Summary stat cards */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8"
+        >
+          {[
+            { label: "Total Projects",         value: projects.length,                   sub: "in system",           color: "" },
+            { label: "Projects with Billings", value: Object.keys(billingCounts).length, sub: "have AR records",     color: "" },
+            { label: "Standalone Billings",    value: standaloneCount,                   sub: "not project-linked",  color: "text-violet-400" },
+            { label: "Total Billings",         value: totalBillings,                     sub: "across all accounts", color: "" },
+          ].map(card => (
+            <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">{card.label}</div>
+              <div className={`text-3xl font-bold tabular-nums ${card.color || "text-foreground"}`}>{card.value}</div>
+              <div className="text-xs text-muted-foreground mt-1">{card.sub}</div>
+            </div>
+          ))}
+        </motion.div>
+
+        {/* Projects card */}
+        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-16">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-3xl font-bold">Projects</CardTitle>
+            <div className="flex flex-col sm:flex-row gap-3 mt-5">
+              <div className="relative flex-1">
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                >
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                </svg>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by name, number or city…"
+                  className={inputCls + " pl-9"}
+                />
+              </div>
+              <div className="relative w-full sm:w-52">
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  className={selectCls}
+                >
+                  {statuses.map(s => (
+                    <option key={s} value={s}>
+                      {s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+                <SelectChevron />
+              </div>
+              <div className="inline-flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/10 rounded-xl bg-white/5 whitespace-nowrap tabular-nums">
+                {filtered.length} / {projects.length} shown
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-0">
+            {fetching ? (
+              <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
+                <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                Loading projects…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+                <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                  <path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6"/>
+                </svg>
+                <p className="text-sm">No projects found.</p>
+                {search && (
+                  <button onClick={() => { setSearch(""); setStatusFilter("all"); }}
+                    className="text-xs text-primary hover:underline">Clear filters</button>
+                )}
+              </div>
+            ) : (
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map(p => (
+                  <ProjectCard key={p.id} project={p} onSelect={onSelect} billingCount={billingCounts[p.id] ?? 0} />
+                ))}
+              </div>
+            )}
+
+            {!fetching && projects.length > 0 && (
+              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+                <span className="tabular-nums">
+                  {projects.length} total projects · {Object.keys(billingCounts).length} with AR records
+                  {standaloneCount > 0 && ` · ${standaloneCount} standalone billings`}
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Global AR section embedded below project picker ── */}
+        {!fetching && <GlobalARView canEdit={true} projects={projects} />}
+      </div>
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+export default function AccountsReceivablePage({ projectId, canEdit = true }: Props) {
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+
+  // If a projectId prop is passed (e.g. embedded in a project detail page),
+  // skip the picker entirely and go straight to that project's AR view.
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from("projects")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+      .eq("id", projectId)
+      .single()
+      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
+  }, [projectId]);
+
+  return (
+    <AnimatePresence mode="wait">
+      {selectedProject ? (
+        <motion.div
+          key={selectedProject.id}
+          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}
+        >
+          <ProjectARView
+            project={selectedProject}
+            canEdit={canEdit}
+            // If projectId was passed as a prop we are embedded — disable back navigation
+            onBack={() => { if (!projectId) setSelectedProject(null); }}
+          />
+        </motion.div>
+      ) : (
+        <motion.div
+          key="picker"
+          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}
+        >
+          <ProjectPickerView onSelect={setSelectedProject} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

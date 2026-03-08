@@ -136,7 +136,6 @@ const api = {
     return (data ?? []) as BalanceSheetEntry[];
   },
 
-  // Fetches ALL entries: project-linked AND firm-wide (null project_id)
   async listAll(): Promise<BalanceSheetEntry[]> {
     const { data, error } = await supabase
       .from("balance_sheet_entries")
@@ -147,7 +146,6 @@ const api = {
     return (data ?? []) as BalanceSheetEntry[];
   },
 
-  // Fetches ONLY entries not linked to any project (firm-wide entries)
   async listFirmWide(): Promise<BalanceSheetEntry[]> {
     const { data, error } = await supabase
       .from("balance_sheet_entries")
@@ -162,12 +160,7 @@ const api = {
   async create(body: BSFormData): Promise<BalanceSheetEntry> {
     const today = todayISO();
 
-    // Build a clean payload — never include project_id key at all when it's null/empty.
-    // This is required because the column may be NOT NULL in the DB.
-    // IMPORTANT: Run `ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;`
-    // in Supabase to allow firm-wide entries without a project link.
     if (body.project_id === null || body.project_id === "") {
-      // Omit project_id entirely from the insert payload
       const { project_id: _omit, ...rest } = body;
       void _omit;
       const payload = { ...rest, entry_date: today };
@@ -177,7 +170,6 @@ const api = {
         .select()
         .single();
       if (error) {
-        // Surface a clear message if the column is still NOT NULL
         if (error.message.includes("not-null") || error.code === "23502") {
           throw new Error(
             "Your database requires a project to be selected. " +
@@ -190,7 +182,6 @@ const api = {
       return data as BalanceSheetEntry;
     }
 
-    // Linked to a specific project
     const payload = { ...body, entry_date: today };
     const { data, error } = await supabase
       .from("balance_sheet_entries")
@@ -219,13 +210,76 @@ function useToast() {
   return { toasts, push };
 }
 
-// ─── SHARED ───────────────────────────────────────────────────────────────────
+// ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
+//
+// Single source of truth for every interactive form element.
+// ALL <input>, <textarea>, and <select> elements across the entire file
+// are built from these three constants only — never with ad-hoc inline classes.
+//
+// inputCls   — text inputs and textareas
+// selectCls  — ALL dropdowns (appearance-none strips native arrow; pr-9 leaves
+//              room for the custom <SelectWrapper> chevron)
+// readonlyCls — non-editable display fields (e.g. auto-set posting date)
+//
+// Typography shared across all three:
+//   text-sm · font-normal · tracking-normal · leading-snug
+// Geometry shared across all three:
+//   rounded-xl · py-2.5 · border border-white/10
+// Colour shared across all three:
+//   bg-white/5 · text-foreground
+// Focus shared across inputCls / selectCls:
+//   focus:outline-none · focus:ring-1 · focus:ring-primary/60 · focus:border-primary/40
 
 const inputCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
+  "w-full px-3 py-2.5 rounded-xl " +
+  "text-sm font-normal tracking-normal leading-snug " +
+  "bg-white/5 border border-white/10 " +
+  "text-foreground placeholder-muted-foreground " +
+  "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
+  "transition-all";
+
+const selectCls =
+  "w-full pl-3 pr-9 py-2.5 rounded-xl " +
+  "text-sm font-normal tracking-normal leading-snug " +
+  "appearance-none cursor-pointer " +
+  "bg-white/5 border border-white/10 " +
+  "text-foreground " +
+  "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
+  "transition-all " +
+  // Dark-theme option list (honoured in Chrome/Edge/Firefox on Windows)
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground";
 
 const readonlyCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none";
+  "w-full px-3 py-2.5 rounded-xl " +
+  "text-sm font-normal tracking-normal leading-snug " +
+  "bg-white/[0.03] border border-white/[0.06] " +
+  "text-muted-foreground cursor-not-allowed select-none";
+
+// ─── SELECT WRAPPER ───────────────────────────────────────────────────────────
+//
+// Renders the custom chevron that replaces the browser's native <select> arrow.
+// Wrap every <select> in <SelectWrapper> — the chevron is pointer-events-none
+// so it never blocks click events on the underlying element.
+
+function SelectWrapper({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`relative ${className}`}>
+      {children}
+      <svg
+        aria-hidden="true"
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        viewBox="0 0 24 24"
+      >
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </div>
+  );
+}
+
+// ─── FIELD ────────────────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -236,35 +290,92 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// ─── TOOLBAR ──────────────────────────────────────────────────────────────────
+// Reusable search + entry-type filter row used in every table view.
+
+function Toolbar({
+  search,
+  onSearch,
+  filterType,
+  onFilterType,
+  shownCount,
+  totalCount,
+  searchPlaceholder = "Search by account name or reference…",
+}: {
+  search:              string;
+  onSearch:            (v: string) => void;
+  filterType:          EntryType | "All";
+  onFilterType:        (v: EntryType | "All") => void;
+  shownCount:          number;
+  totalCount:          number;
+  searchPlaceholder?:  string;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row gap-3">
+      {/* Search */}
+      <div className="relative flex-1">
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+        >
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder={searchPlaceholder}
+          className={inputCls + " pl-9"}
+        />
+      </div>
+
+      {/* Type filter */}
+      <SelectWrapper className="w-full sm:w-44">
+        <select
+          value={filterType}
+          onChange={(e) => onFilterType(e.target.value as EntryType | "All")}
+          className={selectCls}
+        >
+          <option value="All">All Types</option>
+          {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
+        </select>
+      </SelectWrapper>
+
+      {/* Count pill */}
+      <div className="inline-flex items-center px-4 py-2.5 text-xs font-normal tracking-normal text-muted-foreground border border-white/10 rounded-xl bg-white/5 whitespace-nowrap tabular-nums">
+        {shownCount} / {totalCount} shown
+      </div>
+    </div>
+  );
+}
+
 // ─── DB MIGRATION BANNER ──────────────────────────────────────────────────────
 
 function MigrationBanner({ onDismiss }: { onDismiss: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
+      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+      className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"
     >
       <div className="flex items-start gap-3">
         <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
           <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
         </svg>
         <div className="flex-1">
-          <p className="text-amber-300 font-semibold mb-1">Database migration required for firm-wide entries</p>
-          <p className="text-amber-200/70 text-xs mb-2">
+          <p className="text-sm font-semibold text-amber-300 mb-1">Database migration required for firm-wide entries</p>
+          <p className="text-xs font-normal text-amber-200/70 mb-2">
             Run this once in your Supabase SQL editor to allow entries not linked to any project:
           </p>
-          <code className="block bg-black/30 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-200 font-mono mb-2">
+          <code className="block bg-black/30 border border-amber-500/20 rounded-lg px-3 py-2 text-xs font-mono text-amber-200 mb-2">
             ALTER TABLE balance_sheet_entries ALTER COLUMN project_id DROP NOT NULL;
           </code>
-          <p className="text-amber-200/50 text-xs">
+          <p className="text-xs font-normal text-amber-200/50">
             This is safe — existing project-linked entries are unaffected.
           </p>
         </div>
-        <button onClick={onDismiss} className="text-amber-400/60 hover:text-amber-300 transition-colors p-0.5">
+        <button onClick={onDismiss} className="text-amber-400/60 hover:text-amber-300 transition-colors p-0.5 shrink-0">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path d="M18 6 6 18M6 6l12 12"/>
+            <path d="M18 6 6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
@@ -303,10 +414,8 @@ function PostEntryModal({
       return next;
     });
 
-  const subKey = form.entry_type === "Asset" ? "asset_type" : form.entry_type === "Liability" ? "liability_type" : "equity_type";
-  const subVal = ((form as Record<string, unknown>)[subKey] as string) ?? "";
-
-  // Resolve whether this is a firm-wide entry (no project selected)
+  const subKey     = form.entry_type === "Asset" ? "asset_type" : form.entry_type === "Liability" ? "liability_type" : "equity_type";
+  const subVal     = ((form as Record<string, unknown>)[subKey] as string) ?? "";
   const isFirmWide = showProjectSelector && (form.project_id === null || form.project_id === "");
 
   return (
@@ -327,13 +436,16 @@ function PostEntryModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <div>
             <h2 className="text-base font-semibold text-foreground tracking-tight">Post Journal Entry</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs font-normal text-muted-foreground mt-0.5">
               {isFirmWide
                 ? "This entry will be posted to the firm-wide balance sheet (not linked to any project)."
                 : "Entries are posted today and cannot be back-dated or edited after posting."}
             </p>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10 ml-4 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10 ml-4 shrink-0"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
@@ -343,44 +455,58 @@ function PostEntryModal({
         {/* Body */}
         <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
 
-          {/* Project selector — only shown in global sheet modal */}
+          {/* ── Linked Project ── only in global modal */}
           {showProjectSelector && (
             <div className="col-span-2">
               <Field label="Linked Project">
-                <select
-                  value={form.project_id ?? ""}
-                  onChange={(e) => setField("project_id", e.target.value === "" ? null : e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="">— Firm-wide entry (no project) —</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.project_number} · {p.title}
-                    </option>
-                  ))}
-                </select>
-                {/* Contextual hint */}
-                <p className="text-[11px] text-muted-foreground/70 mt-1 leading-relaxed">
+                <SelectWrapper>
+                  <select
+                    value={form.project_id ?? ""}
+                    onChange={(e) => setField("project_id", e.target.value === "" ? null : e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">— Firm-wide entry (no project) —</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>
+                    ))}
+                  </select>
+                </SelectWrapper>
+                <p className="text-[11px] font-normal text-muted-foreground/70 mt-1 leading-relaxed">
                   {isFirmWide
-                    ? "⬆ This entry will appear only in the consolidated firm balance sheet."
+                    ? "This entry will appear only in the consolidated firm balance sheet."
                     : "This entry will appear in both the project balance sheet and the consolidated view."}
                 </p>
               </Field>
             </div>
           )}
 
+          {/* ── Entry Type ── */}
           <Field label="Entry Type *">
-            <select value={form.entry_type} onChange={(e) => setField("entry_type", e.target.value as EntryType)} className={inputCls}>
-              {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <SelectWrapper>
+              <select
+                value={form.entry_type}
+                onChange={(e) => setField("entry_type", e.target.value as EntryType)}
+                className={selectCls}
+              >
+                {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </SelectWrapper>
           </Field>
 
+          {/* ── Sub-type ── */}
           <Field label={`${form.entry_type} Sub-type *`}>
-            <select value={subVal} onChange={(e) => setField(subKey as keyof BSFormData, e.target.value)} className={inputCls}>
-              {SUB_TYPES[form.entry_type].map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <SelectWrapper>
+              <select
+                value={subVal}
+                onChange={(e) => setField(subKey as keyof BSFormData, e.target.value)}
+                className={selectCls}
+              >
+                {SUB_TYPES[form.entry_type].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </SelectWrapper>
           </Field>
 
+          {/* ── Account Name ── */}
           <div className="col-span-2">
             <Field label="Account Name *">
               <input
@@ -392,10 +518,10 @@ function PostEntryModal({
             </Field>
           </div>
 
-          {/* Amount — KES prefix */}
+          {/* ── Amount ── KES prefix badge, border-l omitted to join cleanly */}
           <Field label="Amount *">
-            <div className="flex items-stretch gap-0">
-              <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 border-r-0 whitespace-nowrap select-none">
+            <div className="flex items-stretch">
+              <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-r-0 border-emerald-500/20 whitespace-nowrap select-none">
                 KES
               </span>
               <input
@@ -407,16 +533,23 @@ function PostEntryModal({
                   const val = e.target.value;
                   setField("amount", val === "" ? "" : parseFloat(val));
                 }}
-                className="flex-1 px-3 py-2 rounded-r-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all"
+                className={
+                  "flex-1 px-3 py-2.5 rounded-r-xl " +
+                  "text-sm font-normal tracking-normal leading-snug " +
+                  "bg-white/5 border border-white/10 border-l-0 " +
+                  "text-foreground placeholder-muted-foreground " +
+                  "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
+                  "transition-all"
+                }
                 placeholder="0.00"
               />
             </div>
           </Field>
 
-          {/* Posting date — always today, read-only */}
+          {/* ── Posting Date — read-only ── */}
           <Field label="Posting Date">
             <div className={readonlyCls + " flex items-center gap-2"}>
-              <svg className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
               </svg>
               <span>{fmtDate(form.entry_date)}</span>
@@ -424,6 +557,7 @@ function PostEntryModal({
             </div>
           </Field>
 
+          {/* ── Reference Code ── */}
           <Field label="Reference Code">
             <input
               value={form.reference_code ?? ""}
@@ -433,6 +567,7 @@ function PostEntryModal({
             />
           </Field>
 
+          {/* ── Description ── */}
           <Field label="Description">
             <input
               value={form.description ?? ""}
@@ -442,6 +577,7 @@ function PostEntryModal({
             />
           </Field>
 
+          {/* ── Notes ── */}
           <div className="col-span-2">
             <Field label="Notes">
               <textarea
@@ -459,7 +595,7 @@ function PostEntryModal({
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+            className="px-4 py-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
           >
             Cancel
           </button>
@@ -485,22 +621,25 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+      />
       <motion.div
         className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-white/10"
         initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.18 }}
       >
         <div className="flex items-start gap-4 mb-5">
-          <div className="w-10 h-10 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <div className="w-10 h-10 rounded-full bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0 mt-0.5">
             <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             </svg>
           </div>
           <div>
             <h3 className="font-semibold text-foreground mb-1">Reverse Entry</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
+            <p className="text-sm font-normal text-muted-foreground leading-relaxed">
               Permanently reverse{" "}
               <span className="text-foreground font-medium">{entry.account_name}</span>{" "}
               (<span className="font-mono text-primary text-xs">{fmt(entry.amount)}</span>)?
@@ -509,9 +648,17 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
           </div>
         </div>
         <div className="flex gap-3 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
-          <button onClick={onConfirm} disabled={loading}
-            className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2"
+          >
             {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             Reverse Entry
           </button>
@@ -547,7 +694,7 @@ function ProjectCard({ project, onSelect, entryCount }: {
           </span>
         </div>
         {entryCount > 0 && (
-          <span className="text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full flex-shrink-0 tabular-nums">
+          <span className="text-[10px] font-normal text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full shrink-0 tabular-nums">
             {entryCount} {entryCount === 1 ? "entry" : "entries"}
           </span>
         )}
@@ -558,12 +705,12 @@ function ProjectCard({ project, onSelect, entryCount }: {
       </h3>
 
       {project.description && (
-        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
+        <p className="text-xs font-normal text-muted-foreground line-clamp-2 mb-3 leading-relaxed">
           {project.description}
         </p>
       )}
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground mb-3">
         {project.site_city && (
           <span className="flex items-center gap-1">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -593,7 +740,7 @@ function ProjectCard({ project, onSelect, entryCount }: {
       {project.progress_percent != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-muted-foreground">Progress</span>
+            <span className="text-[10px] font-normal text-muted-foreground">Progress</span>
             <span className="text-[10px] font-mono text-primary">{project.progress_percent}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
@@ -619,7 +766,6 @@ function ProjectCard({ project, onSelect, entryCount }: {
 }
 
 // ─── ENTRIES TABLE ────────────────────────────────────────────────────────────
-// Reusable collapsible table used in both per-project and global views.
 
 function EntriesTable({
   entries,
@@ -634,7 +780,7 @@ function EntriesTable({
   showProjectCol?: boolean;
   projects?:       Project[];
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(
+  const [expanded,   setExpanded]   = useState<Record<string, boolean>>(
     Object.fromEntries(ENTRY_TYPES.map((t) => [t, true]))
   );
   const [search,     setSearch]     = useState("");
@@ -671,36 +817,26 @@ function EntriesTable({
     const p = projects.find((pr) => pr.id === pid);
     return p
       ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
-      : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
+      : <span className="italic font-normal text-muted-foreground/60 text-xs">Unknown</span>;
   };
 
-  // Column count for subtotal colSpan
-  // Columns: Ref | Account Name | Sub-type | Description | Date | [Project] | Amount | [Actions]
-  const baseDataCols = showProjectCol ? 6 : 5; // up to and including Amount col index - 1
+  // Cols before Amount: Ref | Account Name | Sub-type | Description | Date | [Scope]
+  const preAmountCols = showProjectCol ? 6 : 5;
 
   return (
     <>
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 px-6 pt-2 pb-4">
-        <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by account name or reference…"
-            className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
-        </div>
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value as EntryType | "All")}
-          className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
-          <option value="All">All Types</option>
-          {ENTRY_TYPES.map((t) => <option key={t} value={t}>{t}s</option>)}
-        </select>
-        <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
-          {filtered.length} / {entries.length} shown
-        </div>
+      <div className="px-6 pt-2 pb-4">
+        <Toolbar
+          search={search}
+          onSearch={setSearch}
+          filterType={filterType}
+          onFilterType={setFilterType}
+          shownCount={filtered.length}
+          totalCount={entries.length}
+        />
       </div>
 
-      {Object.keys(grouped).length === 0 ? null : (
+      {Object.keys(grouped).length > 0 && (
         <div className="divide-y divide-white/8">
           {ENTRY_TYPES.filter((t) => grouped[t]).map((entryType) => {
             const s        = TYPE_STYLE[entryType];
@@ -721,8 +857,10 @@ function EntriesTable({
                   </div>
                   <div className="flex items-center gap-4">
                     <span className={`text-sm font-semibold tabular-nums ${s.accent}`}>{fmt(subtotal)}</span>
-                    <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                      fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <svg
+                      className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                      fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                    >
                       <path d="m6 9 6 6 6-6"/>
                     </svg>
                   </div>
@@ -730,9 +868,14 @@ function EntriesTable({
 
                 <AnimatePresence initial={false}>
                   {isOpen && (
-                    <motion.div key="rows"
-                      initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }} style={{ overflow: "hidden" }}>
+                    <motion.div
+                      key="rows"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22 }}
+                      style={{ overflow: "hidden" }}
+                    >
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
@@ -747,7 +890,12 @@ function EntriesTable({
                                 "Amount",
                                 ...(canEdit ? ["Actions"] : []),
                               ].map((h) => (
-                                <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                                <th
+                                  key={h}
+                                  className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap"
+                                >
+                                  {h}
+                                </th>
                               ))}
                             </tr>
                           </thead>
@@ -758,19 +906,22 @@ function EntriesTable({
                                 entry.entry_type === "Liability" ? entry.liability_type :
                                 entry.equity_type;
                               return (
-                                <motion.tr key={entry.id}
-                                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                                <motion.tr
+                                  key={entry.id}
+                                  initial={{ opacity: 0, x: -6 }}
+                                  animate={{ opacity: 1, x: 0 }}
                                   transition={{ delay: ri * 0.02, duration: 0.16 }}
-                                  className={`border-b border-white/5 transition-colors ${s.row}`}>
+                                  className={`border-b border-white/5 transition-colors ${s.row}`}
+                                >
                                   <td className="px-5 py-3.5 whitespace-nowrap">
                                     <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
                                   </td>
-                                  <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">{entry.account_name}</td>
-                                  <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">{subType || "—"}</td>
-                                  <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
+                                  <td className="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-foreground">{entry.account_name}</td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap text-xs font-normal text-muted-foreground">{subType || "—"}</td>
+                                  <td className="px-5 py-3.5 text-xs font-normal text-muted-foreground max-w-xs">
                                     <span className="line-clamp-1">{entry.description || "—"}</span>
                                   </td>
-                                  <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(entry.entry_date)}</td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap font-mono text-xs font-normal text-muted-foreground">{fmtDate(entry.entry_date)}</td>
                                   {showProjectCol && (
                                     <td className="px-5 py-3.5 whitespace-nowrap">{projectLabel(entry.project_id)}</td>
                                   )}
@@ -779,8 +930,11 @@ function EntriesTable({
                                   </td>
                                   {canEdit && (
                                     <td className="px-5 py-3.5 whitespace-nowrap">
-                                      <button onClick={() => onDelete(entry)} title="Reverse entry"
-                                        className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
+                                      <button
+                                        onClick={() => onDelete(entry)}
+                                        title="Reverse entry"
+                                        className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                      >
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                           <polyline points="3 6 5 6 21 6"/>
                                           <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -794,8 +948,10 @@ function EntriesTable({
                           </tbody>
                           <tfoot>
                             <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                              <td colSpan={baseDataCols}
-                                className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              <td
+                                colSpan={preAmountCols}
+                                className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                              >
                                 Total {entryType}s
                               </td>
                               <td className={`px-5 py-2.5 text-sm font-bold tabular-nums ${s.accent}`}>{fmt(subtotal)}</td>
@@ -843,13 +999,16 @@ function StatCards({
   const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
-      className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
+      className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+    >
       {ENTRY_TYPES.map((type) => {
         const s        = TYPE_STYLE[type];
         const isActive = filterType === type;
         return (
-          <button key={type}
+          <button
+            key={type}
             onClick={() => setFilterType(isActive ? "All" : type)}
             className={`rounded-2xl border p-4 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 ${
               isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
@@ -857,7 +1016,7 @@ function StatCards({
           >
             <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{type}s</div>
             <div className="text-3xl font-bold text-foreground tabular-nums">{fmt(totals[type] ?? 0)}</div>
-            <div className="text-xs text-muted-foreground mt-1">
+            <div className="text-xs font-normal text-muted-foreground mt-1">
               {entries.filter((e) => e.entry_type === type).length} entries
             </div>
           </button>
@@ -866,11 +1025,13 @@ function StatCards({
       <div className={`rounded-2xl border p-4 text-left backdrop-blur-sm ${
         isBalanced ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
       }`}>
-        <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>A = L + E</div>
+        <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
+          A = L + E
+        </div>
         <div className={`text-3xl font-bold tabular-nums ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}>
           {isBalanced ? "Balanced" : "Unbalanced"}
         </div>
-        <div className="text-xs text-muted-foreground mt-1">
+        <div className="text-xs font-normal text-muted-foreground mt-1">
           {isBalanced ? "Equation checks out" : `Δ ${fmt(Math.abs(totalAssets - (totalLiabilities + totalEquity)))}`}
         </div>
       </div>
@@ -885,11 +1046,10 @@ function AccountingBar({ entries }: { entries: BalanceSheetEntry[] }) {
   const totalLiabilities = entries.filter((e) => e.entry_type === "Liability").reduce((s, e) => s + Number(e.amount), 0);
   const totalEquity      = entries.filter((e) => e.entry_type === "Equity").reduce((s, e) => s + Number(e.amount), 0);
   const isBalanced       = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
-
   if (!entries.length) return null;
 
   return (
-    <div className={`px-6 py-4 flex flex-wrap items-center gap-4 text-xs font-mono ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
+    <div className={`px-6 py-4 flex flex-wrap items-center gap-4 font-mono text-xs ${isBalanced ? "bg-emerald-950/20" : "bg-rose-950/20"}`}>
       <span className="text-muted-foreground">Accounting Equation:</span>
       <span className="text-emerald-400">Assets {fmt(totalAssets)}</span>
       <span className="text-muted-foreground">=</span>
@@ -898,9 +1058,11 @@ function AccountingBar({ entries }: { entries: BalanceSheetEntry[] }) {
       <span className="text-violet-400">Equity {fmt(totalEquity)}</span>
       <span className="text-muted-foreground">=</span>
       <span className={isBalanced ? "text-emerald-400" : "text-rose-400"}>{fmt(totalLiabilities + totalEquity)}</span>
-      <Badge className={`ml-auto ${isBalanced
-        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-        : "bg-rose-500/10 border-rose-500/30 text-rose-300"}`}>
+      <Badge className={`ml-auto ${
+        isBalanced
+          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+          : "bg-rose-500/10 border-rose-500/30 text-rose-300"
+      }`}>
         {isBalanced ? "✓ Balanced" : "⚠ Unbalanced"}
       </Badge>
     </div>
@@ -908,7 +1070,6 @@ function AccountingBar({ entries }: { entries: BalanceSheetEntry[] }) {
 }
 
 // ─── GLOBAL BALANCE SHEET VIEW ────────────────────────────────────────────────
-// Shows ALL entries: project-linked + firm-wide, with tabs to toggle between views.
 
 type GlobalTab = "consolidated" | "firm-wide";
 
@@ -916,26 +1077,23 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
   canEdit:  boolean;
   projects: Project[];
 }) {
-  const [allEntries,      setAllEntries]      = useState<BalanceSheetEntry[]>([]);
-  const [fetching,        setFetching]        = useState(false);
-  const [showModal,       setShowModal]       = useState(false);
-  const [deleting,        setDeleting]        = useState<BalanceSheetEntry | null>(null);
-  const [saving,          setSaving]          = useState(false);
-  const [activeTab,       setActiveTab]       = useState<GlobalTab>("consolidated");
-  const [showMigration,   setShowMigration]   = useState(false);
-  const [filterType,      setFilterType]      = useState<EntryType | "All">("All");
+  const [allEntries,    setAllEntries]    = useState<BalanceSheetEntry[]>([]);
+  const [fetching,      setFetching]      = useState(false);
+  const [showModal,     setShowModal]     = useState(false);
+  const [deleting,      setDeleting]      = useState<BalanceSheetEntry | null>(null);
+  const [saving,        setSaving]        = useState(false);
+  const [activeTab,     setActiveTab]     = useState<GlobalTab>("consolidated");
+  const [showMigration, setShowMigration] = useState(false);
+  const [filterType,    setFilterType]    = useState<EntryType | "All">("All");
 
   const { toasts, push } = useToast();
 
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     setAllEntries([]);
-    try {
-      const data = await api.listAll();
-      setAllEntries(data);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
-    } finally { setFetching(false); }
+    try { setAllEntries(await api.listAll()); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load entries.", "error"); }
+    finally { setFetching(false); }
   }, [push]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
@@ -950,7 +1108,6 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to post entry.";
       push(msg, "error");
-      // If it's the NOT NULL constraint error, surface the migration banner
       if (msg.includes("not-null") || msg.includes("migration") || msg.includes("project_id")) {
         setShowMigration(true);
       }
@@ -970,30 +1127,17 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
     } finally { setSaving(false); }
   };
 
-  // Consolidated = all entries; firm-wide = only null project_id
-  const displayEntries = useMemo(() =>
-    activeTab === "firm-wide"
-      ? allEntries.filter((e) => e.project_id === null)
-      : allEntries,
-  [allEntries, activeTab]);
+  const displayEntries = useMemo(
+    () => activeTab === "firm-wide" ? allEntries.filter((e) => e.project_id === null) : allEntries,
+    [allEntries, activeTab]
+  );
 
-  // Tallies for the tab badges
   const firmWideCount     = allEntries.filter((e) => e.project_id === null).length;
   const consolidatedCount = allEntries.length;
 
   const tabs: { key: GlobalTab; label: string; count: number; description: string }[] = [
-    {
-      key:         "consolidated",
-      label:       "Consolidated",
-      count:       consolidatedCount,
-      description: "All entries across every project + firm-wide",
-    },
-    {
-      key:         "firm-wide",
-      label:       "Firm-wide Only",
-      count:       firmWideCount,
-      description: "Entries not linked to any specific project",
-    },
+    { key: "consolidated", label: "Consolidated",   count: consolidatedCount, description: "All entries across every project + firm-wide accounts" },
+    { key: "firm-wide",    label: "Firm-wide Only", count: firmWideCount,     description: "Entries not linked to any specific project" },
   ];
 
   return (
@@ -1003,7 +1147,8 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
-            <motion.div key={t.id}
+            <motion.div
+              key={t.id}
               initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg max-w-sm ${
                 t.type === "success"
@@ -1041,43 +1186,38 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-px flex-1 bg-white/10" />
-          <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium px-2">Firm Overview</span>
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground px-2">Firm Overview</span>
           <div className="h-px flex-1 bg-white/10" />
         </div>
         <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
           Consolidated{" "}
-          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-            Balance Sheet
-          </span>
+          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Balance Sheet</span>
         </h2>
-        <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
+        <p className="text-center text-sm font-normal text-muted-foreground max-w-xl mx-auto">
           Auto-generated from all posted journal entries across every project and firm-wide accounts.
           Post a new entry to update any section of the balance sheet.
         </p>
       </motion.div>
 
-      {/* Migration banner */}
       <AnimatePresence>
         {showMigration && <MigrationBanner onDismiss={() => setShowMigration(false)} />}
       </AnimatePresence>
 
-      {/* Stat cards — always consolidated totals */}
       <StatCards entries={allEntries} filterType={filterType} setFilterType={setFilterType} />
 
-      {/* Main card */}
       <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
         <CardHeader className="pb-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-3xl font-bold">All Posted Entries</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs font-normal text-muted-foreground mt-1">
                 The consolidated view is the authoritative firm-wide balance sheet.
               </p>
             </div>
             {canEdit && (
               <button
                 onClick={() => setShowModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg flex-shrink-0"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg shrink-0"
                 style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -1094,33 +1234,29 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
                   activeTab === tab.key
                     ? "bg-white/10 text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {tab.label}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full tabular-nums font-mono ${
-                  activeTab === tab.key
-                    ? "bg-primary/20 text-primary"
-                    : "bg-white/5 text-muted-foreground"
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${
+                  activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground"
                 }`}>
                   {tab.count}
                 </span>
               </button>
             ))}
           </div>
-
-          {/* Tab description */}
-          <p className="text-xs text-muted-foreground mt-2">
+          <p className="text-xs font-normal text-muted-foreground mt-2">
             {tabs.find((t) => t.key === activeTab)?.description}
           </p>
         </CardHeader>
 
         <CardContent className="p-0">
           {fetching ? (
-            <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+            <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
               <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
               Loading balance sheet…
             </div>
@@ -1129,7 +1265,7 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
               <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                 <path d="M3 6h18M3 12h18M3 18h18"/>
               </svg>
-              <p className="text-sm">
+              <p className="text-sm font-normal">
                 {activeTab === "firm-wide"
                   ? "No firm-wide entries yet. Post an entry without linking a project."
                   : "No entries posted yet."}
@@ -1154,17 +1290,11 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
           )}
 
           {!fetching && allEntries.length > 0 && (
-            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
               <div className="flex items-center gap-4">
                 <span className="tabular-nums">{allEntries.length} total entries</span>
-                {firmWideCount > 0 && (
-                  <span className="tabular-nums text-violet-400/70">
-                    {firmWideCount} firm-wide
-                  </span>
-                )}
-                <span className="tabular-nums text-primary/70">
-                  {allEntries.length - firmWideCount} project-linked
-                </span>
+                {firmWideCount > 0 && <span className="tabular-nums text-violet-400/70">{firmWideCount} firm-wide</span>}
+                <span className="tabular-nums text-primary/70">{allEntries.length - firmWideCount} project-linked</span>
               </div>
               <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -1184,11 +1314,11 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
 // ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
 
 function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
-  const [projects,     setProjects]     = useState<Project[]>([]);
-  const [fetching,     setFetching]     = useState(true);
-  const [search,       setSearch]       = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [entryCounts,  setEntryCounts]  = useState<Record<string, number>>({});
+  const [projects,      setProjects]      = useState<Project[]>([]);
+  const [fetching,      setFetching]      = useState(true);
+  const [search,        setSearch]        = useState("");
+  const [statusFilter,  setStatusFilter]  = useState("all");
+  const [entryCounts,   setEntryCounts]   = useState<Record<string, number>>({});
   const [firmWideCount, setFirmWideCount] = useState(0);
 
   const { toasts, push } = useToast();
@@ -1209,7 +1339,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             });
             setEntryCounts(tally);
           }
-          // Also count firm-wide entries
           const { count } = await supabase
             .from("balance_sheet_entries")
             .select("id", { count: "exact", head: true })
@@ -1248,7 +1377,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
-            <motion.div key={t.id}
+            <motion.div
+              key={t.id}
               initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
                 t.type === "success"
@@ -1263,32 +1393,35 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
       <div className="container mx-auto px-4 py-16">
 
         {/* Hero */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-12 text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Finance Module</p>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}
+          className="mb-12 text-center"
+        >
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Finance Module</p>
           <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
             Balance{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              Sheet
-            </span>
+            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Sheet</span>
           </h1>
-          <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl md:text-2xl font-normal text-muted-foreground max-w-2xl mx-auto">
             Select a project to view its balance sheet, or scroll down for the firm-wide consolidated view.
           </p>
         </motion.div>
 
         {/* Summary stat cards */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
-          className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8"
+        >
           {[
-            { label: "Total Projects",        value: projects.length,                         sub: "in system",                color: "" },
-            { label: "Projects with Entries",  value: Object.keys(entryCounts).length,         sub: "have BS records",          color: "" },
-            { label: "Firm-wide Entries",      value: firmWideCount,                           sub: "not project-linked",       color: "text-violet-400" },
-            { label: "Total BS Entries",        value: totalEntries,                            sub: "across all accounts",      color: "" },
+            { label: "Total Projects",        value: projects.length,                        sub: "in system",           color: "" },
+            { label: "Projects with Entries",  value: Object.keys(entryCounts).length,        sub: "have BS records",     color: "" },
+            { label: "Firm-wide Entries",      value: firmWideCount,                          sub: "not project-linked",  color: "text-violet-400" },
+            { label: "Total BS Entries",       value: totalEntries,                           sub: "across all accounts", color: "" },
           ].map((card) => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
-              <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{card.label}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">{card.label}</div>
               <div className={`text-3xl font-bold tabular-nums ${card.color || "text-foreground"}`}>{card.value}</div>
-              <div className="text-xs text-muted-foreground mt-1">{card.sub}</div>
+              <div className="text-xs font-normal text-muted-foreground mt-1">{card.sub}</div>
             </div>
           ))}
         </motion.div>
@@ -1297,22 +1430,43 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-16">
           <CardHeader className="pb-4">
             <CardTitle className="text-3xl font-bold">Projects</CardTitle>
+
+            {/* Search + Status filter — both use the unified tokens */}
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                >
                   <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
                 </svg>
-                <input value={search} onChange={(e) => setSearch(e.target.value)}
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name, number or city…"
-                  className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
+                  className={inputCls + " pl-9"}
+                />
               </div>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
-                {statuses.map((s) => (
-                  <option key={s} value={s}>{s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</option>
-                ))}
-              </select>
-              <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
+
+              {/* Status filter */}
+              <SelectWrapper className="w-full sm:w-52">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className={selectCls}
+                >
+                  {statuses.map((s) => (
+                    <option key={s} value={s}>
+                      {s === "all"
+                        ? "All Statuses"
+                        : s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+              </SelectWrapper>
+
+              <div className="inline-flex items-center px-4 py-2.5 text-xs font-normal tracking-normal text-muted-foreground border border-white/10 rounded-xl bg-white/5 whitespace-nowrap tabular-nums">
                 {filtered.length} / {projects.length} shown
               </div>
             </div>
@@ -1320,7 +1474,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 
           <CardContent className="p-0">
             {fetching ? (
-              <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+              <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
                 Loading projects…
               </div>
@@ -1329,10 +1483,14 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6"/>
                 </svg>
-                <p className="text-sm">No projects found.</p>
+                <p className="text-sm font-normal">No projects found.</p>
                 {search && (
-                  <button onClick={() => { setSearch(""); setStatusFilter("all"); }}
-                    className="text-xs text-primary hover:underline">Clear filters</button>
+                  <button
+                    onClick={() => { setSearch(""); setStatusFilter("all"); }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
                 )}
               </div>
             ) : (
@@ -1344,7 +1502,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             )}
 
             {!fetching && projects.length > 0 && (
-              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
                 <span className="tabular-nums">
                   {projects.length} total projects · {Object.keys(entryCounts).length} with balance sheet entries
                   {firmWideCount > 0 && ` · ${firmWideCount} firm-wide entries`}
@@ -1354,11 +1512,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </CardContent>
         </Card>
 
-        {/* Global consolidated balance sheet */}
-        {!fetching && (
-          <GlobalBalanceSheetView canEdit={true} projects={projects} />
-        )}
-
+        {!fetching && <GlobalBalanceSheetView canEdit={true} projects={projects} />}
       </div>
     </div>
   );
@@ -1369,11 +1523,11 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 function EntriesView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
 }) {
-  const [entries,  setEntries]  = useState<BalanceSheetEntry[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [deleting,  setDeleting]  = useState<BalanceSheetEntry | null>(null);
-  const [saving,    setSaving]    = useState(false);
+  const [entries,    setEntries]    = useState<BalanceSheetEntry[]>([]);
+  const [fetching,   setFetching]   = useState(false);
+  const [showModal,  setShowModal]  = useState(false);
+  const [deleting,   setDeleting]   = useState<BalanceSheetEntry | null>(null);
+  const [saving,     setSaving]     = useState(false);
   const [filterType, setFilterType] = useState<EntryType | "All">("All");
 
   const { toasts, push } = useToast();
@@ -1381,12 +1535,9 @@ function EntriesView({ project, canEdit, onBack }: {
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     setEntries([]);
-    try {
-      const data = await api.list(project.id);
-      setEntries(data);
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
-    } finally { setFetching(false); }
+    try { setEntries(await api.list(project.id)); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load entries.", "error"); }
+    finally { setFetching(false); }
   }, [project.id, push]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
@@ -1425,7 +1576,8 @@ function EntriesView({ project, canEdit, onBack }: {
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
-            <motion.div key={t.id}
+            <motion.div
+              key={t.id}
               initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
               className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg ${
                 t.type === "success"
@@ -1460,16 +1612,21 @@ function EntriesView({ project, canEdit, onBack }: {
       <div className="container mx-auto px-4 py-16">
 
         {/* Hero */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-10">
-          <button onClick={onBack}
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}
+          className="mb-10"
+        >
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors mb-6 group"
+          >
             <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path d="m15 18-6-6 6-6"/>
             </svg>
             All Projects
           </button>
 
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">Balance Sheet</p>
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Balance Sheet</p>
 
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
@@ -1487,29 +1644,29 @@ function EntriesView({ project, canEdit, onBack }: {
                 </span>
               </h1>
               {project.site_city && (
-                <p className="text-xl text-muted-foreground mt-2">{project.site_city}{project.site_country ? `, ${project.site_country}` : ""}</p>
+                <p className="text-xl font-normal text-muted-foreground mt-2">
+                  {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
+                </p>
               )}
             </div>
           </div>
         </motion.div>
 
-        {/* Stat cards */}
         <StatCards entries={entries} filterType={filterType} setFilterType={setFilterType} />
 
-        {/* Main entries card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <CardTitle className="text-3xl font-bold">Posted Entries</CardTitle>
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="text-xs font-normal text-muted-foreground mt-1">
                   Balance sheet is auto-generated from posted journal entries. To adjust, post a correcting entry.
                 </p>
               </div>
               {canEdit && (
                 <button
                   onClick={() => setShowModal(true)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg flex-shrink-0"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg shrink-0"
                   style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -1523,7 +1680,7 @@ function EntriesView({ project, canEdit, onBack }: {
 
           <CardContent className="p-0">
             {fetching ? (
-              <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground text-sm">
+              <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
                 Loading balance sheet…
               </div>
@@ -1532,7 +1689,7 @@ function EntriesView({ project, canEdit, onBack }: {
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M3 6h18M3 12h18M3 18h18"/>
                 </svg>
-                <p className="text-sm">No entries posted yet for this project.</p>
+                <p className="text-sm font-normal">No entries posted yet for this project.</p>
                 {canEdit && (
                   <button onClick={() => setShowModal(true)} className="text-xs text-primary hover:underline">
                     Post first entry
@@ -1541,18 +1698,13 @@ function EntriesView({ project, canEdit, onBack }: {
               </div>
             ) : (
               <>
-                <EntriesTable
-                  entries={entries}
-                  canEdit={canEdit}
-                  onDelete={setDeleting}
-                  showProjectCol={false}
-                />
+                <EntriesTable entries={entries} canEdit={canEdit} onDelete={setDeleting} showProjectCol={false} />
                 <AccountingBar entries={entries} />
               </>
             )}
 
             {!fetching && entries.length > 0 && (
-              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
+              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
                 <span className="tabular-nums">{entries.length} total entries</span>
                 <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -1588,9 +1740,11 @@ export default function BalanceSheetPage({ projectId, canEdit = true }: Props) {
   return (
     <AnimatePresence mode="wait">
       {selectedProject ? (
-        <motion.div key={selectedProject.id}
+        <motion.div
+          key={selectedProject.id}
           initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
+          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}
+        >
           <EntriesView
             project={selectedProject}
             canEdit={canEdit}
@@ -1598,9 +1752,11 @@ export default function BalanceSheetPage({ projectId, canEdit = true }: Props) {
           />
         </motion.div>
       ) : (
-        <motion.div key="picker"
+        <motion.div
+          key="picker"
           initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
+          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}
+        >
           <ProjectPickerView onSelect={setSelectedProject} />
         </motion.div>
       )}
