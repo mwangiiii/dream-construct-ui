@@ -6,10 +6,6 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 
-// ─── All mutations go through the Edge Function at /functions/v1/invoices ────
-// The Edge Function handles: JWT auth, server-side validation, audit logging,
-// and all DB writes. The frontend only reads directly from Supabase (SELECT).
-
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface Project {
   id: string;
@@ -28,7 +24,7 @@ interface Project {
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled" | "partial";
 
 interface LineItem {
-  id: string;           // client-side uuid
+  id: string;
   description: string;
   hours?: number | null;
   qty?: number | null;
@@ -41,37 +37,30 @@ interface Invoice {
   project_id: string | null;
   invoice_number: string;
   status: InvoiceStatus;
-  // Company
   company_name: string;
   company_address: string | null;
   company_city_state_zip: string | null;
   company_phone: string | null;
   company_email: string | null;
-  // Bill To
   client_company_name: string;
   client_contact_name: string | null;
   client_address: string | null;
   client_phone: string | null;
   client_email: string | null;
-  // Project Info
   project_start_date: string | null;
   project_end_date: string | null;
   project_location: string | null;
   project_client_ref: string | null;
-  // Dates
   invoice_date: string;
   due_date: string;
-  // Line items (stored as JSONB)
   labor_items: LineItem[];
   material_items: LineItem[];
   other_items: LineItem[];
-  // Financials
   subtotal: number;
   discount_amount: number;
   tax_rate: number;
   total_tax: number;
   total: number;
-  // Payment
   payment_terms: string | null;
   bank_name: string | null;
   account_number: string | null;
@@ -169,9 +158,7 @@ function computeTotals(form: InvoiceFormData) {
   return { subtotal, subtotalLessDiscount, totalTax, total };
 }
 
-// ─── EDGE FUNCTION API ────────────────────────────────────────────────────────
-// Derive the project URL from the already-initialised supabase client so
-// process.env is never referenced at browser runtime.
+// ─── EDGE FUNCTION ────────────────────────────────────────────────────────────
 const SUPABASE_PROJECT_URL: string =
   (supabase as unknown as { supabaseUrl?: string }).supabaseUrl ?? "";
 const EDGE_BASE = `${SUPABASE_PROJECT_URL}/functions/v1/invoices`;
@@ -181,10 +168,7 @@ async function edgeRequest(method: "POST" | "PATCH" | "DELETE", body: Record<str
   if (!session) throw new Error("Not authenticated.");
   const res = await fetch(EDGE_BASE, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-    },
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
     body: JSON.stringify(body),
   });
   const json = await res.json();
@@ -192,6 +176,28 @@ async function edgeRequest(method: "POST" | "PATCH" | "DELETE", body: Record<str
   return json;
 }
 
+// ─── AUDIT LOG ────────────────────────────────────────────────────────────────
+async function auditLog(opts: {
+  tableName: string;
+  recordId?: string | null;
+  action: "INSERT" | "UPDATE" | "DELETE";
+  oldData?: Record<string, unknown> | null;
+  newData?: Record<string, unknown> | null;
+}) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    await supabase.from("audit_logs").insert({
+      table_name: opts.tableName,
+      record_id:  opts.recordId ?? null,
+      action:     opts.action,
+      old_data:   opts.oldData ?? null,
+      new_data:   opts.newData ?? null,
+      changed_by: session?.user?.id ?? null,
+    });
+  } catch { /* never block UX */ }
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
 const api = {
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
@@ -204,9 +210,7 @@ const api = {
 
   async list(projectId: string): Promise<Invoice[]> {
     const { data, error } = await supabase
-      .from("invoices")
-      .select("*")
-      .eq("project_id", projectId)
+      .from("invoices").select("*").eq("project_id", projectId)
       .order("invoice_date", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as Invoice[];
@@ -214,36 +218,425 @@ const api = {
 
   async listAll(): Promise<Invoice[]> {
     const { data, error } = await supabase
-      .from("invoices")
-      .select("*")
-      .order("invoice_date", { ascending: false });
+      .from("invoices").select("*").order("invoice_date", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as Invoice[];
   },
 
   async create(form: InvoiceFormData): Promise<Invoice> {
-    const { subtotal, subtotalLessDiscount, totalTax, total } = computeTotals(form);
+    const totals = computeTotals(form);
     const json = await edgeRequest("POST", {
       action: "create",
-      payload: { ...form, subtotal, subtotal_less_discount: subtotalLessDiscount, total_tax: totalTax, total },
+      payload: { ...form, subtotal: totals.subtotal, subtotal_less_discount: totals.subtotalLessDiscount, total_tax: totals.totalTax, total: totals.total },
     });
+    await auditLog({ tableName: "invoices", recordId: json.data?.id, action: "INSERT", newData: json.data });
     return json.data as Invoice;
   },
 
-  async update(id: string, form: InvoiceFormData): Promise<Invoice> {
-    const { subtotal, subtotalLessDiscount, totalTax, total } = computeTotals(form);
+  async update(id: string, form: InvoiceFormData, prev?: Invoice): Promise<Invoice> {
+    const totals = computeTotals(form);
     const json = await edgeRequest("PATCH", {
-      action: "update",
-      id,
-      payload: { ...form, subtotal, subtotal_less_discount: subtotalLessDiscount, total_tax: totalTax, total },
+      action: "update", id,
+      payload: { ...form, subtotal: totals.subtotal, subtotal_less_discount: totals.subtotalLessDiscount, total_tax: totals.totalTax, total: totals.total },
     });
+    await auditLog({ tableName: "invoices", recordId: id, action: "UPDATE", oldData: prev as unknown as Record<string, unknown>, newData: json.data });
     return json.data as Invoice;
   },
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, prev?: Invoice): Promise<void> {
     await edgeRequest("DELETE", { action: "delete", id });
+    await auditLog({ tableName: "invoices", recordId: id, action: "DELETE", oldData: prev as unknown as Record<string, unknown> });
   },
 };
+
+// ─── PDF PRINT ────────────────────────────────────────────────────────────────
+function printInvoice(inv: Invoice) {
+  const statusBadgeColors: Record<string, { bg: string; color: string; border: string }> = {
+    draft:     { bg: "#1e293b", color: "#94a3b8", border: "#334155" },
+    sent:      { bg: "#0c2340", color: "#38bdf8", border: "#0369a1" },
+    paid:      { bg: "#052e16", color: "#4ade80", border: "#166534" },
+    partial:   { bg: "#2d1e00", color: "#fbbf24", border: "#92400e" },
+    overdue:   { bg: "#2d0a0a", color: "#f87171", border: "#991b1b" },
+    cancelled: { bg: "#18181b", color: "#71717a", border: "#3f3f46" },
+  };
+  const sc = statusBadgeColors[inv.status] ?? statusBadgeColors.draft;
+
+  const safeItems = (items: LineItem[] | null | undefined): LineItem[] => {
+    if (!Array.isArray(items)) return [];
+    return items;
+  };
+
+  const sections: Array<{ label: string; items: LineItem[]; isLabor: boolean }> = [
+    { label: "Labor",    items: safeItems(inv.labor_items).filter(i => i.description?.trim() || i.amount > 0),    isLabor: true  },
+    { label: "Material", items: safeItems(inv.material_items).filter(i => i.description?.trim() || i.amount > 0), isLabor: false },
+    { label: "Other",    items: safeItems(inv.other_items).filter(i => i.description?.trim() || i.amount > 0),    isLabor: false },
+  ].filter(s => s.items.length > 0);
+
+  const lineRows = sections.map(sec => `
+    <tr class="section-header-row">
+      <td colspan="5" class="section-header">${sec.label}</td>
+    </tr>
+    ${sec.items.map(item => `
+    <tr class="line-row">
+      <td class="line-desc">${item.description || "—"}</td>
+      <td class="line-center">${sec.isLabor ? (item.hours ?? 0) : (item.qty ?? 0)}</td>
+      <td class="line-right">${sec.isLabor ? "hrs" : "units"}</td>
+      <td class="line-right mono">${fmtKES(item.unit_price)}</td>
+      <td class="line-right mono bold">${fmtKES(item.amount)}</td>
+    </tr>`).join("")}
+  `).join("");
+
+  const subtotalVal = Number(inv.subtotal) || 0;
+  const discountVal = Number(inv.discount_amount) || 0;
+  const subtotalLessDiscount = subtotalVal - discountVal;
+  const hasDiscount = discountVal > 0;
+  const taxRateVal = Number(inv.tax_rate) || 0;
+  const totalTaxVal = Number(inv.total_tax) || 0;
+  const totalVal = Number(inv.total) || 0;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Invoice ${inv.invoice_number}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      background: #fff;
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 14mm 14mm 12mm;
+      background: #fff;
+    }
+    .header-band {
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 22px 26px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 22px;
+    }
+    .company-name { font-size: 20px; font-weight: 800; color: #f8fafc; letter-spacing: -0.5px; margin-bottom: 5px; }
+    .company-detail { font-size: 10.5px; color: #94a3b8; line-height: 1.7; }
+    .invoice-meta-block { text-align: right; }
+    .invoice-label { font-size: 28px; font-weight: 800; color: #f8fafc; letter-spacing: -1px; text-transform: uppercase; }
+    .invoice-number {
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #a78bfa;
+      background: rgba(167,139,250,0.15); border: 1px solid rgba(167,139,250,0.35);
+      border-radius: 5px; padding: 2px 9px; display: inline-block; margin: 5px 0;
+    }
+    .status-badge {
+      display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; padding: 3px 10px; border-radius: 20px;
+      background: ${sc.bg}; color: ${sc.color}; border: 1px solid ${sc.border};
+    }
+    .info-row { display: flex; gap: 14px; margin-bottom: 20px; }
+    .info-box { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 13px 14px; background: #f9fafb; }
+    .info-box.dark { background: #0f172a; border-color: #1e293b; }
+    .info-box.bill-to { flex: 1.6; }
+    .info-box-label { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #6b7280; margin-bottom: 7px; }
+    .info-box.dark .info-box-label { color: #7c3aed; }
+    .info-box-value { font-size: 11.5px; color: #1f2937; line-height: 1.65; }
+    .info-box.dark .info-box-value { color: #cbd5e1; }
+    .info-box-value strong { font-size: 12.5px; font-weight: 700; color: #111827; }
+    .info-box.dark .info-box-value strong { color: #f8fafc; }
+    .overdue-box { background: #fff1f2; border-color: #fecdd3; }
+    .overdue-box .info-box-label { color: #be123c; }
+    .overdue-box .info-box-value strong { color: #be123c; }
+    .section-title {
+      font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.15em;
+      color: #7c3aed; border-bottom: 1.5px solid #ede9fe; padding-bottom: 5px;
+      margin-bottom: 10px; margin-top: 18px;
+    }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items thead tr { background: #0f172a; }
+    table.items thead th {
+      padding: 9px 10px; font-size: 8.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #94a3b8; text-align: left;
+    }
+    table.items thead th:nth-child(n+2) { text-align: right; }
+    table.items thead th:first-child { border-radius: 6px 0 0 6px; }
+    table.items thead th:last-child  { border-radius: 0 6px 6px 0; }
+    tr.section-header-row td.section-header {
+      padding: 8px 10px 3px; font-size: 8px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.14em; color: #9ca3af; border-bottom: 1px solid #f3f4f6; background: #fafafa;
+    }
+    tr.line-row td { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+    td.line-desc  { font-size: 12px; color: #374151; width: 42%; }
+    td.line-center{ font-size: 11.5px; color: #6b7280; text-align: right; width: 10%; }
+    td.line-right { font-size: 11.5px; color: #6b7280; text-align: right; width: 13%; }
+    td.mono       { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+    td.bold       { font-weight: 700; color: #111827 !important; }
+    .totals-wrap { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .totals-table { width: 300px; border-collapse: collapse; }
+    .totals-table td { padding: 5px 10px; font-size: 12px; }
+    .totals-table .t-label { color: #6b7280; }
+    .totals-table .t-value { text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 600; color: #1f2937; }
+    .totals-table .t-discount .t-label { color: #dc2626; }
+    .totals-table .t-discount .t-value { color: #dc2626; }
+    .totals-table .t-tax .t-label { color: #b45309; }
+    .totals-table .t-tax .t-value { color: #b45309; }
+    .totals-table tr.t-divider td { border-top: 1px solid #e5e7eb; padding-top: 8px; }
+    .totals-table tr.t-grand td { background: #0f172a; padding: 10px 12px; font-size: 13px; font-weight: 800; }
+    .totals-table tr.t-grand td:first-child { color: #f8fafc; border-radius: 6px 0 0 6px; }
+    .totals-table tr.t-grand td:last-child  { color: #a78bfa; border-radius: 0 6px 6px 0; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+    .bottom-row { display: flex; gap: 12px; margin-top: 20px; }
+    .bottom-box { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; background: #f9fafb; }
+    .notes-box { background: #fffbeb; border-color: #fde68a; }
+    .notes-box .info-box-label { color: #92400e; }
+    .notes-box .info-box-value { color: #78350f; }
+    .footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+    .footer-text { font-size: 10px; color: #9ca3af; line-height: 1.6; }
+    .footer-inv  { font-size: 10px; color: #9ca3af; text-align: right; }
+    .footer-inv span { color: #7c3aed; font-weight: 700; }
+    .watermark {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%,-50%) rotate(-35deg);
+      font-size: 90px; font-weight: 900; text-transform: uppercase;
+      opacity: 0.04; color: #000; pointer-events: none; z-index: 0; letter-spacing: 8px;
+    }
+    @media print {
+      html, body { margin: 0; padding: 0; background: #fff; }
+      .page { width: 100%; margin: 0; padding: 10mm 12mm; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+${inv.status === "draft" ? '<div class="watermark">Draft</div>' : ""}
+${inv.status === "cancelled" ? '<div class="watermark">Cancelled</div>' : ""}
+
+<div class="no-print" style="
+  position:sticky;top:0;z-index:100;
+  background:#1e293b;border-bottom:1px solid #334155;
+  padding:10px 20px;display:flex;align-items:center;gap:12px;
+">
+  <span style="font-family:Inter,sans-serif;font-size:13px;font-weight:600;color:#f8fafc;flex:1;">
+    Invoice ${inv.invoice_number} &nbsp;·&nbsp; ${inv.client_company_name}
+  </span>
+  <button onclick="window.print()" style="
+    background:linear-gradient(135deg,#7c3aed,#6d28d9);
+    color:#fff;border:none;border-radius:8px;
+    padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;
+    display:flex;align-items:center;gap:8px;
+  ">
+    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+      <path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+      <rect x="6" y="14" width="12" height="8" rx="1"/>
+    </svg>
+    Save as PDF / Print
+  </button>
+  <button onclick="window.close()" style="
+    background:transparent;color:#94a3b8;border:1px solid #334155;
+    border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;
+  ">Close</button>
+</div>
+
+<div class="page">
+  <div class="header-band">
+    <div class="company-block">
+      <div class="company-name">${inv.company_name || "Your Company"}</div>
+      <div class="company-detail">
+        ${[inv.company_address, inv.company_city_state_zip].filter(Boolean).join(", ")}${inv.company_phone ? `<br/>${inv.company_phone}` : ""}${inv.company_email ? `<br/>${inv.company_email}` : ""}
+      </div>
+    </div>
+    <div class="invoice-meta-block">
+      <div class="invoice-label">Invoice</div>
+      <div><span class="invoice-number">${inv.invoice_number}</span></div>
+      <div style="margin-top:6px;"><span class="status-badge">${STATUS_LABEL[inv.status] ?? inv.status}</span></div>
+    </div>
+  </div>
+
+  <div class="info-row">
+    <div class="info-box dark bill-to">
+      <div class="info-box-label">Bill To</div>
+      <div class="info-box-value">
+        <strong>${inv.client_company_name}</strong>
+        ${inv.client_contact_name ? `<br/>${inv.client_contact_name}` : ""}
+        ${inv.client_address ? `<br/>${inv.client_address}` : ""}
+        ${inv.client_phone ? `<br/>${inv.client_phone}` : ""}
+        ${inv.client_email ? `<br/>${inv.client_email}` : ""}
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;flex:1;">
+      <div class="info-box">
+        <div class="info-box-label">Invoice Date</div>
+        <div class="info-box-value"><strong>${fmtDate(inv.invoice_date)}</strong></div>
+      </div>
+      <div class="info-box ${inv.status === "overdue" ? "overdue-box" : ""}">
+        <div class="info-box-label">Due Date</div>
+        <div class="info-box-value"><strong>${fmtDate(inv.due_date)}</strong></div>
+      </div>
+    </div>
+    <div class="info-box" style="flex:1;">
+      <div class="info-box-label">Project Info</div>
+      <div class="info-box-value">
+        ${inv.project_location ? `<strong>${inv.project_location}</strong><br/>` : ""}
+        ${inv.project_client_ref ? `Ref: ${inv.project_client_ref}<br/>` : ""}
+        ${inv.project_start_date ? `Start: ${fmtDate(inv.project_start_date)}<br/>` : ""}
+        ${inv.project_end_date ? `End: ${fmtDate(inv.project_end_date)}` : ""}
+        ${!inv.project_location && !inv.project_client_ref && !inv.project_start_date && !inv.project_end_date ? "—" : ""}
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Line Items</div>
+  <table class="items">
+    <thead>
+      <tr>
+        <th style="width:42%;">Description</th>
+        <th style="width:10%;text-align:right;">Qty / Hrs</th>
+        <th style="width:10%;text-align:right;">Unit</th>
+        <th style="width:18%;text-align:right;">Unit Price</th>
+        <th style="width:20%;text-align:right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${lineRows || `<tr><td colspan="5" style="padding:16px 10px;text-align:center;color:#9ca3af;font-style:italic;font-size:12px;">No line items recorded</td></tr>`}
+    </tbody>
+  </table>
+
+  <div class="totals-wrap">
+    <table class="totals-table">
+      <tr>
+        <td class="t-label">Subtotal</td>
+        <td class="t-value">${fmtKES(subtotalVal)}</td>
+      </tr>
+      ${hasDiscount ? `
+      <tr class="t-discount">
+        <td class="t-label">Discount</td>
+        <td class="t-value">− ${fmtKES(discountVal)}</td>
+      </tr>
+      <tr>
+        <td class="t-label">After Discount</td>
+        <td class="t-value">${fmtKES(subtotalLessDiscount)}</td>
+      </tr>` : ""}
+      <tr class="t-tax">
+        <td class="t-label">VAT / Tax (${taxRateVal}%)</td>
+        <td class="t-value">${fmtKES(totalTaxVal)}</td>
+      </tr>
+      <tr class="t-divider"><td colspan="2" style="padding:0;"></td></tr>
+      <tr class="t-grand">
+        <td>Total Due</td>
+        <td>${fmtKES(totalVal)}</td>
+      </tr>
+    </table>
+  </div>
+
+  ${(inv.bank_name || inv.account_number || inv.payment_terms || inv.notes) ? `
+  <div class="bottom-row">
+    ${(inv.bank_name || inv.account_number || inv.payment_terms) ? `
+    <div class="bottom-box">
+      <div class="info-box-label">Payment Details</div>
+      <div class="info-box-value">
+        ${inv.payment_terms ? `Terms: <strong>${inv.payment_terms}</strong><br/>` : ""}
+        ${inv.bank_name ? `Bank: <strong>${inv.bank_name}</strong><br/>` : ""}
+        ${inv.account_number ? `Account No: <strong>${inv.account_number}</strong>` : ""}
+      </div>
+    </div>` : ""}
+    ${inv.notes ? `
+    <div class="bottom-box notes-box" style="flex:1.4;">
+      <div class="info-box-label">Notes</div>
+      <div class="info-box-value">${inv.notes}</div>
+    </div>` : ""}
+  </div>` : ""}
+
+  <div class="footer">
+    <div class="footer-text">
+      ${inv.company_name || ""}${inv.company_email ? ` &nbsp;·&nbsp; ${inv.company_email}` : ""}${inv.company_phone ? ` &nbsp;·&nbsp; ${inv.company_phone}` : ""}<br/>
+      Generated ${new Date().toLocaleDateString("en-KE", { day: "2-digit", month: "long", year: "numeric" })}
+    </div>
+    <div class="footer-inv">
+      <span>${inv.invoice_number}</span><br/>
+      Thank you for your business.
+    </div>
+  </div>
+</div>
+
+<script>
+  window.addEventListener('load', function() {
+    setTimeout(function() {
+      if (window.opener || window.name === 'invoice_print') {
+        window.print();
+      }
+    }, 600);
+  });
+</script>
+</body>
+</html>`;
+
+  const w = window.open("", "invoice_print_" + inv.id, "width=960,height=740,scrollbars=yes,resizable=yes");
+  if (!w) {
+    alert("Pop-up blocked. Please allow pop-ups for this site to download invoices as PDF.");
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+// ─── EMAIL SHARE ──────────────────────────────────────────────────────────────
+async function shareInvoiceEmail(
+  inv: Invoice,
+  push: (msg: string, type?: "success" | "error") => void
+): Promise<void> {
+  const to = inv.client_email ?? inv.company_email;
+  if (!to) {
+    push("No email address on this invoice — add a client or company email first.", "error");
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { push("Not authenticated.", "error"); return; }
+
+  const res = await fetch(EDGE_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
+    body: JSON.stringify({
+      action: "send_email",
+      id: inv.id,
+      payload: {
+        to,
+        subject: `Invoice ${inv.invoice_number} from ${inv.company_name}`,
+        invoice_number: inv.invoice_number,
+        client_name: inv.client_contact_name ?? inv.client_company_name,
+        company_name: inv.company_name,
+        total: fmtKES(Number(inv.total)),
+        due_date: fmtDate(inv.due_date),
+        payment_terms: inv.payment_terms,
+        notes: inv.notes,
+        bank_name: inv.bank_name,
+        account_number: inv.account_number,
+      },
+    }),
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Email failed (${res.status})`);
+
+  await auditLog({
+    tableName: "invoices",
+    recordId: inv.id,
+    action: "UPDATE",
+    oldData: null,
+    newData: { action_type: "EMAIL_SHARE", sent_to: to, sent_at: new Date().toISOString() },
+  });
+
+  push(`Invoice sent to ${to}`, "success");
+}
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function useToast() {
@@ -251,7 +644,7 @@ function useToast() {
   const push = useCallback((msg: string, type: "success" | "error" = "success") => {
     const id = Date.now();
     setToasts(p => [...p, { id, msg, type }]);
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500);
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4000);
   }, []);
   return { toasts, push };
 }
@@ -295,8 +688,7 @@ function NumericInput({ value, onChange, step = "0.01", min = "0", max, placehol
   useEffect(() => { setDisplay(value === 0 ? "" : String(value)); }, [value]);
   return (
     <input type="number" step={step} min={min} max={max}
-      value={display} placeholder={placeholder ?? "0"}
-      className={inputCls}
+      value={display} placeholder={placeholder ?? "0"} className={inputCls}
       onChange={e => { setDisplay(e.target.value); onChange(parseFloat(e.target.value) || 0); }}
       onBlur={() => { const s = parseFloat(display) || 0; onChange(s); setDisplay(s === 0 ? "" : String(s)); }}
     />
@@ -325,75 +717,50 @@ function ToastStack({ toasts }: { toasts: { id: number; msg: string; type: "succ
 function LineItemsSection({
   title, items, type, onChange,
 }: {
-  title: string;
-  items: LineItem[];
-  type: "labor" | "material" | "other";
+  title: string; items: LineItem[]; type: "labor" | "material" | "other";
   onChange: (items: LineItem[]) => void;
 }) {
   const isLabor = type === "labor";
-
   const update = (id: string, field: keyof LineItem, val: unknown) => {
     onChange(items.map(item => {
       if (item.id !== id) return item;
       const updated = { ...item, [field]: val };
-      // Recompute amount
-      if (isLabor) {
-        updated.amount = (Number(updated.hours) || 0) * (Number(updated.unit_price) || 0);
-      } else {
-        updated.amount = (Number(updated.qty) || 0) * (Number(updated.unit_price) || 0);
-      }
+      updated.amount = isLabor
+        ? (Number(updated.hours) || 0) * (Number(updated.unit_price) || 0)
+        : (Number(updated.qty)   || 0) * (Number(updated.unit_price) || 0);
       return updated;
     }));
   };
-
   const add = () => onChange([...items, newLineItem()]);
   const remove = (id: string) => onChange(items.filter(i => i.id !== id));
 
   return (
     <div className="mb-2">
-      {/* Section header */}
       <div className="flex items-center gap-3 mb-3">
         <div className="h-px flex-1 bg-white/10" />
         <span className="text-xs font-bold uppercase tracking-[0.15em] text-primary px-2">{title}</span>
         <div className="h-px flex-1 bg-white/10" />
       </div>
-
-      {/* Header row */}
-      <div className={`grid gap-2 mb-2 px-1 ${isLabor ? "grid-cols-[2fr_1fr_1fr_1fr_auto]" : "grid-cols-[2fr_1fr_1fr_1fr_auto]"}`}>
+      <div className="grid gap-2 mb-2 px-1 grid-cols-[2fr_1fr_1fr_1fr_auto]">
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Description</span>
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{isLabor ? "Hours" : "Qty"}</span>
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{isLabor ? "Rate" : "Unit Price"}</span>
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Amount</span>
         <span />
       </div>
-
       {items.map((item, ri) => (
         <motion.div key={item.id}
-          initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: ri * 0.03 }}
-          className="grid gap-2 mb-2 items-center"
-          style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}
-        >
-          <input value={item.description}
-            onChange={e => update(item.id, "description", e.target.value)}
-            placeholder={isLabor ? "e.g. Site supervision" : "e.g. Steel bars"}
-            className={inputCls} />
-          <NumericInput
-            value={isLabor ? (item.hours ?? 0) : (item.qty ?? 0)}
-            onChange={v => update(item.id, isLabor ? "hours" : "qty", v)}
-            step="1" placeholder="0"
-          />
-          <NumericInput
-            value={item.unit_price}
-            onChange={v => update(item.id, "unit_price", v)}
-            placeholder="0.00"
-          />
-          {/* Amount — read-only computed */}
+          initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: ri * 0.03 }}
+          className="grid gap-2 mb-2 items-center" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr auto" }}>
+          <input value={item.description} onChange={e => update(item.id, "description", e.target.value)}
+            placeholder={isLabor ? "e.g. Site supervision" : "e.g. Steel bars"} className={inputCls} />
+          <NumericInput value={isLabor ? (item.hours ?? 0) : (item.qty ?? 0)}
+            onChange={v => update(item.id, isLabor ? "hours" : "qty", v)} step="1" placeholder="0" />
+          <NumericInput value={item.unit_price} onChange={v => update(item.id, "unit_price", v)} placeholder="0.00" />
           <div className="px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.06] text-emerald-400 font-mono font-semibold tabular-nums cursor-not-allowed select-none">
             {fmtKES(item.amount)}
           </div>
-          <button onClick={() => remove(item.id)}
-            disabled={items.length === 1}
+          <button onClick={() => remove(item.id)} disabled={items.length === 1}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
@@ -401,9 +768,7 @@ function LineItemsSection({
           </button>
         </motion.div>
       ))}
-
-      <button onClick={add}
-        className="mt-1 inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors">
+      <button onClick={add} className="mt-1 inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors">
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
           <path d="M12 5v14M5 12h14" />
         </svg>
@@ -427,229 +792,114 @@ function InvoiceModal({
   const [form, setForm] = useState<InvoiceFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
   const [tab, setTab] = useState<"details" | "items" | "payment">("details");
-
-  const set = <K extends keyof InvoiceFormData>(k: K, v: InvoiceFormData[K]) =>
-    setForm(p => ({ ...p, [k]: v }));
-
+  const set = <K extends keyof InvoiceFormData>(k: K, v: InvoiceFormData[K]) => setForm(p => ({ ...p, [k]: v }));
   const { subtotal, subtotalLessDiscount, totalTax, total } = computeTotals(form);
   const isStandalone = showProjectSelector && (!form.project_id || form.project_id === "");
-
-  const tabs = [
-    { key: "details"  as const, label: "Details"  },
-    { key: "items"    as const, label: "Line Items" },
-    { key: "payment"  as const, label: "Payment"  },
-  ];
+  const tabs = [{ key: "details" as const, label: "Details" }, { key: "items" as const, label: "Line Items" }, { key: "payment" as const, label: "Payment" }];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onClose} />
-      <motion.div
-        className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-[#0d0d0d]/95"
-        initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 8 }}
-        transition={{ duration: 0.2 }}
-      >
-        {/* Header */}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div className="relative w-full max-w-3xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-xl bg-[#0d0d0d]/95"
+        initial={{ opacity: 0, scale: 0.96, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }} transition={{ duration: 0.2 }}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <div>
-            <h2 className="text-base font-semibold text-foreground tracking-tight">
-              {isEdit ? "Edit Invoice" : "New Invoice"}
-            </h2>
-            {isStandalone && (
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Not linked to any project — appears in the firm-wide register only.
-              </p>
-            )}
+            <h2 className="text-base font-semibold text-foreground tracking-tight">{isEdit ? "Edit Invoice" : "New Invoice"}</h2>
+            {isStandalone && <p className="text-[11px] text-muted-foreground mt-0.5">Not linked to any project — appears in the firm-wide register only.</p>}
           </div>
-          <button onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 px-6 pt-4 border-b border-white/10 pb-0">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-xs font-semibold uppercase tracking-widest rounded-t-lg transition-all ${
-                tab === t.key
-                  ? "bg-white/10 text-primary border-b-2 border-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-white/5"
-              }`}>
+              className={`px-4 py-2 text-xs font-semibold uppercase tracking-widest rounded-t-lg transition-all ${tab === t.key ? "bg-white/10 text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground hover:bg-white/5"}`}>
               {t.label}
             </button>
           ))}
         </div>
 
         <div className="px-6 py-5 max-h-[62vh] overflow-y-auto">
-
-          {/* ── TAB: Details ── */}
           {tab === "details" && (
             <div className="space-y-5">
-
-              {/* Project selector */}
               {showProjectSelector && (
-                <div>
-                  <Field label="Linked Project" hint="Leave blank for standalone / firm-wide invoice">
-                    <div className="relative">
-                      <select value={form.project_id ?? ""}
-                        onChange={e => set("project_id", e.target.value || null)}
-                        className={selectCls}>
-                        <option value="">— No project (firm-wide / standalone) —</option>
-                        {projects.map(p => (
-                          <option key={p.id} value={p.id}>{p.project_number} — {p.title}</option>
-                        ))}
-                      </select>
-                      <SelectChevron />
-                    </div>
-                  </Field>
-                </div>
+                <Field label="Linked Project" hint="Leave blank for standalone / firm-wide invoice">
+                  <div className="relative">
+                    <select value={form.project_id ?? ""} onChange={e => set("project_id", e.target.value || null)} className={selectCls}>
+                      <option value="">— No project (firm-wide / standalone) —</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.project_number} — {p.title}</option>)}
+                    </select>
+                    <SelectChevron />
+                  </div>
+                </Field>
               )}
-
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Invoice Number *">
-                  <input value={form.invoice_number}
-                    onChange={e => set("invoice_number", e.target.value)}
-                    placeholder="e.g. INV-2026-001" className={inputCls} />
+                  <input value={form.invoice_number} onChange={e => set("invoice_number", e.target.value)} placeholder="e.g. INV-2026-001" className={inputCls} />
                 </Field>
                 <Field label="Status *">
                   <div className="relative">
-                    <select value={form.status}
-                      onChange={e => set("status", e.target.value as InvoiceStatus)}
-                      className={selectCls}>
+                    <select value={form.status} onChange={e => set("status", e.target.value as InvoiceStatus)} className={selectCls}>
                       {INVOICE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
                     </select>
                     <SelectChevron />
                   </div>
                 </Field>
                 <Field label="Invoice Date *">
-                  <input type="date" value={form.invoice_date}
-                    onChange={e => set("invoice_date", e.target.value)}
-                    className={inputCls + " [color-scheme:dark]"} />
+                  <input type="date" value={form.invoice_date} onChange={e => set("invoice_date", e.target.value)} className={inputCls + " [color-scheme:dark]"} />
                 </Field>
                 <Field label="Due Date *">
-                  <input type="date" value={form.due_date}
-                    onChange={e => set("due_date", e.target.value)}
-                    className={inputCls + " [color-scheme:dark]"} />
+                  <input type="date" value={form.due_date} onChange={e => set("due_date", e.target.value)} className={inputCls + " [color-scheme:dark]"} />
                 </Field>
               </div>
-
-              {/* Company info */}
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary mb-3">Your Company</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Company Name *">
-                    <input value={form.company_name}
-                      onChange={e => set("company_name", e.target.value)}
-                      placeholder="e.g. Acme Builders Ltd" className={inputCls} />
-                  </Field>
-                  <Field label="Street Address">
-                    <input value={form.company_address ?? ""}
-                      onChange={e => set("company_address", e.target.value || null)}
-                      placeholder="123 Main St" className={inputCls} />
-                  </Field>
-                  <Field label="City / State / ZIP">
-                    <input value={form.company_city_state_zip ?? ""}
-                      onChange={e => set("company_city_state_zip", e.target.value || null)}
-                      placeholder="Nairobi, Kenya" className={inputCls} />
-                  </Field>
-                  <Field label="Phone">
-                    <input value={form.company_phone ?? ""}
-                      onChange={e => set("company_phone", e.target.value || null)}
-                      placeholder="+254 7XX XXX XXX" className={inputCls} />
-                  </Field>
-                  <Field label="Email" span2>
-                    <input type="email" value={form.company_email ?? ""}
-                      onChange={e => set("company_email", e.target.value || null)}
-                      placeholder="info@company.com" className={inputCls} />
-                  </Field>
+                  <Field label="Company Name *"><input value={form.company_name} onChange={e => set("company_name", e.target.value)} placeholder="e.g. Acme Builders Ltd" className={inputCls} /></Field>
+                  <Field label="Street Address"><input value={form.company_address ?? ""} onChange={e => set("company_address", e.target.value || null)} placeholder="123 Main St" className={inputCls} /></Field>
+                  <Field label="City / State / ZIP"><input value={form.company_city_state_zip ?? ""} onChange={e => set("company_city_state_zip", e.target.value || null)} placeholder="Nairobi, Kenya" className={inputCls} /></Field>
+                  <Field label="Phone"><input value={form.company_phone ?? ""} onChange={e => set("company_phone", e.target.value || null)} placeholder="+254 7XX XXX XXX" className={inputCls} /></Field>
+                  <Field label="Email" span2><input type="email" value={form.company_email ?? ""} onChange={e => set("company_email", e.target.value || null)} placeholder="info@company.com" className={inputCls} /></Field>
                 </div>
               </div>
-
-              {/* Bill To */}
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary mb-3">Bill To</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Client Company *">
-                    <input value={form.client_company_name}
-                      onChange={e => set("client_company_name", e.target.value)}
-                      placeholder="Client Co. Ltd" className={inputCls} />
-                  </Field>
-                  <Field label="Contact Name">
-                    <input value={form.client_contact_name ?? ""}
-                      onChange={e => set("client_contact_name", e.target.value || null)}
-                      placeholder="John Doe" className={inputCls} />
-                  </Field>
-                  <Field label="Address" span2>
-                    <input value={form.client_address ?? ""}
-                      onChange={e => set("client_address", e.target.value || null)}
-                      placeholder="Client street address" className={inputCls} />
-                  </Field>
-                  <Field label="Phone">
-                    <input value={form.client_phone ?? ""}
-                      onChange={e => set("client_phone", e.target.value || null)}
-                      placeholder="+254 7XX XXX XXX" className={inputCls} />
-                  </Field>
-                  <Field label="Email">
-                    <input type="email" value={form.client_email ?? ""}
-                      onChange={e => set("client_email", e.target.value || null)}
-                      placeholder="client@company.com" className={inputCls} />
-                  </Field>
+                  <Field label="Client Company *"><input value={form.client_company_name} onChange={e => set("client_company_name", e.target.value)} placeholder="Client Co. Ltd" className={inputCls} /></Field>
+                  <Field label="Contact Name"><input value={form.client_contact_name ?? ""} onChange={e => set("client_contact_name", e.target.value || null)} placeholder="John Doe" className={inputCls} /></Field>
+                  <Field label="Address" span2><input value={form.client_address ?? ""} onChange={e => set("client_address", e.target.value || null)} placeholder="Client street address" className={inputCls} /></Field>
+                  <Field label="Phone"><input value={form.client_phone ?? ""} onChange={e => set("client_phone", e.target.value || null)} placeholder="+254 7XX XXX XXX" className={inputCls} /></Field>
+                  <Field label="Email"><input type="email" value={form.client_email ?? ""} onChange={e => set("client_email", e.target.value || null)} placeholder="client@company.com" className={inputCls} /></Field>
                 </div>
               </div>
-
-              {/* Project Info */}
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary mb-3">Project Info</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Start Date">
-                    <input type="date" value={form.project_start_date ?? ""}
-                      onChange={e => set("project_start_date", e.target.value || null)}
-                      className={inputCls + " [color-scheme:dark]"} />
-                  </Field>
-                  <Field label="End Date">
-                    <input type="date" value={form.project_end_date ?? ""}
-                      onChange={e => set("project_end_date", e.target.value || null)}
-                      className={inputCls + " [color-scheme:dark]"} />
-                  </Field>
-                  <Field label="Location">
-                    <input value={form.project_location ?? ""}
-                      onChange={e => set("project_location", e.target.value || null)}
-                      placeholder="e.g. Westlands, Nairobi" className={inputCls} />
-                  </Field>
-                  <Field label="Client Reference">
-                    <input value={form.project_client_ref ?? ""}
-                      onChange={e => set("project_client_ref", e.target.value || null)}
-                      placeholder="e.g. PO-2026-009" className={inputCls} />
-                  </Field>
+                  <Field label="Start Date"><input type="date" value={form.project_start_date ?? ""} onChange={e => set("project_start_date", e.target.value || null)} className={inputCls + " [color-scheme:dark]"} /></Field>
+                  <Field label="End Date"><input type="date" value={form.project_end_date ?? ""} onChange={e => set("project_end_date", e.target.value || null)} className={inputCls + " [color-scheme:dark]"} /></Field>
+                  <Field label="Location"><input value={form.project_location ?? ""} onChange={e => set("project_location", e.target.value || null)} placeholder="e.g. Westlands, Nairobi" className={inputCls} /></Field>
+                  <Field label="Client Reference"><input value={form.project_client_ref ?? ""} onChange={e => set("project_client_ref", e.target.value || null)} placeholder="e.g. PO-2026-009" className={inputCls} /></Field>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── TAB: Line Items ── */}
           {tab === "items" && (
             <div className="space-y-6">
-              <LineItemsSection title="Labor" items={form.labor_items} type="labor"
-                onChange={items => set("labor_items", items)} />
-              <LineItemsSection title="Material" items={form.material_items} type="material"
-                onChange={items => set("material_items", items)} />
-              <LineItemsSection title="Other" items={form.other_items} type="other"
-                onChange={items => set("other_items", items)} />
-
-              {/* Totals preview */}
+              <LineItemsSection title="Labor"    items={form.labor_items}    type="labor"    onChange={items => set("labor_items", items)} />
+              <LineItemsSection title="Material" items={form.material_items} type="material" onChange={items => set("material_items", items)} />
+              <LineItemsSection title="Other"    items={form.other_items}    type="other"    onChange={items => set("other_items", items)} />
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground mb-3">Totals Preview</p>
                 {[
-                  { label: "Subtotal",              val: fmtKES(subtotal),              color: "text-foreground" },
-                  { label: "Discount",              val: fmtKES(Number(form.discount_amount)), color: "text-rose-400" },
-                  { label: "Subtotal less Discount",val: fmtKES(subtotalLessDiscount),  color: "text-foreground" },
-                  { label: `Tax (${form.tax_rate}%)`, val: fmtKES(totalTax),            color: "text-amber-400" },
+                  { label: "Subtotal",               val: fmtKES(subtotal),              color: "text-foreground" },
+                  { label: "Discount",               val: fmtKES(Number(form.discount_amount)), color: "text-rose-400" },
+                  { label: "Subtotal less Discount",  val: fmtKES(subtotalLessDiscount),  color: "text-foreground" },
+                  { label: `Tax (${form.tax_rate}%)`, val: fmtKES(totalTax),             color: "text-amber-400"  },
                 ].map(r => (
                   <div key={r.label} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{r.label}</span>
@@ -660,67 +910,34 @@ function InvoiceModal({
                   <span className="text-foreground">Total</span>
                   <span className="font-mono tabular-nums text-primary text-base">{fmtKES(total)}</span>
                 </div>
-
-                {/* Discount + Tax inputs inline */}
                 <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-white/10">
-                  <Field label="Discount (KES)">
-                    <NumericInput value={Number(form.discount_amount)} onChange={v => set("discount_amount", v)} placeholder="0.00" />
-                  </Field>
-                  <Field label="Tax Rate (%)">
-                    <NumericInput value={Number(form.tax_rate)} onChange={v => set("tax_rate", v)} step="0.01" max="100" placeholder="5" />
-                  </Field>
+                  <Field label="Discount (KES)"><NumericInput value={Number(form.discount_amount)} onChange={v => set("discount_amount", v)} placeholder="0.00" /></Field>
+                  <Field label="Tax Rate (%)"><NumericInput value={Number(form.tax_rate)} onChange={v => set("tax_rate", v)} step="0.01" max="100" placeholder="5" /></Field>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── TAB: Payment ── */}
           {tab === "payment" && (
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Payment Terms" span2>
-                <input value={form.payment_terms ?? ""}
-                  onChange={e => set("payment_terms", e.target.value || null)}
-                  placeholder="e.g. Net 30, On receipt" className={inputCls} />
-              </Field>
-              <Field label="Bank Name">
-                <input value={form.bank_name ?? ""}
-                  onChange={e => set("bank_name", e.target.value || null)}
-                  placeholder="e.g. KCB Bank" className={inputCls} />
-              </Field>
-              <Field label="Account Number">
-                <input value={form.account_number ?? ""}
-                  onChange={e => set("account_number", e.target.value || null)}
-                  placeholder="e.g. 1234567890" className={inputCls} />
-              </Field>
-              <Field label="Notes" span2>
-                <textarea value={form.notes ?? ""} rows={4}
-                  onChange={e => set("notes", e.target.value || null)}
-                  placeholder="Thank you for your business!"
-                  className={inputCls + " resize-none"} />
-              </Field>
+              <Field label="Payment Terms" span2><input value={form.payment_terms ?? ""} onChange={e => set("payment_terms", e.target.value || null)} placeholder="e.g. Net 30, On receipt" className={inputCls} /></Field>
+              <Field label="Bank Name"><input value={form.bank_name ?? ""} onChange={e => set("bank_name", e.target.value || null)} placeholder="e.g. KCB Bank" className={inputCls} /></Field>
+              <Field label="Account Number"><input value={form.account_number ?? ""} onChange={e => set("account_number", e.target.value || null)} placeholder="e.g. 1234567890" className={inputCls} /></Field>
+              <Field label="Notes" span2><textarea value={form.notes ?? ""} rows={4} onChange={e => set("notes", e.target.value || null)} placeholder="Thank you for your business!" className={inputCls + " resize-none"} /></Field>
             </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-white/10">
           <div className="flex gap-1">
-            {tabs.map(t => (
-              <span key={t.key}
-                className={`w-1.5 h-1.5 rounded-full transition-all ${tab === t.key ? "bg-primary" : "bg-white/20"}`} />
-            ))}
+            {tabs.map(t => <span key={t.key} className={`w-1.5 h-1.5 rounded-full transition-all ${tab === t.key ? "bg-primary" : "bg-white/20"}`} />)}
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={onClose}
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
-              Cancel
-            </button>
-            <button
-              onClick={() => onSave(form)}
+            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
+            <button onClick={() => onSave(form)}
               disabled={loading || !form.invoice_number.trim() || !form.company_name.trim() || !form.client_company_name.trim() || !form.invoice_date || !form.due_date}
               className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
-              style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
-            >
+              style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
               {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               {isEdit ? "Save Changes" : "Create Invoice"}
             </button>
@@ -738,10 +955,8 @@ function DeleteConfirm({ invoice, onConfirm, onClose, loading }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onClose} />
-      <motion.div
-        className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-[#0d0d0d]/95"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-xl bg-[#0d0d0d]/95"
         initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.18 }}>
         <div className="flex items-start gap-4 mb-5">
@@ -753,18 +968,13 @@ function DeleteConfirm({ invoice, onConfirm, onClose, loading }: {
           <div>
             <h3 className="font-semibold text-foreground mb-1">Delete Invoice</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Permanently delete invoice{" "}
-              <span className="text-foreground font-medium">{invoice.invoice_number}</span>{" "}
-              for <span className="font-mono text-primary text-xs">{invoice.client_company_name}</span>?{" "}
-              This cannot be undone.
+              Permanently delete invoice <span className="text-foreground font-medium">{invoice.invoice_number}</span> for{" "}
+              <span className="font-mono text-primary text-xs">{invoice.client_company_name}</span>? This cannot be undone.
             </p>
           </div>
         </div>
         <div className="flex gap-3 justify-end">
-          <button onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
-            Cancel
-          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
           <button onClick={onConfirm} disabled={loading}
             className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2">
             {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
@@ -782,21 +992,14 @@ function ProjectCard({ project, onSelect, invoiceCount }: {
 }) {
   const status    = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
-
   return (
-    <motion.button
-      onClick={() => onSelect(project)}
+    <motion.button onClick={() => onSelect(project)}
       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
-      className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/5 p-5 hover:border-primary/30 hover:bg-white/8 transition-all duration-200 shadow-sm group"
-    >
+      className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/5 p-5 hover:border-primary/30 hover:bg-white/8 transition-all duration-200 shadow-sm group">
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
-            {project.project_number}
-          </span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>
-            {status.replace(/_/g, " ")}
-          </span>
+          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">{project.project_number}</span>
+          <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>{status.replace(/_/g, " ")}</span>
         </div>
         {invoiceCount > 0 && (
           <span className="text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full shrink-0 tabular-nums">
@@ -804,34 +1007,24 @@ function ProjectCard({ project, onSelect, invoiceCount }: {
           </span>
         )}
       </div>
-      <h3 className="font-semibold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors leading-snug line-clamp-1">
-        {project.title}
-      </h3>
-      {project.description && (
-        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">{project.description}</p>
-      )}
+      <h3 className="font-semibold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors leading-snug line-clamp-1">{project.title}</h3>
+      {project.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">{project.description}</p>}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
         {project.site_city && (
           <span className="flex items-center gap-1">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/>
-            </svg>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
             {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
           </span>
         )}
         {project.budget_numeric != null && (
           <span className="flex items-center gap-1 text-emerald-400/80">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-            </svg>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             {fmtKES(project.budget_numeric)}
           </span>
         )}
         {project.expected_completion_date && (
           <span className="flex items-center gap-1">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-            </svg>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
             Due {fmtDate(project.expected_completion_date)}
           </span>
         )}
@@ -843,18 +1036,14 @@ function ProjectCard({ project, onSelect, invoiceCount }: {
             <span className="text-[10px] font-mono text-primary">{project.progress_percent}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <motion.div className="h-full rounded-full"
-              style={{ background: "linear-gradient(90deg,hsl(var(--primary)),hsl(var(--accent)))" }}
-              initial={{ width: 0 }} animate={{ width: `${project.progress_percent}%` }}
-              transition={{ duration: 0.8, ease: "easeOut" }} />
+            <motion.div className="h-full rounded-full" style={{ background: "linear-gradient(90deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+              initial={{ width: 0 }} animate={{ width: `${project.progress_percent}%` }} transition={{ duration: 0.8, ease: "easeOut" }} />
           </div>
         </div>
       )}
       <div className="flex items-center gap-1 text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
         <span>Open Invoices</span>
-        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-          <path d="m9 18 6-6-6-6"/>
-        </svg>
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
       </div>
     </motion.button>
   );
@@ -866,16 +1055,14 @@ function StatCards({ invoices }: { invoices: Invoice[] }) {
   const paid         = invoices.filter(i => i.status === "paid").reduce((a, i) => a + Number(i.total), 0);
   const outstanding  = invoices.filter(i => !["paid", "cancelled"].includes(i.status)).reduce((a, i) => a + Number(i.total), 0);
   const overdueCount = invoices.filter(i => i.status === "overdue").length;
-
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.08 }}
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
       className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       {[
-        { label: "Total Invoiced",  value: fmtKES(total),       color: "text-foreground",  sub: `${invoices.length} invoices` },
-        { label: "Paid",            value: fmtKES(paid),        color: "text-emerald-400", sub: `${invoices.filter(i => i.status === "paid").length} settled` },
-        { label: "Outstanding",     value: fmtKES(outstanding), color: outstanding > 0 ? "text-rose-400" : "text-emerald-400", sub: "unpaid balance" },
-        { label: "Overdue",         value: String(overdueCount), color: overdueCount > 0 ? "text-rose-400" : "text-muted-foreground", sub: "invoices overdue" },
+        { label: "Total Invoiced", value: fmtKES(total),       color: "text-foreground",  sub: `${invoices.length} invoices` },
+        { label: "Paid",           value: fmtKES(paid),        color: "text-emerald-400", sub: `${invoices.filter(i => i.status === "paid").length} settled` },
+        { label: "Outstanding",    value: fmtKES(outstanding), color: outstanding > 0 ? "text-rose-400" : "text-emerald-400", sub: "unpaid balance" },
+        { label: "Overdue",        value: String(overdueCount), color: overdueCount > 0 ? "text-rose-400" : "text-muted-foreground", sub: "invoices overdue" },
       ].map(c => (
         <div key={c.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
           <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{c.label}</div>
@@ -889,9 +1076,7 @@ function StatCards({ invoices }: { invoices: Invoice[] }) {
 
 // ─── STATUS PILLS ─────────────────────────────────────────────────────────────
 function StatusPills({ invoices, filterStatus, setFilterStatus }: {
-  invoices: Invoice[];
-  filterStatus: InvoiceStatus | "All";
-  setFilterStatus: (s: InvoiceStatus | "All") => void;
+  invoices: Invoice[]; filterStatus: InvoiceStatus | "All"; setFilterStatus: (s: InvoiceStatus | "All") => void;
 }) {
   const counts = useMemo(() => {
     const c: Partial<Record<InvoiceStatus, number>> = {};
@@ -900,18 +1085,14 @@ function StatusPills({ invoices, filterStatus, setFilterStatus }: {
   }, [invoices]);
   if (!invoices.length) return null;
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: 0.12 }}
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.12 }}
       className="flex flex-wrap gap-2 mb-8">
       {INVOICE_STATUSES.filter(s => counts[s]).map(s => {
         const ss = STATUS_STYLE[s];
         const isActive = filterStatus === s;
         return (
-          <button key={s}
-            onClick={() => setFilterStatus(isActive ? "All" : s)}
-            className={`rounded-2xl border px-4 py-3 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 min-w-[7rem] ${
-              isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"
-            }`}>
+          <button key={s} onClick={() => setFilterStatus(isActive ? "All" : s)}
+            className={`rounded-2xl border px-4 py-3 text-left transition-all duration-200 backdrop-blur-sm bg-white/5 min-w-[7rem] ${isActive ? "border-white/20 ring-1 ring-white/20 scale-[1.02]" : "border-white/10 hover:border-white/20 hover:scale-[1.01]"}`}>
             <div className="text-[10px] uppercase tracking-widest font-semibold mb-1.5">{STATUS_LABEL[s]}</div>
             <div className="text-lg font-bold tabular-nums text-foreground">{counts[s]}</div>
             <Badge className={`text-[9px] px-1.5 py-0 border rounded-full mt-1 ${ss.badge}`}>
@@ -924,33 +1105,100 @@ function StatusPills({ invoices, filterStatus, setFilterStatus }: {
   );
 }
 
+// ─── ROW ACTION BUTTONS ───────────────────────────────────────────────────────
+// Always-visible PDF download button — placed before Edit/Delete in each row.
+function RowDownloadButton({ inv }: { inv: Invoice }) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    printInvoice(inv);
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      title="Download / Print as PDF"
+      type="button"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold
+        text-violet-300 bg-violet-500/10 border border-violet-500/20
+        hover:bg-violet-500/20 hover:border-violet-500/40 hover:text-violet-200
+        active:scale-95 transition-all duration-150 whitespace-nowrap select-none cursor-pointer"
+    >
+      <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      PDF
+    </button>
+  );
+}
+
+// Always-visible Share by email button.
+function RowShareButton({ inv, push }: { inv: Invoice; push: (msg: string, type?: "success" | "error") => void }) {
+  const [loading, setLoading] = useState(false);
+  const email = inv.client_email ?? inv.company_email;
+
+  const handleShare = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLoading(true);
+    try {
+      await shareInvoiceEmail(inv, push);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to send email.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleShare}
+      disabled={loading}
+      type="button"
+      title={email ? `Send invoice to ${email}` : "No email address — add a client or company email first"}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold
+        border transition-all duration-150 whitespace-nowrap select-none
+        ${email
+          ? "text-sky-300 bg-sky-500/10 border-sky-500/20 hover:bg-sky-500/20 hover:border-sky-500/40 hover:text-sky-200 active:scale-95 cursor-pointer"
+          : "text-zinc-600 bg-white/3 border-white/8 cursor-not-allowed opacity-40"
+        }
+        disabled:opacity-60`}
+    >
+      {loading
+        ? <span className="w-3.5 h-3.5 border-2 border-sky-400/30 border-t-sky-400 rounded-full animate-spin shrink-0" />
+        : (
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+        )
+      }
+      Share
+    </button>
+  );
+}
+
 // ─── INVOICE TABLE ────────────────────────────────────────────────────────────
 function InvoiceTable({
   invoices, filtered, canEdit, fetching,
   search, filterStatus, setSearch, setFilterStatus,
   onEdit, onDelete, onCreate,
-  showProjectCol = false,
-  projects = [],
+  showProjectCol = false, projects = [],
   emptyLabel = "No invoices found.",
+  push,
 }: {
-  invoices: Invoice[];
-  filtered: Invoice[];
+  invoices: Invoice[]; filtered: Invoice[];
   canEdit: boolean; fetching: boolean;
   search: string; filterStatus: InvoiceStatus | "All";
-  setSearch: (v: string) => void;
-  setFilterStatus: (v: InvoiceStatus | "All") => void;
-  onEdit: (i: Invoice) => void;
-  onDelete: (i: Invoice) => void;
-  onCreate: () => void;
-  showProjectCol?: boolean;
-  projects?: Project[];
+  setSearch: (v: string) => void; setFilterStatus: (v: InvoiceStatus | "All") => void;
+  onEdit: (i: Invoice) => void; onDelete: (i: Invoice) => void; onCreate: () => void;
+  showProjectCol?: boolean; projects?: Project[];
   emptyLabel?: string;
+  push: (msg: string, type?: "success" | "error") => void;
 }) {
   const projectLabel = (pid: string | null) => {
     if (!pid) return (
-      <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">
-        Standalone
-      </span>
+      <span className="inline-flex items-center text-[10px] font-semibold uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">Standalone</span>
     );
     const p = projects.find(pr => pr.id === pid);
     return p
@@ -958,12 +1206,26 @@ function InvoiceTable({
       : <span className="italic text-muted-foreground/60 text-xs">Unknown</span>;
   };
 
+  const handleDownloadAll = () => {
+    filtered.forEach(inv => printInvoice(inv));
+  };
+
+  const handleShareAll = async () => {
+    for (const inv of filtered) {
+      try {
+        await shareInvoiceEmail(inv, push);
+      } catch (err: unknown) {
+        push(err instanceof Error ? err.message : `Failed to send ${inv.invoice_number}.`, "error");
+      }
+    }
+  };
+
+  // Build table headers — Actions column always present and always last
   const headers = [
     "Invoice #", "Client", "Invoice Date", "Due Date",
-    "Subtotal", "Discount", "Tax", "Total",
-    "Status", "Payment Terms",
+    "Subtotal", "Discount", "Tax", "Total", "Status", "Payment Terms",
     ...(showProjectCol ? ["Scope"] : []),
-    ...(canEdit ? ["Actions"] : []),
+    "Actions",
   ];
 
   return (
@@ -971,18 +1233,15 @@ function InvoiceTable({
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3 mt-5 px-6 pb-4">
         <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search by invoice #, client, payment terms…"
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
         </div>
         <div className="relative" style={{ minWidth: "9rem" }}>
-          <select value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value as InvoiceStatus | "All")}
-            className={selectCls}>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as InvoiceStatus | "All")} className={selectCls}>
             <option value="All">All Statuses</option>
             {INVOICE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>
@@ -1006,8 +1265,7 @@ function InvoiceTable({
             </svg>
             <p className="text-sm">{emptyLabel}</p>
             {(search || filterStatus !== "All") && (
-              <button onClick={() => { setSearch(""); setFilterStatus("All"); }}
-                className="text-xs text-primary hover:underline">Clear filters</button>
+              <button onClick={() => { setSearch(""); setFilterStatus("All"); }} className="text-xs text-primary hover:underline">Clear filters</button>
             )}
             {canEdit && !search && filterStatus === "All" && (
               <button onClick={onCreate} className="text-xs text-primary hover:underline">Create first invoice</button>
@@ -1016,7 +1274,7 @@ function InvoiceTable({
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm" style={{ tableLayout: "auto" }}>
                 <thead>
                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                     {headers.map(h => (
@@ -1040,9 +1298,7 @@ function InvoiceTable({
                         <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">{inv.client_company_name}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs text-muted-foreground font-mono">{fmtDate(inv.invoice_date)}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs font-mono">
-                          <span className={inv.status === "overdue" ? "text-rose-400 font-semibold" : "text-muted-foreground"}>
-                            {fmtDate(inv.due_date)}
-                          </span>
+                          <span className={inv.status === "overdue" ? "text-rose-400 font-semibold" : "text-muted-foreground"}>{fmtDate(inv.due_date)}</span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-foreground">{fmtKES(Number(inv.subtotal))}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-rose-400/80">
@@ -1051,63 +1307,66 @@ function InvoiceTable({
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-amber-400">{fmtKES(Number(inv.total_tax))}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs font-bold text-primary">{fmtKES(Number(inv.total))}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold ${ss.badge}`}>
-                            {STATUS_LABEL[inv.status]}
-                          </Badge>
+                          <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold ${ss.badge}`}>{STATUS_LABEL[inv.status]}</Badge>
                         </td>
                         <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">{inv.payment_terms || "—"}</td>
-                        {showProjectCol && (
-                          <td className="px-4 py-3.5 whitespace-nowrap">{projectLabel(inv.project_id)}</td>
-                        )}
-                        {canEdit && (
-                          <td className="px-4 py-3.5 whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
-                              <button onClick={() => onEdit(inv)} title="Edit"
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                </svg>
-                              </button>
-                              <button onClick={() => onDelete(inv)} title="Delete"
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                  <polyline points="3 6 5 6 21 6"/>
-                                  <path d="M19 6l-1 14H6L5 6"/>
-                                  <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                        )}
+                        {showProjectCol && <td className="px-4 py-3.5 whitespace-nowrap">{projectLabel(inv.project_id)}</td>}
+
+                        {/* ── ACTIONS CELL: always rendered, PDF + Share always visible ── */}
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5 flex-nowrap">
+                            {/* ✅ PDF Download — always visible */}
+                            <RowDownloadButton inv={inv} />
+
+                            {/* ✅ Share by Email — always visible */}
+                            <RowShareButton inv={inv} push={push} />
+
+                            {/* Edit + Delete — only when canEdit */}
+                            {canEdit && (
+                              <>
+                                <div className="w-px h-5 bg-white/10 mx-0.5 shrink-0" />
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onEdit(inv); }}
+                                  title="Edit invoice"
+                                  type="button"
+                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all shrink-0">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onDelete(inv); }}
+                                  title="Delete invoice"
+                                  type="button"
+                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all shrink-0">
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/>
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
                       </motion.tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                    <td colSpan={4} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Subtotal ({filtered.length})
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">
-                      {fmtKES(filtered.reduce((a, i) => a + Number(i.subtotal), 0))}
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-rose-400/80">
-                      {fmtKES(filtered.reduce((a, i) => a + Number(i.discount_amount), 0))}
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">
-                      {fmtKES(filtered.reduce((a, i) => a + Number(i.total_tax), 0))}
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-primary">
-                      {fmtKES(filtered.reduce((a, i) => a + Number(i.total), 0))}
-                    </td>
-                    <td colSpan={showProjectCol ? (canEdit ? 4 : 3) : (canEdit ? 3 : 2)} />
+                    <td colSpan={4} className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subtotal ({filtered.length})</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-foreground">{fmtKES(filtered.reduce((a, i) => a + Number(i.subtotal), 0))}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-rose-400/80">{fmtKES(filtered.reduce((a, i) => a + Number(i.discount_amount), 0))}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">{fmtKES(filtered.reduce((a, i) => a + Number(i.total_tax), 0))}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-bold text-primary">{fmtKES(filtered.reduce((a, i) => a + Number(i.total), 0))}</td>
+                    <td colSpan={showProjectCol ? (canEdit ? 5 : 4) : (canEdit ? 4 : 3)} />
                   </tr>
                 </tfoot>
               </table>
             </div>
 
-            {/* Grand total bar */}
+            {/* Grand Total bar + batch actions */}
             <div className="px-6 py-4 flex flex-wrap items-center gap-5 text-xs font-mono bg-primary/5 border-t border-primary/10">
               <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
               <span className="text-foreground">Invoiced {fmtKES(invoices.reduce((a, i) => a + Number(i.total), 0))}</span>
@@ -1115,9 +1374,34 @@ function InvoiceTable({
               <span className="text-emerald-400">Paid {fmtKES(invoices.filter(i => i.status === "paid").reduce((a, i) => a + Number(i.total), 0))}</span>
               <span className="text-muted-foreground">·</span>
               <span className="text-rose-400">Outstanding {fmtKES(invoices.filter(i => !["paid","cancelled"].includes(i.status)).reduce((a, i) => a + Number(i.total), 0))}</span>
-              <Badge className="ml-auto bg-primary/10 border-primary/20 text-primary">
-                {invoices.length} invoice{invoices.length !== 1 ? "s" : ""}
-              </Badge>
+              <Badge className="ml-auto bg-primary/10 border-primary/20 text-primary">{invoices.length} invoice{invoices.length !== 1 ? "s" : ""}</Badge>
+              {filtered.length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-violet-300 bg-violet-500/10 border border-violet-500/20 hover:bg-violet-500/20 hover:border-violet-500/40 hover:text-violet-200 active:scale-95 transition-all duration-150 whitespace-nowrap"
+                  >
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download All PDFs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleShareAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-sky-300 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 hover:border-sky-500/40 hover:text-sky-200 active:scale-95 transition-all duration-150 whitespace-nowrap"
+                  >
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                      <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                    Share All
+                  </button>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -1131,74 +1415,49 @@ function useInvoiceCrud(push: (msg: string, type?: "success" | "error") => void)
   const [saving, setSaving] = useState(false);
 
   const handleCreate = useCallback(async (
-    form: InvoiceFormData,
-    onSuccess: (inv: Invoice) => void,
-    onDone: () => void,
+    form: InvoiceFormData, onSuccess: (inv: Invoice) => void, onDone: () => void,
   ) => {
     setSaving(true);
-    try {
-      const inv = await api.create(form);
-      onSuccess(inv);
-      push("Invoice created.");
-      onDone();
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to create invoice.", "error");
-    } finally { setSaving(false); }
+    try { const inv = await api.create(form); onSuccess(inv); push("Invoice created."); onDone(); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to create invoice.", "error"); }
+    finally { setSaving(false); }
   }, [push]);
 
   const handleUpdate = useCallback(async (
-    id: string,
-    form: InvoiceFormData,
-    onSuccess: (inv: Invoice) => void,
-    onDone: () => void,
+    id: string, form: InvoiceFormData, onSuccess: (inv: Invoice) => void, onDone: () => void, prev?: Invoice,
   ) => {
     setSaving(true);
-    try {
-      const inv = await api.update(id, form);
-      onSuccess(inv);
-      push("Invoice updated.");
-      onDone();
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to update invoice.", "error");
-    } finally { setSaving(false); }
+    try { const inv = await api.update(id, form, prev); onSuccess(inv); push("Invoice updated."); onDone(); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to update invoice.", "error"); }
+    finally { setSaving(false); }
   }, [push]);
 
   const handleDelete = useCallback(async (
-    id: string,
-    onSuccess: () => void,
-    onDone: () => void,
+    id: string, onSuccess: () => void, onDone: () => void, prev?: Invoice,
   ) => {
     setSaving(true);
-    try {
-      await api.remove(id);
-      onSuccess();
-      push("Invoice deleted.");
-      onDone();
-    } catch (err: unknown) {
-      push(err instanceof Error ? err.message : "Failed to delete invoice.", "error");
-    } finally { setSaving(false); }
+    try { await api.remove(id, prev); onSuccess(); push("Invoice deleted."); onDone(); }
+    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to delete invoice.", "error"); }
+    finally { setSaving(false); }
   }, [push]);
 
   return { saving, handleCreate, handleUpdate, handleDelete };
 }
 
 // ─── PER-PROJECT INVOICE VIEW ─────────────────────────────────────────────────
-function ProjectInvoiceView({ project, canEdit, onBack }: {
-  project: Project; canEdit: boolean; onBack: () => void;
-}) {
-  const [invoices,     setInvoices]     = useState<Invoice[]>([]);
-  const [fetching,     setFetching]     = useState(false);
-  const [modal,        setModal]        = useState<null | "create" | "edit">(null);
-  const [editing,      setEditing]      = useState<Invoice | null>(null);
-  const [deleting,     setDeleting]     = useState<Invoice | null>(null);
-  const [search,       setSearch]       = useState("");
+function ProjectInvoiceView({ project, canEdit, onBack }: { project: Project; canEdit: boolean; onBack: () => void }) {
+  const [invoices, setInvoices]         = useState<Invoice[]>([]);
+  const [fetching, setFetching]         = useState(false);
+  const [modal, setModal]               = useState<null | "create" | "edit">(null);
+  const [editing, setEditing]           = useState<Invoice | null>(null);
+  const [deleting, setDeleting]         = useState<Invoice | null>(null);
+  const [search, setSearch]             = useState("");
   const [filterStatus, setFilterStatus] = useState<InvoiceStatus | "All">("All");
   const { toasts, push }               = useToast();
   const { saving, handleCreate, handleUpdate, handleDelete } = useInvoiceCrud(push);
 
   const fetchInvoices = useCallback(async () => {
-    setFetching(true);
-    setInvoices([]);
+    setFetching(true); setInvoices([]);
     try { setInvoices(await api.list(project.id)); }
     catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load.", "error"); }
     finally { setFetching(false); }
@@ -1206,24 +1465,18 @@ function ProjectInvoiceView({ project, canEdit, onBack }: {
 
   useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
 
-  const filtered = useMemo(() =>
-    invoices.filter(i => {
-      if (filterStatus !== "All" && i.status !== filterStatus) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return i.invoice_number.toLowerCase().includes(q) ||
-          i.client_company_name.toLowerCase().includes(q) ||
-          (i.payment_terms ?? "").toLowerCase().includes(q);
-      }
-      return true;
-    }),
-  [invoices, filterStatus, search]);
+  const filtered = useMemo(() => invoices.filter(i => {
+    if (filterStatus !== "All" && i.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return i.invoice_number.toLowerCase().includes(q) || i.client_company_name.toLowerCase().includes(q) || (i.payment_terms ?? "").toLowerCase().includes(q);
+    }
+    return true;
+  }), [invoices, filterStatus, search]);
 
   const status    = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
-
-  // Strip computed fields for edit
-  const toForm = (inv: Invoice): InvoiceFormData & { id: string } => {
+  const toForm    = (inv: Invoice): InvoiceFormData & { id: string } => {
     const { id, subtotal: _s, total_tax: _tt, total: _t, created_at: _ca, updated_at: _ua, ...rest } = inv;
     return { ...rest, id } as InvoiceFormData & { id: string };
   };
@@ -1231,78 +1484,41 @@ function ProjectInvoiceView({ project, canEdit, onBack }: {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <ToastStack toasts={toasts} />
-
       <AnimatePresence>
         {modal === "create" && (
-          <InvoiceModal
-            initial={makeEmpty(project.id)}
-            onSave={form => handleCreate(
-              { ...form, project_id: project.id },
-              inv => setInvoices(p => [inv, ...p]),
-              () => setModal(null),
-            )}
-            onClose={() => setModal(null)}
-            loading={saving}
-            showProjectSelector={false}
-          />
+          <InvoiceModal initial={makeEmpty(project.id)}
+            onSave={form => handleCreate({ ...form, project_id: project.id }, inv => setInvoices(p => [inv, ...p]), () => setModal(null))}
+            onClose={() => setModal(null)} loading={saving} showProjectSelector={false} />
         )}
         {modal === "edit" && editing && (
-          <InvoiceModal
-            initial={toForm(editing)}
-            onSave={form => handleUpdate(
-              editing.id, form,
-              inv => setInvoices(p => p.map(i => i.id === editing.id ? inv : i)),
-              () => { setModal(null); setEditing(null); },
-            )}
-            onClose={() => { setModal(null); setEditing(null); }}
-            loading={saving}
-            showProjectSelector={false}
-          />
+          <InvoiceModal initial={toForm(editing)}
+            onSave={form => handleUpdate(editing.id, form, inv => setInvoices(p => p.map(i => i.id === editing.id ? inv : i)), () => { setModal(null); setEditing(null); }, editing)}
+            onClose={() => { setModal(null); setEditing(null); }} loading={saving} showProjectSelector={false} />
         )}
         {deleting && (
-          <DeleteConfirm
-            invoice={deleting}
-            onConfirm={() => handleDelete(
-              deleting.id,
-              () => setInvoices(p => p.filter(i => i.id !== deleting.id)),
-              () => setDeleting(null),
-            )}
-            onClose={() => setDeleting(null)}
-            loading={saving}
-          />
+          <DeleteConfirm invoice={deleting}
+            onConfirm={() => handleDelete(deleting.id, () => setInvoices(p => p.filter(i => i.id !== deleting.id)), () => setDeleting(null), deleting)}
+            onClose={() => setDeleting(null)} loading={saving} />
         )}
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-16">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-10">
-          <button onClick={onBack}
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
-            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <path d="m15 18-6-6 6-6"/>
-            </svg>
+          <button onClick={onBack} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group">
+            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
             All Projects
           </button>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Invoicing</p>
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
-                  {project.project_number}
-                </span>
-                <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>
-                  {status.replace(/_/g, " ")}
-                </span>
+                <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">{project.project_number}</span>
+                <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>{status.replace(/_/g, " ")}</span>
               </div>
               <h1 className="text-5xl md:text-7xl font-bold leading-tight">
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-                  {project.title}
-                </span>
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">{project.title}</span>
               </h1>
-              {project.site_city && (
-                <p className="text-xl text-muted-foreground mt-2">
-                  {project.site_city}{project.site_country ? `, ${project.site_country}` : ""}
-                </p>
-              )}
+              {project.site_city && <p className="text-xl text-muted-foreground mt-2">{project.site_city}{project.site_country ? `, ${project.site_country}` : ""}</p>}
             </div>
           </div>
         </motion.div>
@@ -1318,11 +1534,9 @@ function ProjectInvoiceView({ project, canEdit, onBack }: {
                 <p className="text-xs text-muted-foreground mt-1">All invoices linked to this project.</p>
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={fetchInvoices}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
+                <button onClick={fetchInvoices} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                   </svg>
                   Refresh
                 </button>
@@ -1330,34 +1544,23 @@ function ProjectInvoiceView({ project, canEdit, onBack }: {
                   <button onClick={() => setModal("create")}
                     className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
                     style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                      <path d="M12 5v14M5 12h14"/>
-                    </svg>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                     New Invoice
                   </button>
                 )}
               </div>
             </div>
           </CardHeader>
-
-          <InvoiceTable
-            invoices={invoices} filtered={filtered}
-            canEdit={canEdit} fetching={fetching}
-            search={search} filterStatus={filterStatus}
-            setSearch={setSearch} setFilterStatus={setFilterStatus}
-            onEdit={inv => { setEditing(inv); setModal("edit"); }}
-            onDelete={setDeleting}
-            onCreate={() => setModal("create")}
-            showProjectCol={false}
-          />
-
+          <InvoiceTable invoices={invoices} filtered={filtered} canEdit={canEdit} fetching={fetching}
+            search={search} filterStatus={filterStatus} setSearch={setSearch} setFilterStatus={setFilterStatus}
+            onEdit={inv => { setEditing(inv); setModal("edit"); }} onDelete={setDeleting}
+            onCreate={() => setModal("create")} showProjectCol={false} push={push} />
           {!fetching && invoices.length > 0 && (
             <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
               <span className="tabular-nums">{invoices.length} total invoice{invoices.length !== 1 ? "s" : ""}</span>
               <button onClick={fetchInvoices} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                 </svg>
                 Refresh
               </button>
@@ -1373,20 +1576,19 @@ function ProjectInvoiceView({ project, canEdit, onBack }: {
 type GlobalTab = "consolidated" | "standalone";
 
 function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: Project[] }) {
-  const [allInvoices,  setAllInvoices]  = useState<Invoice[]>([]);
-  const [fetching,     setFetching]     = useState(false);
-  const [modal,        setModal]        = useState<null | "create" | "edit">(null);
-  const [editing,      setEditing]      = useState<Invoice | null>(null);
-  const [deleting,     setDeleting]     = useState<Invoice | null>(null);
-  const [activeTab,    setActiveTab]    = useState<GlobalTab>("consolidated");
-  const [search,       setSearch]       = useState("");
+  const [allInvoices, setAllInvoices]   = useState<Invoice[]>([]);
+  const [fetching, setFetching]         = useState(false);
+  const [modal, setModal]               = useState<null | "create" | "edit">(null);
+  const [editing, setEditing]           = useState<Invoice | null>(null);
+  const [deleting, setDeleting]         = useState<Invoice | null>(null);
+  const [activeTab, setActiveTab]       = useState<GlobalTab>("consolidated");
+  const [search, setSearch]             = useState("");
   const [filterStatus, setFilterStatus] = useState<InvoiceStatus | "All">("All");
   const { toasts, push }               = useToast();
   const { saving, handleCreate, handleUpdate, handleDelete } = useInvoiceCrud(push);
 
   const fetchAll = useCallback(async () => {
-    setFetching(true);
-    setAllInvoices([]);
+    setFetching(true); setAllInvoices([]);
     try { setAllInvoices(await api.listAll()); }
     catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load.", "error"); }
     finally { setFetching(false); }
@@ -1399,22 +1601,17 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
     [allInvoices, activeTab]
   );
 
-  const filtered = useMemo(() =>
-    displayInvoices.filter(i => {
-      if (filterStatus !== "All" && i.status !== filterStatus) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return i.invoice_number.toLowerCase().includes(q) ||
-          i.client_company_name.toLowerCase().includes(q) ||
-          (i.payment_terms ?? "").toLowerCase().includes(q);
-      }
-      return true;
-    }),
-  [displayInvoices, filterStatus, search]);
+  const filtered = useMemo(() => displayInvoices.filter(i => {
+    if (filterStatus !== "All" && i.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return i.invoice_number.toLowerCase().includes(q) || i.client_company_name.toLowerCase().includes(q) || (i.payment_terms ?? "").toLowerCase().includes(q);
+    }
+    return true;
+  }), [displayInvoices, filterStatus, search]);
 
   const standaloneCount   = allInvoices.filter(i => i.project_id === null).length;
   const consolidatedCount = allInvoices.length;
-
   const tabs = [
     { key: "consolidated" as GlobalTab, label: "Consolidated",    count: consolidatedCount, description: "All invoices across every project plus standalone firm-wide invoices" },
     { key: "standalone"   as GlobalTab, label: "Standalone Only", count: standaloneCount,   description: "Invoices not linked to any specific project" },
@@ -1428,51 +1625,24 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
   return (
     <div className="container mx-auto px-4 pb-20">
       <ToastStack toasts={toasts} />
-
       <AnimatePresence>
         {modal === "create" && (
-          <InvoiceModal
-            initial={makeEmpty(null)}
-            onSave={form => handleCreate(
-              { ...form, project_id: form.project_id || null },
-              inv => setAllInvoices(p => [inv, ...p]),
-              () => setModal(null),
-            )}
-            onClose={() => setModal(null)}
-            loading={saving}
-            projects={projects}
-            showProjectSelector={true}
-          />
+          <InvoiceModal initial={makeEmpty(null)}
+            onSave={form => handleCreate({ ...form, project_id: form.project_id || null }, inv => setAllInvoices(p => [inv, ...p]), () => setModal(null))}
+            onClose={() => setModal(null)} loading={saving} projects={projects} showProjectSelector={true} />
         )}
         {modal === "edit" && editing && (
-          <InvoiceModal
-            initial={toForm(editing)}
-            onSave={form => handleUpdate(
-              editing.id, form,
-              inv => setAllInvoices(p => p.map(i => i.id === editing.id ? inv : i)),
-              () => { setModal(null); setEditing(null); },
-            )}
-            onClose={() => { setModal(null); setEditing(null); }}
-            loading={saving}
-            projects={projects}
-            showProjectSelector={true}
-          />
+          <InvoiceModal initial={toForm(editing)}
+            onSave={form => handleUpdate(editing.id, form, inv => setAllInvoices(p => p.map(i => i.id === editing.id ? inv : i)), () => { setModal(null); setEditing(null); }, editing)}
+            onClose={() => { setModal(null); setEditing(null); }} loading={saving} projects={projects} showProjectSelector={true} />
         )}
         {deleting && (
-          <DeleteConfirm
-            invoice={deleting}
-            onConfirm={() => handleDelete(
-              deleting.id,
-              () => setAllInvoices(p => p.filter(i => i.id !== deleting.id)),
-              () => setDeleting(null),
-            )}
-            onClose={() => setDeleting(null)}
-            loading={saving}
-          />
+          <DeleteConfirm invoice={deleting}
+            onConfirm={() => handleDelete(deleting.id, () => setAllInvoices(p => p.filter(i => i.id !== deleting.id)), () => setDeleting(null), deleting)}
+            onClose={() => setDeleting(null)} loading={saving} />
         )}
       </AnimatePresence>
 
-      {/* Section heading */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="h-px flex-1 bg-white/10" />
@@ -1480,14 +1650,10 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
           <div className="h-px flex-1 bg-white/10" />
         </div>
         <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
-          Global{" "}
-          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-            Invoice Register
-          </span>
+          Global <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Invoice Register</span>
         </h2>
         <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
           Consolidated view of all invoices across every project and standalone firm-wide records.
-          Project linking is optional — leave blank for a firm-level invoice.
         </p>
       </motion.div>
 
@@ -1502,11 +1668,9 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
               <p className="text-xs text-muted-foreground mt-1">The consolidated view is the authoritative firm-wide invoice register.</p>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={fetchAll}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
+              <button onClick={fetchAll} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-xl hover:bg-white/5 transition-all">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                 </svg>
                 Refresh
               </button>
@@ -1514,52 +1678,30 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
                 <button onClick={() => setModal("create")}
                   className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg shrink-0"
                   style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                    <path d="M12 5v14M5 12h14"/>
-                  </svg>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
                   New Invoice
                 </button>
               )}
             </div>
           </div>
-
-          {/* Tabs */}
           <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
             {tabs.map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
-                  activeTab === tab.key
-                    ? "bg-white/10 text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}>
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? "bg-white/10 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
                 {tab.label}
-                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${
-                  activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground"
-                }`}>{tab.count}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground"}`}>{tab.count}</span>
               </button>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground mt-2 mb-1">
-            {tabs.find(t => t.key === activeTab)?.description}
-          </p>
+          <p className="text-xs text-muted-foreground mt-2 mb-1">{tabs.find(t => t.key === activeTab)?.description}</p>
         </CardHeader>
 
-        <InvoiceTable
-          invoices={displayInvoices} filtered={filtered}
-          canEdit={canEdit} fetching={fetching}
-          search={search} filterStatus={filterStatus}
-          setSearch={setSearch} setFilterStatus={setFilterStatus}
-          onEdit={inv => { setEditing(inv); setModal("edit"); }}
-          onDelete={setDeleting}
-          onCreate={() => setModal("create")}
-          showProjectCol={activeTab === "consolidated"}
-          projects={projects}
-          emptyLabel={
-            activeTab === "standalone"
-              ? "No standalone invoices yet. Create an invoice without linking a project."
-              : "No invoices created yet."
-          }
-        />
+        <InvoiceTable invoices={displayInvoices} filtered={filtered} canEdit={canEdit} fetching={fetching}
+          search={search} filterStatus={filterStatus} setSearch={setSearch} setFilterStatus={setFilterStatus}
+          onEdit={inv => { setEditing(inv); setModal("edit"); }} onDelete={setDeleting}
+          onCreate={() => setModal("create")} showProjectCol={activeTab === "consolidated"} projects={projects}
+          emptyLabel={activeTab === "standalone" ? "No standalone invoices yet. Create an invoice without linking a project." : "No invoices created yet."}
+          push={push} />
 
         {!fetching && allInvoices.length > 0 && (
           <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
@@ -1570,8 +1712,7 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
             </div>
             <button onClick={fetchAll} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
               </svg>
               Refresh
             </button>
@@ -1582,14 +1723,14 @@ function GlobalInvoiceView({ canEdit, projects }: { canEdit: boolean; projects: 
   );
 }
 
-// ─── PROJECT PICKER VIEW ──────────────────────────────────────────────────────
+// ─── PROJECT PICKER ───────────────────────────────────────────────────────────
 function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
-  const [projects,       setProjects]       = useState<Project[]>([]);
-  const [fetching,       setFetching]       = useState(true);
-  const [search,         setSearch]         = useState("");
-  const [statusFilter,   setStatusFilter]   = useState("all");
-  const [invoiceCounts,  setInvoiceCounts]  = useState<Record<string, number>>({});
-  const [standaloneCount,setStandaloneCount]= useState(0);
+  const [projects,        setProjects]        = useState<Project[]>([]);
+  const [fetching,        setFetching]        = useState(true);
+  const [search,          setSearch]          = useState("");
+  const [statusFilter,    setStatusFilter]    = useState("all");
+  const [invoiceCounts,   setInvoiceCounts]   = useState<Record<string, number>>({});
+  const [standaloneCount, setStandaloneCount] = useState(0);
   const { toasts, push } = useToast();
 
   useEffect(() => {
@@ -1599,17 +1740,13 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         setProjects(data);
         if (data.length > 0) {
           const ids = data.map(p => p.id);
-          const { data: counts } = await supabase
-            .from("invoices").select("project_id").in("project_id", ids);
+          const { data: counts } = await supabase.from("invoices").select("project_id").in("project_id", ids);
           if (counts) {
             const tally: Record<string, number> = {};
-            (counts as { project_id: string }[]).forEach(r => {
-              tally[r.project_id] = (tally[r.project_id] ?? 0) + 1;
-            });
+            (counts as { project_id: string }[]).forEach(r => { tally[r.project_id] = (tally[r.project_id] ?? 0) + 1; });
             setInvoiceCounts(tally);
           }
-          const { count } = await supabase
-            .from("invoices").select("id", { count: "exact", head: true }).is("project_id", null);
+          const { count } = await supabase.from("invoices").select("id", { count: "exact", head: true }).is("project_id", null);
           setStandaloneCount(count ?? 0);
         }
       })
@@ -1622,18 +1759,14 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
     return ["all", ...Array.from(s)];
   }, [projects]);
 
-  const filtered = useMemo(() =>
-    projects.filter(p => {
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return p.title.toLowerCase().includes(q) ||
-          p.project_number.toLowerCase().includes(q) ||
-          (p.site_city ?? "").toLowerCase().includes(q);
-      }
-      return true;
-    }),
-  [projects, search, statusFilter]);
+  const filtered = useMemo(() => projects.filter(p => {
+    if (statusFilter !== "all" && p.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return p.title.toLowerCase().includes(q) || p.project_number.toLowerCase().includes(q) || (p.site_city ?? "").toLowerCase().includes(q);
+    }
+    return true;
+  }), [projects, search, statusFilter]);
 
   const totalInvoices = Object.values(invoiceCounts).reduce((a, b) => a + b, 0) + standaloneCount;
 
@@ -1641,29 +1774,23 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <ToastStack toasts={toasts} />
       <div className="container mx-auto px-4 py-16">
-
-        {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }} className="mb-12 text-center">
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground mb-3">Finance Module</p>
           <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
-            Invoice{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              Management
-            </span>
+            Invoice <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Management</span>
           </h1>
           <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto">
             Select a project to manage its invoices, or scroll down for the firm-wide consolidated view.
           </p>
         </motion.div>
 
-        {/* Summary stats */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Total Projects",          value: projects.length,                   sub: "in system",           color: "" },
-            { label: "Projects with Invoices",  value: Object.keys(invoiceCounts).length, sub: "have invoice records", color: "" },
-            { label: "Standalone Invoices",     value: standaloneCount,                   sub: "not project-linked",   color: "text-violet-400" },
-            { label: "Total Invoices",          value: totalInvoices,                     sub: "across all projects",  color: "" },
+            { label: "Total Projects",         value: projects.length,                   sub: "in system",            color: "" },
+            { label: "Projects with Invoices", value: Object.keys(invoiceCounts).length, sub: "have invoice records",  color: "" },
+            { label: "Standalone Invoices",    value: standaloneCount,                   sub: "not project-linked",    color: "text-violet-400" },
+            { label: "Total Invoices",         value: totalInvoices,                     sub: "across all projects",   color: "" },
           ].map(card => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">{card.label}</div>
@@ -1673,27 +1800,19 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           ))}
         </motion.div>
 
-        {/* Projects card */}
         <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-16">
           <CardHeader className="pb-4">
             <CardTitle className="text-3xl font-bold">Projects</CardTitle>
             <div className="flex flex-col sm:flex-row gap-3 mt-5">
               <div className="relative flex-1">
-                <svg aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
                 </svg>
-                <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Search by name, number or city…"
-                  className={inputCls + " pl-9"} />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, number or city…" className={inputCls + " pl-9"} />
               </div>
               <div className="relative w-full sm:w-52">
                 <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={selectCls}>
-                  {statuses.map(s => (
-                    <option key={s} value={s}>
-                      {s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
-                    </option>
-                  ))}
+                  {statuses.map(s => <option key={s} value={s}>{s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</option>)}
                 </select>
                 <SelectChevron />
               </div>
@@ -1702,29 +1821,20 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               </div>
             </div>
           </CardHeader>
-
           <CardContent className="p-0">
             {fetching ? (
               <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
-                <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-                Loading projects…
+                <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />Loading projects…
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
-                <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6"/>
-                </svg>
+                <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6"/></svg>
                 <p className="text-sm">No projects found.</p>
-                {search && (
-                  <button onClick={() => { setSearch(""); setStatusFilter("all"); }}
-                    className="text-xs text-primary hover:underline">Clear filters</button>
-                )}
+                {search && <button onClick={() => { setSearch(""); setStatusFilter("all"); }} className="text-xs text-primary hover:underline">Clear filters</button>}
               </div>
             ) : (
               <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filtered.map(p => (
-                  <ProjectCard key={p.id} project={p} onSelect={onSelect} invoiceCount={invoiceCounts[p.id] ?? 0} />
-                ))}
+                {filtered.map(p => <ProjectCard key={p.id} project={p} onSelect={onSelect} invoiceCount={invoiceCounts[p.id] ?? 0} />)}
               </div>
             )}
             {!fetching && projects.length > 0 && (
@@ -1738,7 +1848,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </CardContent>
         </Card>
 
-        {/* Global invoice section */}
         {!fetching && <GlobalInvoiceView canEdit={true} projects={projects} />}
       </div>
     </div>
@@ -1751,11 +1860,9 @@ export default function InvoicePage({ projectId, canEdit = true }: Props) {
 
   useEffect(() => {
     if (!projectId) return;
-    supabase
-      .from("projects")
+    supabase.from("projects")
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
-      .eq("id", projectId)
-      .single()
+      .eq("id", projectId).single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); });
   }, [projectId]);
 
@@ -1765,11 +1872,7 @@ export default function InvoicePage({ projectId, canEdit = true }: Props) {
         <motion.div key={selectedProject.id}
           initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
-          <ProjectInvoiceView
-            project={selectedProject}
-            canEdit={canEdit}
-            onBack={() => { if (!projectId) setSelectedProject(null); }}
-          />
+          <ProjectInvoiceView project={selectedProject} canEdit={canEdit} onBack={() => { if (!projectId) setSelectedProject(null); }} />
         </motion.div>
       ) : (
         <motion.div key="picker"

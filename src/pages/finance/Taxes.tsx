@@ -1,5 +1,12 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem
+} from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -595,10 +602,28 @@ function EntryModal({
     form.counter_party.trim() !== "" &&
     form.gross_amount > 0;
 
-  const taxPeriods: TaxPeriod[] = [
+  // Allow user to select from known periods or enter a custom one if not present
+  const knownPeriods: TaxPeriod[] = [
     "2026-Q1","2026-Q2","2026-Q3","2026-Q4",
     "2025-Q1","2025-Q2","2025-Q3","2025-Q4",
   ];
+  // If the current form period is not in the list, add it as a selectable option
+  const taxPeriods = useMemo(() => {
+    if (form.tax_period && !knownPeriods.includes(form.tax_period as TaxPeriod)) {
+      return [form.tax_period, ...knownPeriods];
+    }
+    return knownPeriods;
+  }, [form.tax_period]);
+
+  // Track if user is in custom period mode
+  const [customPeriodMode, setCustomPeriodMode] = useState(false);
+
+  useEffect(() => {
+    // If the form.tax_period matches a known period, exit custom mode
+    if (taxPeriods.includes(form.tax_period)) {
+      setCustomPeriodMode(false);
+    }
+  }, [form.tax_period, taxPeriods]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -654,9 +679,16 @@ function EntryModal({
                 <input value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="e.g. Invoice for site works Phase 1" className={inputCls} />
               </Field>
               <Field label="Transaction Type *">
-                <select value={form.transaction_type} onChange={(e) => set("transaction_type", e.target.value as TransactionType)} className={inputCls}>
-                  {TRANSACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <Select value={form.transaction_type} onValueChange={v => set("transaction_type", v as TransactionType)}>
+                  <SelectTrigger className={inputCls}>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRANSACTION_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Reference No.">
                 <input value={form.ref_number ?? ""} onChange={(e) => set("ref_number", e.target.value || null)} placeholder="INV-001 / PAY-055" className={inputCls} />
@@ -665,9 +697,44 @@ function EntryModal({
                 <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className={inputCls} />
               </Field>
               <Field label="Tax Period *">
-                <select value={form.tax_period} onChange={(e) => set("tax_period", e.target.value)} className={inputCls}>
-                  {taxPeriods.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <Select
+                    value={taxPeriods.includes(form.tax_period) && !customPeriodMode ? form.tax_period : "custom"}
+                    onValueChange={v => {
+                      if (v === "custom") {
+                        setCustomPeriodMode(true);
+                        // Do not clear the input, just focus
+                        setTimeout(() => {
+                          const input = document.getElementById("custom-tax-period-input");
+                          if (input) input.focus();
+                        }, 50);
+                      } else {
+                        set("tax_period", v);
+                        setCustomPeriodMode(false);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className={inputCls + " flex-1"}>
+                      <SelectValue placeholder="Select period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {taxPeriods.map((p) => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                      <SelectItem value="custom">Other…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {customPeriodMode && (
+                    <input
+                      id="custom-tax-period-input"
+                      type="text"
+                      value={form.tax_period}
+                      onChange={e => set("tax_period", e.target.value.replace(/\s+/g, "").toUpperCase())}
+                      placeholder="e.g. 2027-Q1 or 2026-05"
+                      className={inputCls + " flex-1"}
+                    />
+                  )}
+                </div>
               </Field>
             </div>
 
@@ -741,14 +808,28 @@ function EntryModal({
             <SectionLabel label="Deduction Classification" dotColor="bg-pink-400" textColor="text-pink-400" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Field label="Deduction Category">
-                <select value={form.deduction_category} onChange={(e) => set("deduction_category", e.target.value as DeductionCategory)} className={inputCls}>
-                  {DEDUCTION_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <Select value={form.deduction_category} onValueChange={v => set("deduction_category", v as DeductionCategory)}>
+                  <SelectTrigger className={inputCls}>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEDUCTION_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Deduction Type">
-                <select value={form.deduction_type} onChange={(e) => set("deduction_type", e.target.value as DeductionType)} className={inputCls}>
-                  {DEDUCTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <Select value={form.deduction_type} onValueChange={v => set("deduction_type", v as DeductionType)}>
+                  <SelectTrigger className={inputCls}>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEDUCTION_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="Allowable Deduction">
                 <div className="flex gap-2 h-10">
@@ -1787,12 +1868,15 @@ function GlobalTaxTable({ canEdit }: { canEdit: boolean }) {
 
 export default function TaxesPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [showGlobal, setShowGlobal] = useState(true);
+  const [showGlobal, setShowGlobal] = useState(!projectId);
 
+  // If projectId is provided, auto-select that project
   useEffect(() => {
-    if (!projectId) return;
-    supabase.from("projects").select("*").eq("id", projectId).single()
-      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
+    if (projectId) {
+      supabase.from("projects").select("*").eq("id", projectId).single()
+        .then(({ data }) => { if (data) setSelectedProject(data as Project); });
+      setShowGlobal(false);
+    }
   }, [projectId]);
 
   return (
@@ -1803,11 +1887,17 @@ export default function TaxesPage({ projectId, canEdit = true }: Props) {
         </motion.div>
       ) : selectedProject ? (
         <motion.div key="taxes" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
-          <TaxView project={selectedProject} canEdit={canEdit} onBack={() => setSelectedProject(null)} />
+          <TaxView project={selectedProject} canEdit={canEdit} onBack={() => {
+            setSelectedProject(null);
+            setShowGlobal(true);
+          }} />
         </motion.div>
       ) : (
         <motion.div key="picker" initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.25 }}>
-          <ProjectPickerView onSelect={setSelectedProject} />
+          <ProjectPickerView onSelect={(p) => {
+            setSelectedProject(p);
+            setShowGlobal(false);
+          }} />
         </motion.div>
       )}
     </AnimatePresence>
