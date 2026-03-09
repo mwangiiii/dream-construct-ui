@@ -65,6 +65,7 @@ import FixedAssetEquipmentDepreciationPage from "./pages/finance/Fixed_Asset_Equ
 import BalanceSheetPage from "./pages/finance/BalanceSheetPage.tsx";
 import StatementOfAccountPage from "./pages/finance/Statement_of_Account";
 import IncomeStatementPage from "./pages/finance/Income_Statement";
+import InvoicePage from "./pages/finance/InvoicePage.tsx";
 import TaxesPage from "./pages/finance/Taxes";
 import LoansPage from "./pages/finance/Loans";
 import AccountsPayablePage from "./pages/finance/AccountsPayablePage.tsx";
@@ -435,6 +436,9 @@ const App = () => {
 
             <Route path="/finance/statement-of-account"
               element={<FinanceGuard><StatementOfAccountPage /></FinanceGuard>} />
+
+            <Route path="/finance/invoices"
+              element={<FinanceGuard><InvoicePage /></FinanceGuard>} />
 
             <Route path="/finance/income-statement"
               element={<FinanceGuard><IncomeStatementPage /></FinanceGuard>} />

@@ -63,6 +63,7 @@ const financeRoutes = [
       { label: "Work in Progress",     short: "WIP",  path: "/finance/work-in-progress",                 icon: HardHat             },
       { label: "Change Orders",        short: "CO",   path: "/finance/change-orders-tracking",           icon: GitPullRequestArrow },
       { label: "Inventory",            short: "INV",  path: "/finance/inventory",                        icon: Package             },
+      {label: "invoices",              short: "INV",  path: "/finance/invoices",                         icon: Receipt             },
     ],
   },
   {

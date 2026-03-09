@@ -208,29 +208,35 @@ const makeEmpty = (projectId: string | null): ARFormData => ({
   notes:             null,
 });
 
-// ─── AUDIT HELPER ─────────────────────────────────────────────────────────────
-async function writeAudit(params: {
-  table_name: string;
-  record_id: string | null;
-  action: "INSERT" | "UPDATE" | "DELETE";
-  old_data?: Record<string, unknown> | null;
-  new_data?: Record<string, unknown> | null;
-}) {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("audit_logs").insert([{
-      table_name: params.table_name,
-      record_id:  params.record_id,
-      action:     params.action,
-      old_data:   params.old_data  ?? null,
-      new_data:   params.new_data  ?? null,
-      changed_by: user?.id         ?? null,
-      changed_at: new Date().toISOString(),
-    }]);
-  } catch {
-    // Audit failures must never block the main operation
-    console.warn("[audit] failed to write audit log", params);
-  }
+// ─── EDGE FUNCTION API ────────────────────────────────────────────────────────
+// ALL mutations go through the Edge Function at /functions/v1/accounts-receivable.
+// The Edge Function uses the service_role key to write to audit_logs, which
+// guarantees audit records are always persisted regardless of client-side RLS.
+// Reads (SELECT) are performed directly from the browser via the Supabase JS client.
+
+// Derive the project URL from the already-initialised supabase client so
+// process.env is never referenced at browser runtime.
+const SUPABASE_PROJECT_URL: string =
+  (supabase as unknown as { supabaseUrl?: string }).supabaseUrl ?? "";
+const EDGE_BASE = `${SUPABASE_PROJECT_URL}/functions/v1/accounts-receivable`;
+
+async function edgeRequest(
+  method: "POST" | "PATCH" | "DELETE",
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not authenticated. Please sign in.");
+  const res = await fetch(EDGE_BASE, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status})`);
+  return json;
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -239,6 +245,7 @@ function throwSb(error: { message?: string } | null, ctx: string): never {
 }
 
 const api = {
+  // ── Reads: direct Supabase JS (SELECT only, covered by RLS) ────────────────
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
@@ -267,58 +274,21 @@ const api = {
     return (data ?? []) as AccountsReceivable[];
   },
 
+  // ── Writes: all go through Edge Function → service_role → audit guaranteed ─
   async create(body: ARFormData): Promise<AccountsReceivable> {
-    const clean = stripGenerated(body);
-    const { data, error } = await supabase
-      .from("accounts_receivable")
-      .insert([clean])
-      .select("*")
-      .single();
-    if (error) throwSb(error, "create");
-    const row = data as AccountsReceivable;
-    await writeAudit({
-      table_name: "accounts_receivable",
-      record_id:  row.id,
-      action:     "INSERT",
-      old_data:   null,
-      new_data:   row as unknown as Record<string, unknown>,
-    });
-    return row;
+    const json = await edgeRequest("POST", { action: "create", payload: body });
+    return json.data as AccountsReceivable;
   },
 
-  async update(id: string, body: ARFormData, oldRow: AccountsReceivable): Promise<AccountsReceivable> {
-    const clean = stripGenerated(body);
-    const { data, error } = await supabase
-      .from("accounts_receivable")
-      .update({ ...clean, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select("*")
-      .single();
-    if (error) throwSb(error, "update");
-    const row = data as AccountsReceivable;
-    await writeAudit({
-      table_name: "accounts_receivable",
-      record_id:  id,
-      action:     "UPDATE",
-      old_data:   oldRow as unknown as Record<string, unknown>,
-      new_data:   row    as unknown as Record<string, unknown>,
-    });
-    return row;
+  async update(id: string, body: ARFormData, _oldRow: AccountsReceivable): Promise<AccountsReceivable> {
+    // oldRow is fetched server-side in the Edge Function for audit accuracy
+    const json = await edgeRequest("PATCH", { action: "update", id, payload: body });
+    return json.data as AccountsReceivable;
   },
 
   async remove(row: AccountsReceivable): Promise<void> {
-    const { error } = await supabase
-      .from("accounts_receivable")
-      .delete()
-      .eq("id", row.id);
-    if (error) throwSb(error, "delete");
-    await writeAudit({
-      table_name: "accounts_receivable",
-      record_id:  row.id,
-      action:     "DELETE",
-      old_data:   row as unknown as Record<string, unknown>,
-      new_data:   null,
-    });
+    // Full row is fetched server-side before deletion for audit old_data
+    await edgeRequest("DELETE", { action: "delete", id: row.id });
   },
 };
 

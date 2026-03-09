@@ -5,6 +5,16 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 
+// ─── DATABASE MIGRATION NOTE ──────────────────────────────────────────────────
+// To support global (unlinked) entries, run this once in your Supabase SQL editor:
+//
+//   ALTER TABLE statement_of_account
+//     ALTER COLUMN project_id DROP NOT NULL;
+//
+// This allows statement entries that belong to the firm as a whole rather
+// than any specific project (e.g. firm-wide retainers, corporate adjustments).
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface Project {
   id: string;
@@ -34,7 +44,7 @@ type EntryType =
 
 interface StatementEntry {
   id: number;
-  project_id: string;
+  project_id: string | null;
   entry_date: string;
   due_date: string | null;
   description: string;
@@ -56,11 +66,17 @@ interface Props {
   projectId?: string;
   canEdit?: boolean;
 }
-
+  
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCY = "KES";
 
-const ENTRY_STATUSES: EntryStatus[] = ["Outstanding", "Paid", "Overdue", "Partial", "Void"];
+const ENTRY_STATUSES: EntryStatus[] = [
+  "Outstanding",
+  "Paid",
+  "Overdue",
+  "Partial",
+  "Void",
+];
 const ENTRY_TYPES: EntryType[] = [
   "Invoice",
   "Payment",
@@ -70,61 +86,85 @@ const ENTRY_TYPES: EntryType[] = [
   "Adjustment",
 ];
 
-const STATUS_STYLE: Record<
-  EntryStatus,
-  { accent: string; badge: string; dot: string; row: string }
-> = {
+const STATUS_STYLE: Record<EntryStatus, { accent: string; badge: string; dot: string; row: string }> = {
   Outstanding: {
     accent: "text-amber-400",
     badge: "bg-amber-500/10 border-amber-500/30 text-amber-300",
     dot: "bg-amber-400",
-    row: "hover:bg-amber-950/20",
+    row: "hover:bg-amber-950/20"
   },
   Paid: {
     accent: "text-emerald-400",
     badge: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
     dot: "bg-emerald-400",
-    row: "hover:bg-emerald-950/20",
+    row: "hover:bg-emerald-950/20"
   },
   Overdue: {
     accent: "text-rose-400",
     badge: "bg-rose-500/10 border-rose-500/30 text-rose-300",
     dot: "bg-rose-400",
-    row: "hover:bg-rose-950/20",
+    row: "hover:bg-rose-950/20"
   },
   Partial: {
     accent: "text-sky-400",
     badge: "bg-sky-500/10 border-sky-500/30 text-sky-300",
     dot: "bg-sky-400",
-    row: "hover:bg-sky-950/20",
+    row: "hover:bg-sky-950/20"
   },
   Void: {
     accent: "text-gray-400",
     badge: "bg-gray-500/10 border-gray-500/30 text-gray-400",
     dot: "bg-gray-500",
-    row: "hover:bg-gray-950/20",
-  },
+    row: "hover:bg-gray-950/20"
+  }
 };
 
 const TYPE_STYLE: Record<EntryType, { color: string; bg: string }> = {
-  Invoice:     { color: "text-violet-300",  bg: "bg-violet-500/10 border-violet-500/25" },
-  Payment:     { color: "text-emerald-300", bg: "bg-emerald-500/10 border-emerald-500/25" },
-  "Credit Note": { color: "text-sky-300",   bg: "bg-sky-500/10 border-sky-500/25" },
-  "Debit Note":  { color: "text-orange-300", bg: "bg-orange-500/10 border-orange-500/25" },
-  Retainer:    { color: "text-pink-300",    bg: "bg-pink-500/10 border-pink-500/25" },
-  Adjustment:  { color: "text-gray-300",    bg: "bg-gray-500/10 border-gray-500/25" },
+  Invoice: {
+    color: "text-violet-300",
+    bg: "bg-violet-500/10 border-violet-500/25",
+  },
+  Payment: {
+    color: "text-emerald-300",
+    bg: "bg-emerald-500/10 border-emerald-500/25",
+  },
+  "Credit Note": {
+    color: "text-sky-300",
+    bg: "bg-sky-500/10 border-sky-500/25",
+  },
+  "Debit Note": {
+    color: "text-orange-300",
+    bg: "bg-orange-500/10 border-orange-500/25",
+  },
+  Retainer: {
+    color: "text-pink-300",
+    bg: "bg-pink-500/10 border-pink-500/25",
+  },
+  Adjustment: {
+    color: "text-gray-300",
+    bg: "bg-gray-500/10 border-gray-500/25",
+  },
 };
 
 const PROJECT_STATUS_STYLE: Record<string, string> = {
-  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  planning: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  active: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  on_hold: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
   completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
+// ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
+const inputCls =
+  "w-full px-3 py-2.5 rounded-xl text-sm font-normal tracking-normal leading-snug " +
+  "bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground " +
+  "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
+
+const readonlyCls =
+  "w-full px-3 py-2.5 rounded-xl text-sm font-normal tracking-normal leading-snug " +
+  "bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none";
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-/** Null/NaN-safe KES formatter */
 const fmt = (n: number | null | undefined) => {
   const safe = typeof n === "number" && isFinite(n) ? n : 0;
   return new Intl.NumberFormat("en-KE", {
@@ -135,16 +175,6 @@ const fmt = (n: number | null | undefined) => {
   }).format(safe);
 };
 
-/** Compact formatter e.g. 1.2M */
-const fmtC = (n: number | null | undefined) => {
-  const safe = typeof n === "number" && isFinite(n) ? n : 0;
-  return new Intl.NumberFormat("en-KE", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(safe);
-};
-
-/** Null-safe number coercion */
 const n0 = (v: number | null | undefined): number =>
   typeof v === "number" && isFinite(v) ? v : 0;
 
@@ -162,17 +192,17 @@ const isOverdue = (due: string | null, status: EntryStatus) => {
   return new Date(due + "T00:00:00") < new Date();
 };
 
-/** Sanitize a DB row — coerce nulls, recompute running_balance if needed */
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
 function sanitizeEntry(raw: StatementEntry): StatementEntry {
   return {
     ...raw,
-    charges:         n0(raw.charges),
-    credits:         n0(raw.credits),
+    charges: n0(raw.charges),
+    credits: n0(raw.credits),
     running_balance: n0(raw.running_balance),
   };
 }
 
-/** Recompute running balances for an ordered list of entries */
 function recomputeBalances(entries: StatementEntry[]): StatementEntry[] {
   let balance = 0;
   return entries.map((e) => {
@@ -181,29 +211,73 @@ function recomputeBalances(entries: StatementEntry[]): StatementEntry[] {
   });
 }
 
-const makeEmptyForm = (projectId: string): EntryFormData => ({
-  project_id:  projectId,
-  entry_date:  new Date().toISOString().slice(0, 10),
-  due_date:    null,
+const makeEmptyForm = (projectId: string | null = null): EntryFormData => ({
+  project_id: projectId,
+  entry_date: todayISO(),
+  due_date: null,
   description: "",
-  entry_type:  "Invoice",
+  entry_type: "Invoice",
   account_code: null,
   reference_no: null,
-  charges:     0,
-  credits:     0,
-  status:      "Outstanding",
-  notes:       null,
+  charges: 0,
+  credits: 0,
+  status: "Outstanding",
+  notes: null,
 });
+
+// ─── AUDIT LOGGING ────────────────────────────────────────────────────────────
+async function writeAuditLog(
+  action: "INSERT" | "UPDATE" | "DELETE",
+  recordId: number | null,
+  oldData: object | null,
+  newData: object | null
+) {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await supabase.from("audit_logs").insert([
+      {
+        table_name: "statement_of_account",
+        record_id: recordId ? String(recordId) : null,
+        action,
+        old_data: oldData,
+        new_data: newData,
+        changed_by: user?.id ?? null,
+      },
+    ]);
+  } catch {
+    // Audit failures are non-blocking — silently ignore
+  }
+}
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 function toWritable(form: EntryFormData): EntryFormData {
   const {
-    project_id, entry_date, due_date, description, entry_type,
-    account_code, reference_no, charges, credits, status, notes,
+    project_id,
+    entry_date,
+    due_date,
+    description,
+    entry_type,
+    account_code,
+    reference_no,
+    charges,
+    credits,
+    status,
+    notes,
   } = form;
   return {
-    project_id, entry_date, due_date, description, entry_type,
-    account_code, reference_no, charges, credits, status, notes,
+    project_id,
+    entry_date,
+    due_date,
+    description,
+    entry_type,
+    account_code,
+    reference_no,
+    charges,
+    credits,
+    status,
+    notes,
   };
 }
 
@@ -230,17 +304,72 @@ const api = {
     return recomputeBalances(rows);
   },
 
-  async create(form: EntryFormData): Promise<StatementEntry> {
+  async listAll(): Promise<StatementEntry[]> {
     const { data, error } = await supabase
       .from("statement_of_account")
-      .insert([toWritable(form)])
+      .select("*")
+      .order("entry_date", { ascending: true });
+    if (error) throw new Error(error.message);
+    const rows = ((data ?? []) as StatementEntry[]).map(sanitizeEntry);
+    return recomputeBalances(rows);
+  },
+
+  async listFirmWide(): Promise<StatementEntry[]> {
+    const { data, error } = await supabase
+      .from("statement_of_account")
+      .select("*")
+      .is("project_id", null)
+      .order("entry_date", { ascending: true });
+    if (error) throw new Error(error.message);
+    const rows = ((data ?? []) as StatementEntry[]).map(sanitizeEntry);
+    return recomputeBalances(rows);
+  },
+
+  async create(form: EntryFormData): Promise<StatementEntry> {
+    const payload = toWritable(form);
+
+    // Strip project_id for firm-wide entries
+    if (!payload.project_id) {
+      const { project_id: _omit, ...rest } = payload;
+      void _omit;
+      const { data, error } = await supabase
+        .from("statement_of_account")
+        .insert([rest])
+        .select()
+        .single();
+      if (error) {
+        if (error.message.includes("not-null") || error.code === "23502") {
+          throw new Error(
+            "Your database requires a project. Run:\n\n" +
+              "ALTER TABLE statement_of_account ALTER COLUMN project_id DROP NOT NULL;"
+          );
+        }
+        throw new Error(error.message);
+      }
+      const row = sanitizeEntry(data as StatementEntry);
+      await writeAuditLog("INSERT", row.id, null, row);
+      return row;
+    }
+
+    const { data, error } = await supabase
+      .from("statement_of_account")
+      .insert([payload])
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return sanitizeEntry(data as StatementEntry);
+    const row = sanitizeEntry(data as StatementEntry);
+    await writeAuditLog("INSERT", row.id, null, row);
+    return row;
   },
 
   async update(id: number, form: EntryFormData): Promise<StatementEntry> {
+    // Fetch old for audit
+    const { data: oldRaw } = await supabase
+      .from("statement_of_account")
+      .select("*")
+      .eq("id", id)
+      .single();
+
     const { data, error } = await supabase
       .from("statement_of_account")
       .update(toWritable(form))
@@ -248,23 +377,31 @@ const api = {
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return sanitizeEntry(data as StatementEntry);
+    const row = sanitizeEntry(data as StatementEntry);
+    await writeAuditLog("UPDATE", id, oldRaw ?? null, row);
+    return row;
   },
 
   async remove(id: number): Promise<void> {
+    // Fetch old for audit
+    const { data: oldRaw } = await supabase
+      .from("statement_of_account")
+      .select("*")
+      .eq("id", id)
+      .single();
+
     const { error } = await supabase
       .from("statement_of_account")
       .delete()
       .eq("id", id);
     if (error) throw new Error(error.message);
+    await writeAuditLog("DELETE", id, oldRaw ?? null, null);
   },
 };
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function useToast() {
-  const [toasts, setToasts] = useState<
-    { id: number; msg: string; type: "success" | "error" }[]
-  >([]);
+  const [toasts, setToasts] = useState<{ id: number; msg: string; type: "success" | "error" }[]>([]);
   const push = useCallback(
     (msg: string, type: "success" | "error" = "success") => {
       const id = Date.now();
@@ -276,14 +413,89 @@ function useToast() {
   return { toasts, push };
 }
 
-// ─── SHARED UI ────────────────────────────────────────────────────────────────
-const inputCls =
-  "w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all";
+// ─── TOAST RENDERER ───────────────────────────────────────────────────────────
+function ToastStack({
+  toasts,
+}: {
+  toasts: { id: number; msg: string; type: "success" | "error" }[];
+}) {
+  return (
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+      <AnimatePresence>
+        {toasts.map((t) => (
+          <motion.div
+            key={t.id}
+            initial={{ opacity: 0, x: 40 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 40 }}
+            className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-medium border backdrop-blur-xl shadow-lg max-w-sm ${
+              t.type === "success"
+                ? "bg-emerald-950/80 border-emerald-500/25 text-emerald-300"
+                : "bg-rose-950/80 border-rose-500/25 text-rose-300"
+            }`}
+          >
+            {t.msg}
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
 
-/**
- * Custom Select — fully themed dropdown that matches the dark page aesthetic.
- * Replaces all native <select> elements so browser system UI never bleeds in.
- */
+// ─── MIGRATION BANNER ─────────────────────────────────────────────────────────
+function MigrationBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"
+    >
+      <div className="flex items-start gap-3">
+        <svg
+          className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        </svg>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-amber-300 mb-1">
+            Database migration required for firm-wide entries
+          </p>
+          <p className="text-xs font-normal text-amber-200/70 mb-2">
+            Run this once in your Supabase SQL editor:
+          </p>
+          <code className="block bg-black/30 border border-amber-500/20 rounded-lg px-3 py-2 text-xs font-mono text-amber-200 mb-2">
+            ALTER TABLE statement_of_account ALTER COLUMN project_id DROP NOT
+            NULL;
+          </code>
+          <p className="text-xs font-normal text-amber-200/50">
+            This is safe — existing project-linked entries are unaffected.
+          </p>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="text-amber-400/60 hover:text-amber-300 transition-colors p-0.5 shrink-0"
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            viewBox="0 0 24 24"
+          >
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── CUSTOM SELECT ────────────────────────────────────────────────────────────
 function Select({
   value,
   onChange,
@@ -301,42 +513,43 @@ function Select({
   const ref = React.useRef<HTMLDivElement>(null);
   const selected = options.find((o) => o.value === value);
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Close on Escape
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
   return (
     <div ref={ref} className={`relative ${className}`}>
-      {/* Trigger */}
       <button
         type="button"
         onClick={() => setOpen((x) => !x)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground hover:bg-white/8 hover:border-white/20 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all"
+        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm font-normal bg-white/5 border border-white/10 text-foreground hover:bg-white/8 hover:border-white/20 focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all"
       >
         <span className={selected ? "text-foreground" : "text-muted-foreground"}>
           {selected?.label ?? placeholder ?? "Select…"}
         </span>
         <svg
           className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          viewBox="0 0 24 24"
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
-
-      {/* Dropdown panel */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -353,7 +566,10 @@ function Select({
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
                     className={`w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-sm text-left transition-colors ${
                       isActive
                         ? "bg-primary/15 text-primary font-semibold"
@@ -362,7 +578,13 @@ function Select({
                   >
                     <span>{opt.label}</span>
                     {isActive && (
-                      <svg className="w-3.5 h-3.5 flex-shrink-0 text-primary" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <svg
+                        className="w-3.5 h-3.5 flex-shrink-0 text-primary"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2.5}
+                        viewBox="0 0 24 24"
+                      >
                         <path d="M20 6 9 17l-5-5" />
                       </svg>
                     )}
@@ -377,6 +599,7 @@ function Select({
   );
 }
 
+// ─── FIELD ────────────────────────────────────────────────────────────────────
 function Field({
   label,
   children,
@@ -390,7 +613,7 @@ function Field({
 }) {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.12em]">
+      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
         {label}
       </label>
       {children}
@@ -403,6 +626,7 @@ function Field({
   );
 }
 
+// ─── SECTION LABEL ────────────────────────────────────────────────────────────
 function SectionLabel({
   label,
   dotColor,
@@ -416,7 +640,9 @@ function SectionLabel({
 }) {
   return (
     <div className="flex items-center gap-2 pt-3 pb-1">
-      <span className={`w-1.5 h-5 rounded-full ${dotColor} flex-shrink-0`} />
+      <span
+        className={`w-1.5 h-5 rounded-full ${dotColor} flex-shrink-0`}
+      />
       <div>
         <span
           className={`text-[10px] font-black uppercase tracking-[0.18em] ${textColor}`}
@@ -434,7 +660,7 @@ function SectionLabel({
   );
 }
 
-// ─── BALANCE INDICATOR ────────────────────────────────────────────────────────
+// ─── BALANCE BAR ──────────────────────────────────────────────────────────────
 function BalanceBar({
   totalCharges,
   totalCredits,
@@ -486,8 +712,6 @@ function BalanceBar({
           </p>
         )}
       </div>
-
-      {/* Visual bars */}
       <div className="px-5 py-4 space-y-3">
         <div>
           <div className="flex justify-between text-[10px] mb-1">
@@ -507,7 +731,9 @@ function BalanceBar({
         </div>
         <div>
           <div className="flex justify-between text-[10px] mb-1">
-            <span className="text-emerald-400 font-semibold">Total Credits</span>
+            <span className="text-emerald-400 font-semibold">
+              Total Credits
+            </span>
             <span className="font-mono font-bold text-emerald-400">
               {fmt(totalCredits)}
             </span>
@@ -532,11 +758,15 @@ function EntryModal({
   onSave,
   onClose,
   loading,
+  projects = [],
+  showProjectSelector = false,
 }: {
   initial: EntryFormData & { id?: number };
   onSave: (d: EntryFormData) => void;
   onClose: () => void;
   loading: boolean;
+  projects?: Project[];
+  showProjectSelector?: boolean;
 }) {
   const [form, setForm] = useState<EntryFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
@@ -544,17 +774,28 @@ function EntryModal({
   const set = <K extends keyof EntryFormData>(k: K, v: EntryFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  // Auto-set status to Paid when full credit matches charges
+  // Auto-set status
   useEffect(() => {
-    if (form.credits > 0 && form.credits >= form.charges && form.status !== "Void") {
+    if (
+      form.credits > 0 &&
+      form.credits >= form.charges &&
+      form.status !== "Void"
+    ) {
       set("status", "Paid");
-    } else if (form.credits > 0 && form.credits < form.charges && form.status === "Paid") {
+    } else if (
+      form.credits > 0 &&
+      form.credits < form.charges &&
+      form.status === "Paid"
+    ) {
       set("status", "Partial");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.charges, form.credits]);
 
   const netAmount = n0(form.charges) - n0(form.credits);
+  const isFirmWide =
+    showProjectSelector &&
+    (form.project_id === null || form.project_id === "");
   const isValid =
     form.description.trim() !== "" &&
     (n0(form.charges) > 0 || n0(form.credits) > 0);
@@ -594,7 +835,9 @@ function EntryModal({
                 {isEdit ? "Edit Statement Entry" : "New Statement Entry"}
               </h2>
               <p className="text-[10px] text-muted-foreground">
-                Running balance recalculated automatically
+                {isFirmWide
+                  ? "This entry will be posted to the firm-wide statement (not linked to any project)."
+                  : "Running balance recalculated automatically"}
               </p>
             </div>
           </div>
@@ -616,7 +859,41 @@ function EntryModal({
 
         {/* Body */}
         <div className="px-6 py-5 max-h-[72vh] overflow-y-auto space-y-4">
-          {/* Entry details */}
+          {/* Linked Project — only in global modal */}
+          {showProjectSelector && (
+            <>
+              <SectionLabel
+                label="Scope"
+                dotColor="bg-primary/70"
+                textColor="text-primary"
+              />
+              <Field label="Linked Project">
+                <Select
+                  value={form.project_id ?? ""}
+                  onChange={(v) =>
+                    set("project_id", v === "" ? null : (v as string))
+                  }
+                  options={[
+                    {
+                      value: "",
+                      label: "— Firm-wide entry (no project) —",
+                    },
+                    ...projects.map((p) => ({
+                      value: p.id,
+                      label: `${p.project_number} · ${p.title}`,
+                    })),
+                  ]}
+                />
+                <span className="text-[9px] text-muted-foreground/70 mt-1 leading-relaxed">
+                  {isFirmWide
+                    ? "This entry will appear only in the consolidated firm statement."
+                    : "This entry will appear in both the project statement and the consolidated view."}
+                </span>
+              </Field>
+            </>
+          )}
+
+          {/* Entry Details */}
           <SectionLabel
             label="Entry Details"
             dotColor="bg-violet-400"
@@ -748,7 +1025,9 @@ function EntryModal({
             <Field label="Account Code">
               <input
                 value={form.account_code ?? ""}
-                onChange={(e) => set("account_code", e.target.value || null)}
+                onChange={(e) =>
+                  set("account_code", e.target.value || null)
+                }
                 placeholder="e.g. 1002"
                 className={inputCls}
               />
@@ -756,7 +1035,9 @@ function EntryModal({
             <Field label="Reference No.">
               <input
                 value={form.reference_no ?? ""}
-                onChange={(e) => set("reference_no", e.target.value || null)}
+                onChange={(e) =>
+                  set("reference_no", e.target.value || null)
+                }
                 placeholder="e.g. INV-001 / REC-055"
                 className={inputCls}
               />
@@ -778,7 +1059,7 @@ function EntryModal({
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/3">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+            className="px-4 py-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
           >
             Cancel
           </button>
@@ -844,7 +1125,7 @@ function DeleteConfirm({
           </div>
           <div>
             <h3 className="font-bold text-foreground mb-1">Delete Entry</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
+            <p className="text-sm font-normal text-muted-foreground leading-relaxed">
               Permanently remove{" "}
               <span className="text-foreground font-semibold">
                 {entry.description}
@@ -856,7 +1137,7 @@ function DeleteConfirm({
         <div className="flex gap-3 justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
+            className="px-4 py-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5"
           >
             Cancel
           </button>
@@ -921,7 +1202,6 @@ function ProjectCard({
           </div>
         )}
       </div>
-
       <h3 className="font-bold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors line-clamp-1">
         {project.title}
       </h3>
@@ -930,7 +1210,6 @@ function ProjectCard({
           {project.description}
         </p>
       )}
-
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
         {project.site_city && (
           <span className="flex items-center gap-1">
@@ -962,7 +1241,6 @@ function ProjectCard({
           </span>
         )}
       </div>
-
       {project.progress_percent != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
@@ -983,11 +1261,890 @@ function ProjectCard({
           </div>
         </div>
       )}
-
       <div className="flex items-center gap-1 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity font-semibold">
         Open Statement of Account →
       </div>
     </motion.button>
+  );
+}
+
+// ─── STATEMENT ROW ────────────────────────────────────────────────────────────
+function StatementRow({
+  entry,
+  canEdit,
+  onEdit,
+  onDelete,
+  isOverdueRow,
+  showProjectCol = false,
+  projects = [],
+}: {
+  entry: StatementEntry;
+  canEdit: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  isOverdueRow: boolean;
+  showProjectCol?: boolean;
+  projects?: Project[];
+}) {
+  const s = STATUS_STYLE[entry.status];
+  const t = TYPE_STYLE[entry.entry_type];
+  const [expanded, setExpanded] = useState(false);
+  const balance = n0(entry.running_balance);
+
+  const projectLabel = (pid: string | null) => {
+    if (!pid)
+      return (
+        <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">
+          Firm-wide
+        </span>
+      );
+    const p = projects.find((pr) => pr.id === pid);
+    return p ? (
+      <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
+        {p.project_number}
+      </span>
+    ) : (
+      <span className="italic font-normal text-muted-foreground/60 text-xs">
+        Unknown
+      </span>
+    );
+  };
+
+  const colSpanCount = showProjectCol
+    ? canEdit
+      ? 11
+      : 10
+    : canEdit
+    ? 10
+    : 9;
+
+  return (
+    <>
+      <motion.tr
+        className={`border-b border-white/8 cursor-pointer transition-colors ${s.row} ${isOverdueRow ? "bg-rose-950/10" : ""}`}
+        onClick={() => setExpanded((x) => !x)}
+      >
+        <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+          {fmtDate(entry.entry_date)}
+        </td>
+        <td className="px-4 py-3.5">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground line-clamp-1">
+              {entry.description}
+            </span>
+            {entry.reference_no && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {entry.reference_no}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3.5 hidden sm:table-cell">
+          <span
+            className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${t.bg} ${t.color}`}
+          >
+            {entry.entry_type}
+          </span>
+        </td>
+        <td className="px-4 py-3.5 hidden md:table-cell">
+          {entry.account_code ? (
+            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
+              {entry.account_code}
+            </span>
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
+        </td>
+        {showProjectCol && (
+          <td className="px-4 py-3.5 whitespace-nowrap hidden md:table-cell">
+            {projectLabel(entry.project_id)}
+          </td>
+        )}
+        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold text-right">
+          {n0(entry.charges) > 0 ? (
+            <span className="text-rose-400">{fmt(entry.charges)}</span>
+          ) : (
+            <span className="text-muted-foreground/40">—</span>
+          )}
+        </td>
+        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold text-right">
+          {n0(entry.credits) > 0 ? (
+            <span className="text-emerald-400">{fmt(entry.credits)}</span>
+          ) : (
+            <span className="text-muted-foreground/40">—</span>
+          )}
+        </td>
+        <td className="px-4 py-3.5 tabular-nums font-black text-sm text-right whitespace-nowrap">
+          <span
+            className={
+              balance > 0
+                ? "text-rose-400"
+                : balance < 0
+                ? "text-emerald-400"
+                : "text-muted-foreground"
+            }
+          >
+            {fmt(balance)}
+          </span>
+        </td>
+        <td className="px-4 py-3.5 text-xs hidden lg:table-cell whitespace-nowrap">
+          {isOverdueRow ? (
+            <span className="text-rose-400 font-semibold">
+              {fmtDate(entry.due_date)} ⚠
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{fmtDate(entry.due_date)}</span>
+          )}
+        </td>
+        <td className="px-4 py-3.5">
+          <Badge className={`text-[9px] font-bold ${s.badge}`}>
+            {entry.status}
+          </Badge>
+        </td>
+        {canEdit && (
+          <td className="px-4 py-3.5">
+            <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={onEdit}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium"
+              >
+                Edit
+              </button>
+              <button
+                onClick={onDelete}
+                className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium"
+              >
+                Del
+              </button>
+            </div>
+          </td>
+        )}
+      </motion.tr>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.tr
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="bg-white/2"
+          >
+            <td colSpan={colSpanCount} className="px-6 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px]">
+                {[
+                  { label: "Entry Type", value: entry.entry_type },
+                  { label: "Entry Date", value: fmtDate(entry.entry_date) },
+                  { label: "Due Date", value: fmtDate(entry.due_date) },
+                  { label: "Account Code", value: entry.account_code || "—" },
+                  { label: "Reference No.", value: entry.reference_no || "—" },
+                  { label: "Charges (DR)", value: fmt(entry.charges) },
+                  { label: "Credits (CR)", value: fmt(entry.credits) },
+                  {
+                    label: "Net Movement",
+                    value: fmt(n0(entry.charges) - n0(entry.credits)),
+                  },
+                  {
+                    label: "Running Balance",
+                    value: fmt(entry.running_balance),
+                  },
+                  ...(showProjectCol
+                    ? [
+                        {
+                          label: "Scope",
+                          value: entry.project_id
+                            ? (projects.find((p) => p.id === entry.project_id)
+                                ?.project_number ?? "Unknown")
+                            : "Firm-wide",
+                        },
+                      ]
+                    : []),
+                  ...(entry.notes ? [{ label: "Notes", value: entry.notes }] : []),
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="bg-white/4 rounded-xl p-3 border border-white/8"
+                  >
+                    <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">
+                      {item.label}
+                    </p>
+                    <p className="font-mono font-semibold text-foreground text-[11px]">
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </td>
+          </motion.tr>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+// ─── STATEMENT TABLE (shared between project + global views) ──────────────────
+function StatementTable({
+  entries,
+  canEdit,
+  onEdit,
+  onDelete,
+  showProjectCol = false,
+  projects = [],
+}: {
+  entries: StatementEntry[];
+  canEdit: boolean;
+  onEdit: (e: StatementEntry) => void;
+  onDelete: (e: StatementEntry) => void;
+  showProjectCol?: boolean;
+  projects?: Project[];
+}) {
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<EntryStatus | "All">("All");
+  const [filterType, setFilterType] = useState<EntryType | "All">("All");
+
+  const filtered = useMemo(
+    () =>
+      entries.filter((e) => {
+        const statusMatch = filterStatus === "All" || e.status === filterStatus;
+        const typeMatch = filterType === "All" || e.entry_type === filterType;
+        const searchMatch =
+          !search ||
+          e.description.toLowerCase().includes(search.toLowerCase()) ||
+          (e.reference_no ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (e.account_code ?? "").toLowerCase().includes(search.toLowerCase());
+        return statusMatch && typeMatch && searchMatch;
+      }),
+    [entries, filterStatus, filterType, search]
+  );
+
+  const TABLE_HEADERS = [
+    "Date",
+    "Description",
+    "Type",
+    "Acc. Code",
+    ...(showProjectCol ? ["Scope"] : []),
+    "Charges (DR)",
+    "Credits (CR)",
+    "Balance",
+    "Due Date",
+    "Status",
+    ...(canEdit ? ["Actions"] : []),
+  ];
+
+  const HEADER_ALIGN = [
+    "text-left",
+    "text-left",
+    "text-left hidden sm:table-cell",
+    "text-left hidden md:table-cell",
+    ...(showProjectCol ? ["text-left hidden md:table-cell"] : []),
+    "text-right",
+    "text-right",
+    "text-right",
+    "text-left hidden lg:table-cell",
+    "text-left",
+    ...(canEdit ? ["text-left"] : []),
+  ];
+
+  return (
+    <>
+      {/* Toolbar */}
+      <div className="px-6 pt-2 pb-4 flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            viewBox="0 0 24 24"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search description, reference or account code…"
+            className={inputCls + " pl-9"}
+          />
+        </div>
+        <Select
+          value={filterStatus}
+          onChange={(v) => setFilterStatus(v as EntryStatus | "All")}
+          options={[
+            { value: "All", label: "All Statuses" },
+            ...ENTRY_STATUSES.map((s) => ({ value: s, label: s })),
+          ]}
+          className="w-full sm:w-44"
+        />
+        <Select
+          value={filterType}
+          onChange={(v) => setFilterType(v as EntryType | "All")}
+          options={[
+            { value: "All", label: "All Types" },
+            ...ENTRY_TYPES.map((t) => ({ value: t, label: t })),
+          ]}
+          className="w-full sm:w-44"
+        />
+        <div className="inline-flex items-center px-4 py-2.5 text-xs font-normal text-muted-foreground border border-white/10 rounded-xl bg-white/5 whitespace-nowrap tabular-nums">
+          {filtered.length} / {entries.length} shown
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
+          <svg
+            className="w-10 h-10 opacity-30"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
+          </svg>
+          <p className="text-sm font-normal">No matching entries found.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[800px]">
+            <thead>
+              <tr className="border-b border-white/8 bg-white/3">
+                {TABLE_HEADERS.map((h, i) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap ${HEADER_ALIGN[i]}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((entry) => (
+                <StatementRow
+                  key={entry.id}
+                  entry={entry}
+                  canEdit={canEdit}
+                  onEdit={() => onEdit(entry)}
+                  onDelete={() => onDelete(entry)}
+                  isOverdueRow={isOverdue(entry.due_date, entry.status)}
+                  showProjectCol={showProjectCol}
+                  projects={projects}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── SUMMARY FOOTER ───────────────────────────────────────────────────────────
+function SummaryFooter({
+  entries,
+  shownCount,
+}: {
+  entries: StatementEntry[];
+  shownCount?: number;
+}) {
+  const totalCharges = entries.reduce((a, e) => a + n0(e.charges), 0);
+  const totalCredits = entries.reduce((a, e) => a + n0(e.credits), 0);
+  const closingBalance =
+    entries.length > 0 ? n0(entries[entries.length - 1].running_balance) : 0;
+
+  return (
+    <div className="border-t border-white/12 bg-white/3">
+      <div className="px-5 py-4">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+            Summary — {entries.length} entries
+          </span>
+          {shownCount !== undefined && (
+            <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] font-bold ml-auto">
+              {shownCount} shown
+            </Badge>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            {
+              label: "Total Charges",
+              value: totalCharges,
+              color: "text-rose-400",
+              sub: "DR",
+            },
+            {
+              label: "Total Credits",
+              value: totalCredits,
+              color: "text-emerald-400",
+              sub: "CR",
+            },
+            {
+              label: "Net Movement",
+              value: totalCharges - totalCredits,
+              color:
+                totalCharges - totalCredits > 0
+                  ? "text-rose-400"
+                  : "text-emerald-400",
+              sub: totalCharges - totalCredits > 0 ? "Owed" : "Credit",
+            },
+            {
+              label: "Closing Balance",
+              value: closingBalance,
+              color:
+                closingBalance > 0
+                  ? "text-rose-400"
+                  : closingBalance < 0
+                  ? "text-emerald-400"
+                  : "text-muted-foreground",
+              sub:
+                closingBalance > 0
+                  ? "Outstanding"
+                  : closingBalance < 0
+                  ? "Credit"
+                  : "Settled",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="bg-white/4 rounded-xl p-3 border border-white/8"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
+                  {item.label}
+                </p>
+                <span className="text-[9px] font-bold text-muted-foreground/60">
+                  {item.sub}
+                </span>
+              </div>
+              <p
+                className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}
+              >
+                {fmt(item.value)}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GLOBAL STATEMENT VIEW ────────────────────────────────────────────────────
+type GlobalTab = "consolidated" | "firm-wide";
+
+function GlobalStatementView({
+  canEdit,
+  projects,
+}: {
+  canEdit: boolean;
+  projects: Project[];
+}) {
+  const [allEntries, setAllEntries] = useState<StatementEntry[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<StatementEntry | null>(null);
+  const [deleting, setDeleting] = useState<StatementEntry | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<GlobalTab>("consolidated");
+  const [showMigration, setShowMigration] = useState(false);
+
+  const { toasts, push } = useToast();
+
+  const fetchEntries = useCallback(async () => {
+    setFetching(true);
+    setAllEntries([]);
+    try {
+      setAllEntries(await api.listAll());
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
+    } finally {
+      setFetching(false);
+    }
+  }, [push]);
+
+  useEffect(() => {
+    fetchEntries();
+  }, [fetchEntries]);
+
+  const refreshBalances = useCallback((updated: StatementEntry[]) => {
+    const sorted = [...updated].sort(
+      (a, b) =>
+        new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
+    );
+    setAllEntries(recomputeBalances(sorted));
+  }, []);
+
+  const handleCreate = async (form: EntryFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      refreshBalances([...allEntries, row]);
+      push("Entry added successfully.");
+      setShowModal(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to add entry.";
+      push(msg, "error");
+      if (
+        msg.includes("not-null") ||
+        msg.includes("migration") ||
+        msg.includes("project_id")
+      ) {
+        setShowMigration(true);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdate = async (form: EntryFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const row = await api.update(editing.id, form);
+      const next = allEntries.map((e) => (e.id === editing.id ? row : e));
+      refreshBalances(next);
+      push("Entry updated.");
+      setEditing(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update entry.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      const next = allEntries.filter((e) => e.id !== deleting.id);
+      refreshBalances(next);
+      push("Entry deleted.");
+      setDeleting(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete entry.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const displayEntries = useMemo(
+    () =>
+      activeTab === "firm-wide"
+        ? allEntries.filter((e) => e.project_id === null)
+        : allEntries,
+    [allEntries, activeTab]
+  );
+
+  const firmWideCount = allEntries.filter((e) => e.project_id === null).length;
+  const consolidatedCount = allEntries.length;
+
+  const totalCharges = displayEntries.reduce((a, e) => a + n0(e.charges), 0);
+  const totalCredits = displayEntries.reduce((a, e) => a + n0(e.credits), 0);
+  const closingBalance =
+    displayEntries.length > 0
+      ? n0(displayEntries[displayEntries.length - 1].running_balance)
+      : 0;
+  const overdueCount = displayEntries.filter((e) =>
+    isOverdue(e.due_date, e.status)
+  ).length;
+
+  const tabs: {
+    key: GlobalTab;
+    label: string;
+    count: number;
+    description: string;
+  }[] = [
+    {
+      key: "consolidated",
+      label: "Consolidated",
+      count: consolidatedCount,
+      description:
+        "All entries across every project + firm-wide accounts",
+    },
+    {
+      key: "firm-wide",
+      label: "Firm-wide Only",
+      count: firmWideCount,
+      description: "Entries not linked to any specific project",
+    },
+  ];
+
+  return (
+    <div className="container mx-auto px-4 pb-20">
+      <ToastStack toasts={toasts} />
+
+      <AnimatePresence>
+        {showModal && (
+          <EntryModal
+            initial={makeEmptyForm(null)}
+            onSave={handleCreate}
+            onClose={() => setShowModal(false)}
+            loading={saving}
+            projects={projects}
+            showProjectSelector
+          />
+        )}
+        {editing && !showModal && (
+          <EntryModal
+            initial={{ ...editing }}
+            onSave={handleUpdate}
+            onClose={() => setEditing(null)}
+            loading={saving}
+            projects={projects}
+            showProjectSelector
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm
+            entry={deleting}
+            onConfirm={handleDelete}
+            onClose={() => setDeleting(null)}
+            loading={saving}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Section Heading */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mb-6"
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground px-2">
+            Firm Overview
+          </span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+        <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
+          Consolidated{" "}
+          <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+            Statement of Account
+          </span>
+        </h2>
+        <p className="text-center text-sm font-normal text-muted-foreground max-w-xl mx-auto">
+          Auto-generated from all posted entries across every project and
+          firm-wide accounts. Add a new entry to update any section of the
+          statement.
+        </p>
+      </motion.div>
+
+      <AnimatePresence>
+        {showMigration && (
+          <MigrationBanner onDismiss={() => setShowMigration(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Global stat cards */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.08 }}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+      >
+        {[
+          {
+            label: "Total Entries",
+            value: allEntries.length,
+            sub: "all scopes",
+            color: "",
+            isNum: true,
+          },
+          {
+            label: "Total Charges",
+            value: allEntries.reduce((a, e) => a + n0(e.charges), 0),
+            sub: "DR",
+            color: "text-rose-400",
+            isNum: false,
+          },
+          {
+            label: "Total Credits",
+            value: allEntries.reduce((a, e) => a + n0(e.credits), 0),
+            sub: "CR",
+            color: "text-emerald-400",
+            isNum: false,
+          },
+          {
+            label: "Overdue",
+            value: overdueCount,
+            sub: "past due date",
+            color: overdueCount > 0 ? "text-rose-400" : "",
+            isNum: true,
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className={`rounded-2xl border p-4 backdrop-blur-sm bg-white/5 ${
+              card.color === "text-rose-400" && card.isNum && overdueCount > 0
+                ? "border-rose-500/20"
+                : "border-white/10"
+            }`}
+          >
+            <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">
+              {card.label}
+            </div>
+            <div
+              className={`text-3xl font-bold tabular-nums ${card.color || "text-foreground"}`}
+            >
+              {card.isNum ? card.value : fmt(card.value as number)}
+            </div>
+            <div className="text-xs font-normal text-muted-foreground mt-1">
+              {card.sub}
+            </div>
+          </div>
+        ))}
+      </motion.div>
+
+      <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-3xl font-bold">
+                All Posted Entries
+              </CardTitle>
+              <p className="text-xs font-normal text-muted-foreground mt-1">
+                The consolidated view is the authoritative firm-wide statement.
+              </p>
+            </div>
+            {canEdit && (
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg shrink-0"
+                style={{
+                  background:
+                    "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))",
+                }}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New Entry
+              </button>
+            )}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
+                  activeTab === tab.key
+                    ? "bg-white/10 text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.label}
+                <span
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${
+                    activeTab === tab.key
+                      ? "bg-primary/20 text-primary"
+                      : "bg-white/5 text-muted-foreground"
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs font-normal text-muted-foreground mt-2">
+            {tabs.find((t) => t.key === activeTab)?.description}
+          </p>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {fetching ? (
+            <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
+              <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+              Loading statement…
+            </div>
+          ) : displayEntries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+              <svg
+                className="w-12 h-12 opacity-20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                viewBox="0 0 24 24"
+              >
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
+              </svg>
+              <p className="text-sm font-normal">
+                {activeTab === "firm-wide"
+                  ? "No firm-wide entries yet. Add an entry without linking a project."
+                  : "No entries posted yet."}
+              </p>
+              {canEdit && (
+                <button
+                  onClick={() => setShowModal(true)}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Add first entry
+                </button>
+              )}
+            </div>
+          ) : (
+            <StatementTable
+              entries={displayEntries}
+              canEdit={canEdit}
+              onEdit={(e) => setEditing(e)}
+              onDelete={(e) => setDeleting(e)}
+              showProjectCol={activeTab === "consolidated"}
+              projects={projects}
+            />
+          )}
+
+          {displayEntries.length > 0 && (
+            <SummaryFooter entries={displayEntries} />
+          )}
+
+          {!fetching && allEntries.length > 0 && (
+            <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
+              <div className="flex items-center gap-4">
+                <span className="tabular-nums">
+                  {allEntries.length} total entries
+                </span>
+                {firmWideCount > 0 && (
+                  <span className="tabular-nums text-violet-400/70">
+                    {firmWideCount} firm-wide
+                  </span>
+                )}
+                <span className="tabular-nums text-primary/70">
+                  {allEntries.length - firmWideCount} project-linked
+                </span>
+              </div>
+              <button
+                onClick={fetchEntries}
+                className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
+              >
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M23 4v6h-6" />
+                  <path d="M1 20v-6h6" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Refresh
+              </button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -997,9 +2154,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [summaries, setSummaries] = useState<
-    Record<string, { total: number; outstanding: number; overdue: number }>
-  >({});
+  const [summaries, setSummaries] = useState<Record<string, { total: number; outstanding: number; overdue: number }>>({});
   const { toasts, push } = useToast();
 
   useEffect(() => {
@@ -1014,13 +2169,14 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             .select("project_id,status,due_date")
             .in("project_id", ids);
           if (rows) {
-            const tally: Record<
-              string,
-              { total: number; outstanding: number; overdue: number }
-            > = {};
-            rows.forEach((r: any) => {
+            const tally: Record<string, { total: number; outstanding: number; overdue: number }> = {};
+            (rows as { project_id: string; status: EntryStatus; due_date: string | null }[]).forEach((r) => {
               if (!tally[r.project_id])
-                tally[r.project_id] = { total: 0, outstanding: 0, overdue: 0 };
+                tally[r.project_id] = {
+                  total: 0,
+                  outstanding: 0,
+                  overdue: 0,
+                };
               tally[r.project_id].total++;
               if (r.status === "Outstanding")
                 tally[r.project_id].outstanding++;
@@ -1066,26 +2222,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((t) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
-              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
-                t.type === "success"
-                  ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300"
-                  : "bg-rose-950/90 border-rose-500/25 text-rose-300"
-              }`}
-            >
-              {t.msg}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      <ToastStack toasts={toasts} />
 
       <div className="container mx-auto px-4 py-12 max-w-7xl">
         {/* Hero */}
@@ -1144,292 +2281,171 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </div>
         </motion.div>
 
-        {/* Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="relative flex-1">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
+        {/* Summary stat cards */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8"
+        >
+          {[
+            {
+              label: "Total Projects",
+              value: projects.length,
+              sub: "in system",
+              color: "",
+            },
+            {
+              label: "Projects with Entries",
+              value: Object.keys(summaries).length,
+              sub: "have SOA records",
+              color: "",
+            },
+            {
+              label: "Total Overdue",
+              value: totalOverdue,
+              sub: "past due date",
+              color: totalOverdue > 0 ? "text-rose-400" : "",
+            },
+            {
+              label: "Total Entries",
+              value: totalEntries,
+              sub: "across all projects",
+              color: "",
+            },
+          ].map((card) => (
+            <div
+              key={card.label}
+              className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5"
             >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.35-4.35" />
-            </svg>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search projects by name, number or city…"
-              className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: "all", label: "All Statuses" },
-              ...Array.from(new Set(projects.map((p) => p.status ?? "planning"))).map((s) => ({
-                value: s,
-                label: s.replace(/_/g, " ").toUpperCase(),
-              })),
-            ]}
-          />
-        </div>
-
-        {/* Project Grid */}
-        {fetching ? (
-          <div className="flex items-center justify-center py-32 text-muted-foreground">
-            <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
-            Loading projects…
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-32 text-muted-foreground">
-            No projects found.
-          </div>
-        ) : (
-          <motion.div
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-            initial="hidden"
-            animate="visible"
-            variants={{
-              visible: { transition: { staggerChildren: 0.05 } },
-              hidden: {},
-            }}
-          >
-            {filtered.map((p) => (
-              <motion.div
-                key={p.id}
-                variants={{
-                  hidden: { opacity: 0, y: 16 },
-                  visible: { opacity: 1, y: 0 },
-                }}
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+                {card.label}
+              </div>
+              <div
+                className={`text-3xl font-bold tabular-nums ${card.color || "text-foreground"}`}
               >
-                <ProjectCard
-                  project={p}
-                  onSelect={onSelect}
-                  summary={
-                    summaries[p.id] ?? {
-                      total: 0,
-                      outstanding: 0,
-                      overdue: 0,
-                    }
-                  }
+                {card.value}
+              </div>
+              <div className="text-xs font-normal text-muted-foreground mt-1">
+                {card.sub}
+              </div>
+            </div>
+          ))}
+        </motion.div>
+
+        {/* Projects card */}
+        <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg mb-16">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-3xl font-bold">Projects</CardTitle>
+            <div className="flex flex-col sm:flex-row gap-3 mt-5">
+              <div className="relative flex-1">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by name, number or city…"
+                  className={inputCls + " pl-9"}
                 />
-              </motion.div>
-            ))}
-          </motion.div>
+              </div>
+              <Select
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: "all", label: "All Statuses" },
+                  ...Array.from(
+                    new Set(projects.map((p) => p.status ?? "planning"))
+                  ).map((s) => ({
+                    value: s,
+                    label: s
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (l) => l.toUpperCase()),
+                  })),
+                ]}
+                className="w-full sm:w-52"
+              />
+              <div className="inline-flex items-center px-4 py-2.5 text-xs font-normal text-muted-foreground border border-white/10 rounded-xl bg-white/5 whitespace-nowrap tabular-nums">
+                {filtered.length} / {projects.length} shown
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {fetching ? (
+              <div className="flex items-center justify-center py-24 gap-3 text-sm text-muted-foreground">
+                <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                Loading projects…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+                <svg
+                  className="w-12 h-12 opacity-20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M2 20h20M5 20V8l7-6 7 6v12M9 20v-6h6v6" />
+                </svg>
+                <p className="text-sm font-normal">No projects found.</p>
+                {search && (
+                  <button
+                    onClick={() => {
+                      setSearch("");
+                      setStatusFilter("all");
+                    }}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map((p) => (
+                  <ProjectCard
+                    key={p.id}
+                    project={p}
+                    onSelect={onSelect}
+                    summary={
+                      summaries[p.id] ?? {
+                        total: 0,
+                        outstanding: 0,
+                        overdue: 0,
+                      }
+                    }
+                  />
+                ))}
+              </div>
+            )}
+            {!fetching && projects.length > 0 && (
+              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
+                <span className="tabular-nums">
+                  {projects.length} total projects ·{" "}
+                  {Object.keys(summaries).length} with statement entries
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Global consolidated view */}
+        {!fetching && (
+          <GlobalStatementView canEdit={true} projects={projects} />
         )}
       </div>
     </div>
   );
 }
 
-// ─── STATEMENT ROW ────────────────────────────────────────────────────────────
-function StatementRow({
-  entry,
-  canEdit,
-  onEdit,
-  onDelete,
-  isOverdueRow,
-}: {
-  entry: StatementEntry;
-  canEdit: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-  isOverdueRow: boolean;
-}) {
-  const s = STATUS_STYLE[entry.status];
-  const t = TYPE_STYLE[entry.entry_type];
-  const [expanded, setExpanded] = useState(false);
-  const balance = n0(entry.running_balance);
-
-  return (
-    <>
-      <motion.tr
-        className={`border-b border-white/8 cursor-pointer transition-colors ${s.row} ${
-          isOverdueRow ? "bg-rose-950/10" : ""
-        }`}
-        onClick={() => setExpanded((x) => !x)}
-      >
-        {/* Date */}
-        <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
-          {fmtDate(entry.entry_date)}
-        </td>
-        {/* Description */}
-        <td className="px-4 py-3.5">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold text-foreground line-clamp-1">
-              {entry.description}
-            </span>
-            {entry.reference_no && (
-              <span className="text-[10px] font-mono text-muted-foreground">
-                {entry.reference_no}
-              </span>
-            )}
-          </div>
-        </td>
-        {/* Type */}
-        <td className="px-4 py-3.5 hidden sm:table-cell">
-          <span
-            className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${t.bg} ${t.color}`}
-          >
-            {entry.entry_type}
-          </span>
-        </td>
-        {/* Account code */}
-        <td className="px-4 py-3.5 hidden md:table-cell">
-          {entry.account_code ? (
-            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
-              {entry.account_code}
-            </span>
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </td>
-        {/* Charges (DR) */}
-        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold text-right">
-          {n0(entry.charges) > 0 ? (
-            <span className="text-rose-400">{fmt(entry.charges)}</span>
-          ) : (
-            <span className="text-muted-foreground/40">—</span>
-          )}
-        </td>
-        {/* Credits (CR) */}
-        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold text-right">
-          {n0(entry.credits) > 0 ? (
-            <span className="text-emerald-400">{fmt(entry.credits)}</span>
-          ) : (
-            <span className="text-muted-foreground/40">—</span>
-          )}
-        </td>
-        {/* Running Balance */}
-        <td className="px-4 py-3.5 tabular-nums font-black text-sm text-right whitespace-nowrap">
-          <span
-            className={
-              balance > 0
-                ? "text-rose-400"
-                : balance < 0
-                ? "text-emerald-400"
-                : "text-muted-foreground"
-            }
-          >
-            {fmt(balance)}
-          </span>
-        </td>
-        {/* Due date */}
-        <td className="px-4 py-3.5 text-xs hidden lg:table-cell whitespace-nowrap">
-          {isOverdueRow ? (
-            <span className="text-rose-400 font-semibold">
-              {fmtDate(entry.due_date)} ⚠
-            </span>
-          ) : (
-            <span className="text-muted-foreground">
-              {fmtDate(entry.due_date)}
-            </span>
-          )}
-        </td>
-        {/* Status */}
-        <td className="px-4 py-3.5">
-          <Badge className={`text-[9px] font-bold ${s.badge}`}>
-            {entry.status}
-          </Badge>
-        </td>
-        {/* Actions */}
-        {canEdit && (
-          <td className="px-4 py-3.5">
-            <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={onEdit}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium"
-              >
-                Edit
-              </button>
-              <button
-                onClick={onDelete}
-                className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium"
-              >
-                Del
-              </button>
-            </div>
-          </td>
-        )}
-      </motion.tr>
-
-      {/* Expanded detail row */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.tr
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="bg-white/2"
-          >
-            <td colSpan={canEdit ? 10 : 9} className="px-6 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px]">
-                {[
-                  {
-                    label: "Entry Type",
-                    value: entry.entry_type,
-                  },
-                  {
-                    label: "Entry Date",
-                    value: fmtDate(entry.entry_date),
-                  },
-                  {
-                    label: "Due Date",
-                    value: fmtDate(entry.due_date),
-                  },
-                  {
-                    label: "Account Code",
-                    value: entry.account_code || "—",
-                  },
-                  {
-                    label: "Reference No.",
-                    value: entry.reference_no || "—",
-                  },
-                  {
-                    label: "Charges (DR)",
-                    value: fmt(entry.charges),
-                  },
-                  {
-                    label: "Credits (CR)",
-                    value: fmt(entry.credits),
-                  },
-                  {
-                    label: "Net Movement",
-                    value: fmt(n0(entry.charges) - n0(entry.credits)),
-                  },
-                  {
-                    label: "Running Balance",
-                    value: fmt(entry.running_balance),
-                  },
-                  ...(entry.notes
-                    ? [{ label: "Notes", value: entry.notes }]
-                    : []),
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="bg-white/4 rounded-xl p-3 border border-white/8"
-                  >
-                    <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">
-                      {item.label}
-                    </p>
-                    <p className="font-mono font-semibold text-foreground text-[11px]">
-                      {item.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </td>
-          </motion.tr>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-// ─── STATEMENT VIEW ───────────────────────────────────────────────────────────
+// ─── STATEMENT VIEW (per-project) ─────────────────────────────────────────────
 function StatementView({
   project,
   canEdit,
@@ -1441,23 +2457,20 @@ function StatementView({
 }) {
   const [entries, setEntries] = useState<StatementEntry[]>([]);
   const [fetching, setFetching] = useState(false);
-  const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState<EntryStatus | "All">("All");
-  const [filterType, setFilterType] = useState<EntryType | "All">("All");
   const [modal, setModal] = useState<null | "create" | "edit">(null);
   const [editing, setEditing] = useState<StatementEntry | null>(null);
   const [deleting, setDeleting] = useState<StatementEntry | null>(null);
   const [saving, setSaving] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<EntryStatus | "All">("All");
 
   const { toasts, push } = useToast();
 
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     try {
-      const data = await api.list(project.id);
-      setEntries(data);
-    } catch (err: any) {
-      push(err.message || "Failed to load entries", "error");
+      setEntries(await api.list(project.id));
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries", "error");
     } finally {
       setFetching(false);
     }
@@ -1467,28 +2480,23 @@ function StatementView({
     fetchEntries();
   }, [fetchEntries]);
 
-  // After every mutation, re-run balance computation on the full list
-  const refreshBalances = useCallback(
-    (updated: StatementEntry[]) => {
-      const sorted = [...updated].sort(
-        (a, b) =>
-          new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
-      );
-      setEntries(recomputeBalances(sorted));
-    },
-    []
-  );
+  const refreshBalances = useCallback((updated: StatementEntry[]) => {
+    const sorted = [...updated].sort(
+      (a, b) =>
+        new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
+    );
+    setEntries(recomputeBalances(sorted));
+  }, []);
 
   const handleCreate = async (form: EntryFormData) => {
     setSaving(true);
     try {
       const row = await api.create({ ...form, project_id: project.id });
-      const next = [...entries, row];
-      refreshBalances(next);
+      refreshBalances([...entries, row]);
       push("Entry added ✓");
       setModal(null);
-    } catch (err: any) {
-      push(err.message || "Failed to add entry", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to add entry", "error");
     } finally {
       setSaving(false);
     }
@@ -1499,13 +2507,12 @@ function StatementView({
     setSaving(true);
     try {
       const row = await api.update(editing.id, form);
-      const next = entries.map((e) => (e.id === editing.id ? row : e));
-      refreshBalances(next);
+      refreshBalances(entries.map((e) => (e.id === editing.id ? row : e)));
       push("Entry updated ✓");
       setModal(null);
       setEditing(null);
-    } catch (err: any) {
-      push(err.message || "Failed to update", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update", "error");
     } finally {
       setSaving(false);
     }
@@ -1516,44 +2523,20 @@ function StatementView({
     setSaving(true);
     try {
       await api.remove(deleting.id);
-      const next = entries.filter((e) => e.id !== deleting.id);
-      refreshBalances(next);
+      refreshBalances(entries.filter((e) => e.id !== deleting.id));
       push("Entry deleted");
       setDeleting(null);
-    } catch (err: any) {
-      push(err.message || "Failed to delete", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete", "error");
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Filtered + Search ──────────────────────────────────────────────────────
-  const filtered = useMemo(
-    () =>
-      entries.filter((e) => {
-        const statusMatch = filterStatus === "All" || e.status === filterStatus;
-        const typeMatch = filterType === "All" || e.entry_type === filterType;
-        const searchMatch =
-          !search ||
-          e.description.toLowerCase().includes(search.toLowerCase()) ||
-          (e.reference_no ?? "")
-            .toLowerCase()
-            .includes(search.toLowerCase()) ||
-          (e.account_code ?? "")
-            .toLowerCase()
-            .includes(search.toLowerCase());
-        return statusMatch && typeMatch && searchMatch;
-      }),
-    [entries, filterStatus, filterType, search]
-  );
-
-  // ── Summary Stats ──────────────────────────────────────────────────────────
   const totalCharges = entries.reduce((a, e) => a + n0(e.charges), 0);
   const totalCredits = entries.reduce((a, e) => a + n0(e.credits), 0);
   const closingBalance =
-    entries.length > 0
-      ? n0(entries[entries.length - 1].running_balance)
-      : 0;
+    entries.length > 0 ? n0(entries[entries.length - 1].running_balance) : 0;
   const outstandingCount = entries.filter(
     (e) => e.status === "Outstanding"
   ).length;
@@ -1565,55 +2548,10 @@ function StatementView({
     ? Math.round((paidCount / entries.length) * 100)
     : 0;
 
-  const TABLE_HEADERS = [
-    "Date",
-    "Description",
-    "Type",
-    "Acc. Code",
-    "Charges (DR)",
-    "Credits (CR)",
-    "Balance",
-    "Due Date",
-    "Status",
-    ...(canEdit ? ["Actions"] : []),
-  ];
-  const HEADER_ALIGN = [
-    "text-left",
-    "text-left",
-    "text-left hidden sm:table-cell",
-    "text-left hidden md:table-cell",
-    "text-right",
-    "text-right",
-    "text-right",
-    "text-left hidden lg:table-cell",
-    "text-left",
-    ...(canEdit ? ["text-left"] : []),
-  ];
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      {/* Toasts */}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((t) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 40 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
-              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
-                t.type === "success"
-                  ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300"
-                  : "bg-rose-950/90 border-rose-500/25 text-rose-300"
-              }`}
-            >
-              {t.msg}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      <ToastStack toasts={toasts} />
 
-      {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
           <EntryModal
@@ -1648,7 +2586,7 @@ function StatementView({
         {/* Back */}
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group"
+          className="inline-flex items-center gap-1.5 text-sm font-normal text-muted-foreground hover:text-foreground mb-8 transition-colors group"
         >
           <svg
             className="w-4 h-4 transition-transform group-hover:-translate-x-0.5"
@@ -1702,7 +2640,6 @@ function StatementView({
 
         {/* Summary Strip + Balance Bar */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
-          {/* Status pills */}
           <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {ENTRY_STATUSES.map((st) => {
               const s = STATUS_STYLE[st];
@@ -1711,9 +2648,7 @@ function StatementView({
               return (
                 <button
                   key={st}
-                  onClick={() =>
-                    setFilterStatus(isActive ? "All" : st)
-                  }
+                  onClick={() => setFilterStatus(isActive ? "All" : st)}
                   className={`rounded-2xl border p-4 text-left transition-all duration-200 ${
                     isActive
                       ? "border-white/30 bg-white/8 shadow-lg"
@@ -1734,7 +2669,6 @@ function StatementView({
                 </button>
               );
             })}
-            {/* Overdue count */}
             <div
               className={`rounded-2xl border p-4 ${
                 overdueCount > 0
@@ -1744,7 +2678,9 @@ function StatementView({
             >
               <div
                 className={`text-[9px] uppercase tracking-widest font-black mb-1 ${
-                  overdueCount > 0 ? "text-rose-400" : "text-muted-foreground"
+                  overdueCount > 0
+                    ? "text-rose-400"
+                    : "text-muted-foreground"
                 }`}
               >
                 Overdue
@@ -1760,7 +2696,6 @@ function StatementView({
                 past due date
               </div>
             </div>
-            {/* Paid rate */}
             <div
               className={`rounded-2xl border p-4 ${
                 paidPct === 100
@@ -1783,8 +2718,6 @@ function StatementView({
               </div>
             </div>
           </div>
-
-          {/* Balance bar */}
           <BalanceBar
             totalCharges={totalCharges}
             totalCredits={totalCredits}
@@ -1800,7 +2733,7 @@ function StatementView({
                 <CardTitle className="text-2xl font-black">
                   Statement of Account
                 </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <p className="text-xs font-normal text-muted-foreground mt-0.5">
                   Click any row to expand full entry detail · Running balance
                   auto-computed
                 </p>
@@ -1827,53 +2760,15 @@ function StatementView({
                 </button>
               )}
             </div>
-
-            {/* Search & Filters */}
-            <div className="flex flex-col sm:flex-row gap-3 pb-4">
-              <div className="relative flex-1">
-                <svg
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  viewBox="0 0 24 24"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
-                </svg>
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search description, reference or account code…"
-                  className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-                />
-              </div>
-              <Select
-                value={filterStatus}
-                onChange={(v) => setFilterStatus(v as EntryStatus | "All")}
-                options={[
-                  { value: "All", label: "All Statuses" },
-                  ...ENTRY_STATUSES.map((s) => ({ value: s, label: s })),
-                ]}
-              />
-              <Select
-                value={filterType}
-                onChange={(v) => setFilterType(v as EntryType | "All")}
-                options={[
-                  { value: "All", label: "All Types" },
-                  ...ENTRY_TYPES.map((t) => ({ value: t, label: t })),
-                ]}
-              />
-            </div>
           </CardHeader>
 
           <CardContent className="p-0">
             {fetching ? (
-              <div className="flex items-center justify-center py-28 text-muted-foreground">
-                <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
+              <div className="flex items-center justify-center py-28 text-muted-foreground gap-3">
+                <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
                 Loading statement…
               </div>
-            ) : filtered.length === 0 ? (
+            ) : entries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-28 text-muted-foreground gap-3">
                 <svg
                   className="w-10 h-10 opacity-30"
@@ -1884,7 +2779,9 @@ function StatementView({
                 >
                   <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
                 </svg>
-                <p className="text-sm">No statement entries yet</p>
+                <p className="text-sm font-normal">
+                  No statement entries yet for this project.
+                </p>
                 {canEdit && (
                   <button
                     onClick={() => setModal("create")}
@@ -1895,115 +2792,42 @@ function StatementView({
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[800px]">
-                  <thead>
-                    <tr className="border-b border-white/8 bg-white/3">
-                      {TABLE_HEADERS.map((h, i) => (
-                        <th
-                          key={h}
-                          className={`px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap ${HEADER_ALIGN[i]}`}
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((entry) => (
-                      <StatementRow
-                        key={entry.id}
-                        entry={entry}
-                        canEdit={canEdit}
-                        onEdit={() => {
-                          setEditing(entry);
-                          setModal("edit");
-                        }}
-                        onDelete={() => setDeleting(entry)}
-                        isOverdueRow={isOverdue(entry.due_date, entry.status)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <StatementTable
+                entries={entries}
+                canEdit={canEdit}
+                onEdit={(e) => {
+                  setEditing(e);
+                  setModal("edit");
+                }}
+                onDelete={(e) => setDeleting(e)}
+                showProjectCol={false}
+              />
             )}
 
-            {/* Closing Balance Footer */}
-            {entries.length > 0 && (
-              <div className="border-t border-white/12 bg-white/3">
-                <div className="px-5 py-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                      Summary — {entries.length} entries
-                    </span>
-                    <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] font-bold ml-auto">
-                      {filtered.length} shown
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      {
-                        label: "Total Charges",
-                        value: totalCharges,
-                        color: "text-rose-400",
-                        sub: "DR",
-                      },
-                      {
-                        label: "Total Credits",
-                        value: totalCredits,
-                        color: "text-emerald-400",
-                        sub: "CR",
-                      },
-                      {
-                        label: "Net Movement",
-                        value: totalCharges - totalCredits,
-                        color:
-                          totalCharges - totalCredits > 0
-                            ? "text-rose-400"
-                            : "text-emerald-400",
-                        sub:
-                          totalCharges - totalCredits > 0
-                            ? "Owed"
-                            : "Credit",
-                      },
-                      {
-                        label: "Closing Balance",
-                        value: closingBalance,
-                        color:
-                          closingBalance > 0
-                            ? "text-rose-400"
-                            : closingBalance < 0
-                            ? "text-emerald-400"
-                            : "text-muted-foreground",
-                        sub:
-                          closingBalance > 0
-                            ? "Outstanding"
-                            : closingBalance < 0
-                            ? "Credit"
-                            : "Settled",
-                      },
-                    ].map((item) => (
-                      <div
-                        key={item.label}
-                        className="bg-white/4 rounded-xl p-3 border border-white/8"
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
-                            {item.label}
-                          </p>
-                          <span className="text-[9px] font-bold text-muted-foreground/60">
-                            {item.sub}
-                          </span>
-                        </div>
-                        <p
-                          className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}
-                        >
-                          {fmt(item.value)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            {entries.length > 0 && <SummaryFooter entries={entries} />}
+
+            {!fetching && entries.length > 0 && (
+              <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
+                <span className="tabular-nums">
+                  {entries.length} total entries
+                </span>
+                <button
+                  onClick={fetchEntries}
+                  className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
+                >
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M23 4v6h-6" />
+                    <path d="M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  Refresh
+                </button>
               </div>
             )}
           </CardContent>
@@ -2024,7 +2848,9 @@ export default function StatementOfAccountPage({
     if (!projectId) return;
     supabase
       .from("projects")
-      .select("*")
+      .select(
+        "id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at"
+      )
       .eq("id", projectId)
       .single()
       .then(({ data }) => {
@@ -2045,7 +2871,9 @@ export default function StatementOfAccountPage({
           <StatementView
             project={selectedProject}
             canEdit={canEdit}
-            onBack={() => setSelectedProject(null)}
+            onBack={() => {
+              if (!projectId) setSelectedProject(null);
+            }}
           />
         </motion.div>
       ) : (

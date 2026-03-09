@@ -1506,8 +1506,288 @@ function TaxView({ project, canEdit, onBack }: { project: Project; canEdit: bool
 }
 
 // ─── ROOT COMPONENT ───────────────────────────────────────────────────────────
+// ─── GLOBAL TAX TABLE ───────────────────────────────────────────────────────
+type GlobalTab = "consolidated" | "firm-wide";
+
+function GlobalTaxTable({ canEdit }: { canEdit: boolean }) {
+  const [allEntries, setAllEntries] = useState<TaxEntry[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [activeTab, setActiveTab] = useState<GlobalTab>("consolidated");
+  const [deleting, setDeleting] = useState<TaxEntry | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<TaxEntry | null>(null);
+  const { toasts, push } = useToast();
+
+  const fetchEntries = useCallback(async () => {
+    setFetching(true);
+    try {
+      const { data, error } = await supabase
+        .from("tax_transactions")
+        .select("*")
+        .order("date", { ascending: true });
+      if (error) throw new Error(error.message);
+      setAllEntries(recomputeBalances((data ?? []).map(sanitizeEntry)));
+    } catch (err: any) {
+      push(err.message || "Failed to load tax entries", "error");
+    } finally {
+      setFetching(false);
+    }
+  }, [push]);
+
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
+
+  const handleCreate = async (form: TaxFormData) => {
+    setSaving(true);
+    try {
+      const row = await api.create(form);
+      setAllEntries((prev) => recomputeBalances([...prev, row]));
+      push("Entry added ✓");
+      setShowModal(false);
+    } catch (err: any) {
+      push(err.message || "Failed to add entry", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdate = async (form: TaxFormData) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const row = await api.update(editing.id, form);
+      setAllEntries((prev) => recomputeBalances(prev.map((e) => (e.id === editing.id ? row : e))));
+      push("Entry updated ✓");
+      setShowModal(false); setEditing(null);
+    } catch (err: any) {
+      push(err.message || "Failed to update", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await api.remove(deleting.id);
+      setAllEntries((prev) => recomputeBalances(prev.filter((e) => e.id !== deleting.id)));
+      push("Entry deleted");
+      setDeleting(null);
+    } catch (err: any) {
+      push(err.message || "Failed to delete", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const displayEntries = useMemo(
+    () => activeTab === "firm-wide"
+      ? allEntries.filter((e) => !e.project_id)
+      : allEntries,
+    [allEntries, activeTab]
+  );
+
+  // Totals for stat cards
+  const totalGross     = displayEntries.reduce((a, e) => a + n0(e.gross_amount), 0);
+  const totalVat       = displayEntries.reduce((a, e) => a + n0(e.vat), 0);
+  const totalOutputVat = displayEntries.reduce((a, e) => a + n0(e.output_vat), 0);
+  const totalInputVat  = displayEntries.reduce((a, e) => a + n0(e.input_vat), 0);
+  const totalNetVat    = totalOutputVat - totalInputVat;
+  const totalWht       = displayEntries.reduce((a, e) => a + n0(e.wht_amount), 0);
+  const totalRetention = displayEntries.reduce((a, e) => a + n0(e.retention_amount), 0);
+  const totalCashIn    = displayEntries.reduce((a, e) => a + n0(e.cash_in), 0);
+  const totalCashOut   = displayEntries.reduce((a, e) => a + n0(e.cash_out), 0);
+  const closingBalance = displayEntries.length > 0 ? n0(displayEntries[displayEntries.length - 1].running_balance) : 0;
+
+  const tabs: { key: GlobalTab; label: string; count: number; description: string }[] = [
+    { key: "consolidated", label: "Consolidated", count: allEntries.length, description: "All tax entries across every project + firm-wide" },
+    { key: "firm-wide", label: "Firm-wide Only", count: allEntries.filter((e) => !e.project_id).length, description: "Entries not linked to any specific project" },
+  ];
+
+  return (
+    <div className="container mx-auto px-4 pb-20">
+      {/* Toasts */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
+              className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${t.type === "success" ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300" : "bg-rose-950/90 border-rose-500/25 text-rose-300"}`}>{t.msg}</motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showModal && (
+          <EntryModal
+            initial={makeEmptyForm("")}
+            onSave={handleCreate}
+            onClose={() => setShowModal(false)}
+            loading={saving}
+          />
+        )}
+        {editing && showModal && (
+          <EntryModal
+            initial={{ ...editing }}
+            onSave={handleUpdate}
+            onClose={() => { setShowModal(false); setEditing(null); }}
+            loading={saving}
+          />
+        )}
+        {deleting && (
+          <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+        )}
+      </AnimatePresence>
+
+      {/* Section heading */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground px-2">Firm Overview</span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+        <h2 className="text-3xl md:text-5xl font-bold text-center mb-2">
+          Consolidated <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Tax Register</span>
+        </h2>
+        <p className="text-center text-sm font-normal text-muted-foreground max-w-xl mx-auto">
+          Auto-generated from all tax entries across every project and firm-wide accounts. Post a new entry to update any section of the tax register.
+        </p>
+      </motion.div>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: "Total Gross", value: totalGross, color: "text-foreground" },
+          { label: "Total VAT", value: totalVat, color: "text-amber-400" },
+          { label: "Net VAT to KRA", value: totalNetVat, color: totalNetVat > 0 ? "text-rose-400" : "text-emerald-400" },
+          { label: "WHT", value: totalWht, color: "text-rose-300" },
+        ].map((item) => (
+          <div key={item.label} className="rounded-2xl border border-white/8 bg-white/3 p-4">
+            <div className="text-[9px] uppercase tracking-widest font-black text-muted-foreground mb-1">{item.label}</div>
+            <div className={`text-base sm:text-lg font-black tabular-nums tracking-tight ${item.color}`}>KES {fmtC(item.value)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${activeTab === tab.key ? "bg-white/10 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {tab.label}
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full tabular-nums ${activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground"}`}>{tab.count}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs font-normal text-muted-foreground mt-2">{tabs.find((t) => t.key === activeTab)?.description}</p>
+
+      <Card className="backdrop-blur-xl bg-white/5 border border-white/12 rounded-2xl shadow-xl overflow-hidden mt-8">
+        <CardHeader className="pb-0 border-b border-white/8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5">
+            <div>
+              <CardTitle className="text-2xl font-black">Tax Register</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Click any row to expand full tax detail · Cash flow balance auto-computed</p>
+            </div>
+            {canEdit && (
+              <button onClick={() => { setShowModal(true); setEditing(null); }}
+                className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
+                style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                New Entry
+              </button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {fetching ? (
+            <div className="flex items-center justify-center py-28 text-muted-foreground">
+              <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
+              Loading tax register…
+            </div>
+          ) : displayEntries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-28 text-muted-foreground gap-3">
+              <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
+              </svg>
+              <p className="text-sm">No tax entries yet</p>
+              {canEdit && <button onClick={() => { setShowModal(true); setEditing(null); }} className="text-sm text-primary hover:underline">Add the first entry →</button>}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[900px]">
+                <thead>
+                  <tr className="border-b border-white/8 bg-white/3">
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-left">Date</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-left">Description / Party</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-left hidden sm:table-cell">Type</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right">Gross</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden md:table-cell">VAT</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden md:table-cell">Net</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden lg:table-cell">WHT</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden lg:table-cell">Retention</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden xl:table-cell">Cash In</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right hidden xl:table-cell">Cash Out</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-right">Balance</th>
+                    <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-left hidden sm:table-cell">Period</th>
+                    {canEdit && <th className="px-4 py-3 text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap text-left">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayEntries.map((entry) => (
+                    <TaxRow key={entry.id} entry={entry} canEdit={canEdit}
+                      onEdit={() => { setEditing(entry); setShowModal(true); }}
+                      onDelete={() => setDeleting(entry)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {/* Footer totals */}
+          {displayEntries.length > 0 && (
+            <div className="border-t border-white/12 bg-white/3">
+              <div className="px-5 py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                    Totals — {displayEntries.length} entries
+                  </span>
+                  <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] font-bold ml-auto">
+                    {displayEntries.length} shown
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {[
+                    { label: "Gross", value: totalGross, color: "text-foreground" },
+                    { label: "VAT", value: totalVat, color: "text-amber-300" },
+                    { label: "Net VAT to KRA", value: totalNetVat, color: totalNetVat > 0 ? "text-rose-400" : "text-emerald-400" },
+                    { label: "WHT", value: totalWht, color: "text-rose-300" },
+                    { label: "Cash In", value: totalCashIn, color: "text-emerald-400" },
+                    { label: "Closing Bal.", value: closingBalance, color: closingBalance > 0 ? "text-emerald-400" : "text-rose-400" },
+                  ].map((item) => (
+                    <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">{item.label}</p>
+                      <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{fmt(item.value)}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] text-muted-foreground/50 mt-3">
+                  Output VAT {fmt(totalOutputVat)} · Input VAT {fmt(totalInputVat)} · Net VAT payable to KRA {fmt(totalNetVat)} · Retention held {fmt(totalRetention)} · KRA compliant 2026
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function TaxesPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [showGlobal, setShowGlobal] = useState(true);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1517,7 +1797,11 @@ export default function TaxesPage({ projectId, canEdit = true }: Props) {
 
   return (
     <AnimatePresence mode="wait">
-      {selectedProject ? (
+      {showGlobal ? (
+        <motion.div key="global-tax" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
+          <GlobalTaxTable canEdit={canEdit} />
+        </motion.div>
+      ) : selectedProject ? (
         <motion.div key="taxes" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
           <TaxView project={selectedProject} canEdit={canEdit} onBack={() => setSelectedProject(null)} />
         </motion.div>

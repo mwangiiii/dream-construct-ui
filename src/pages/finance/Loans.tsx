@@ -233,6 +233,10 @@ const api = {
     return (data ?? []) as Loan[];
   },
   async create(body: LoanFormData): Promise<Loan> {
+    // Enforce project_id is present
+    if (!body.project_id || String(body.project_id).length === 0) {
+      throw new Error("Each loan must be linked to a project. Please select a project.");
+    }
     const clean = stripGenerated(body);
     const { data, error } = await supabase.from("loans").insert([clean]).select("*").single();
     if (error) throwSb(error, "create");
@@ -485,20 +489,26 @@ function LoanModal({ initial, onSave, onClose, loading, projects }: {
             <div className="grid grid-cols-2 gap-4">
               {projects && (
                 <div className="col-span-2">
-                  <Field label="Project (optional)" hint="Leave unlinked for standalone loans not tied to a project">
+                  <Field label="Project *" hint="Each loan must be linked to a project">
                     <div className="relative">
                       <select
                         value={form.project_id ?? ""}
                         onChange={e => set("project_id", e.target.value || null)}
                         className={selectCls}
+                        required
                       >
-                        <option value="">— No project (standalone) —</option>
+                        <option value="">Select a project…</option>
                         {projects.map(p => (
                           <option key={p.id} value={p.id}>{p.project_number} — {p.title}</option>
                         ))}
                       </select>
                       <SelectChevron />
                     </div>
+                    {!form.project_id && (
+                      <div className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-2 text-rose-400 text-xs font-bold mt-2">
+                        Please select a project before saving a loan record.
+                      </div>
+                    )}
                   </Field>
                 </div>
               )}
@@ -1183,7 +1193,13 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
   const handleCreate = async (form: LoanFormData) => {
     setSaving(true);
     try {
-      const row = await api.create({ ...form, project_id: form.project_id || null });
+      // Remove all generated/calculated fields before sending to Supabase
+      // Ensure sanitized is LoanFormData, not Partial
+      const sanitized: LoanFormData = {
+        ...form,
+        project_id: form.project_id!, // project_id is now required
+      };
+      const row = await api.create(sanitized);
       setLoans(p => [row, ...p]);
       push("Loan added successfully.");
       setModal(null);
@@ -1227,7 +1243,7 @@ function GlobalLoansTable({ canEdit }: { canEdit: boolean }) {
       <CardHeader className="pb-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <CardTitle className="text-2xl font-bold">All Loans — Global View</CardTitle>
+            <CardTitle className="text-2xl font-bold">All Loans Global View</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
               Every loan across all projects plus standalone loans not linked to any project.
               {standaloneCount > 0 && (
@@ -1605,7 +1621,13 @@ function LoansView({ project, canEdit, onBack }: {
   const handleCreate = async (form: LoanFormData) => {
     setSaving(true);
     try {
-      const row = await api.create({ ...form, project_id: project.id });
+      // Remove all generated/calculated fields before sending to Supabase
+      // Ensure sanitized is LoanFormData, not Partial
+      const sanitized: LoanFormData = {
+        ...form,
+        project_id: form.project_id!, // project_id is now required
+      };
+      const row = await api.create(sanitized);
       setLoans(p => [row, ...p]);
       push("Loan record added."); setModal(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to add loan.", "error"); }
@@ -1808,9 +1830,12 @@ function LoansView({ project, canEdit, onBack }: {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <CardTitle className="text-3xl font-bold">Loan Schedule</CardTitle>
               {canEdit && (
-                <button onClick={() => setModal("create")}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 shadow-lg"
-                  style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+                <button
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold rounded-xl text-primary-foreground transition-all opacity-60 cursor-not-allowed shadow-lg"
+                  style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
+                  disabled
+                  title="Global (standalone) loans are not supported. Please select a project to add a loan."
+                >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>
@@ -1852,6 +1877,7 @@ function LoansView({ project, canEdit, onBack }: {
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function LoansPage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [showGlobal, setShowGlobal] = useState(true);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1866,21 +1892,34 @@ export default function LoansPage({ projectId, canEdit = true }: Props) {
 
   return (
     <AnimatePresence mode="wait">
-      {selectedProject ? (
-        <motion.div key={selectedProject.id}
-          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
+      {showGlobal ? (
+        <motion.div key="global-loans" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
+          <GlobalLoansTable canEdit={canEdit} />
+          <div className="flex justify-center mt-6">
+            <button className="px-4 py-2 rounded-xl bg-primary/10 text-primary font-bold hover:bg-primary/20 transition" onClick={() => setShowGlobal(false)}>
+              Switch to Project Loans
+            </button>
+          </div>
+        </motion.div>
+      ) : selectedProject ? (
+        <motion.div key="loans" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
           <LoansView
             project={selectedProject}
             canEdit={canEdit}
-            onBack={() => { if (!projectId) setSelectedProject(null); }}
+            onBack={() => {
+              if (!projectId) setSelectedProject(null);
+              setShowGlobal(true);
+            }}
           />
         </motion.div>
       ) : (
-        <motion.div key="picker"
-          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
-          <ProjectPickerView onSelect={setSelectedProject} canEdit={canEdit} />
+        <motion.div key="picker" initial={{ opacity: 0, x: -40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.25 }}>
+          <ProjectPickerView onSelect={(p) => { setSelectedProject(p); setShowGlobal(false); }} canEdit={canEdit} />
+          <div className="flex justify-center mt-6">
+            <button className="px-4 py-2 rounded-xl bg-primary/10 text-primary font-bold hover:bg-primary/20 transition" onClick={() => setShowGlobal(true)}>
+              Switch to Global Loans
+            </button>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
