@@ -23,7 +23,6 @@ interface Project {
   created_at: string;
 }
 
-// workers table: full_name (NOT name), role (NOT trade)
 interface Worker {
   id: string;
   full_name: string;
@@ -39,6 +38,7 @@ interface PayrollEntry {
   project_id: string | null;
   job_id: string;
   employee_name: string;
+  worker_id: string | null;
   rate: number;
   rate_type: RateType;
   time_worked: string;
@@ -94,35 +94,48 @@ const PROJECT_STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
 };
 
-const makeEmptyForm = (projectId: string | null = null): PayrollFormData => ({
+const makeEmptyProjectForm = (projectId: string): PayrollFormData => ({
   project_id: projectId,
   job_id: "",
+  worker_id: null,
   employee_name: "",
   rate: 0,
   rate_type: "Per Month",
   time_worked: "1 month",
   gross_pay: 0,
-  nssf_tier1: 0,
-  nssf_tier2: 0,
-  nssf_total: 0,
-  shif: 0,
-  housing_levy: 0,
-  pension: 0,
-  taxable_income: 0,
-  paye_gross_tax: 0,
-  personal_relief: 2400,
-  insurance_relief: 0,
-  paye_net: 0,
-  total_deductions: 0,
-  net_pay: 0,
+  nssf_tier1: 0, nssf_tier2: 0, nssf_total: 0,
+  shif: 0, housing_levy: 0, pension: 0,
+  taxable_income: 0, paye_gross_tax: 0,
+  personal_relief: 2400, insurance_relief: 0,
+  paye_net: 0, total_deductions: 0, net_pay: 0,
   due_date: new Date().toISOString().slice(0, 10),
-  paid_date: null,
-  bank_code: null,
-  serial_no: null,
-  etims_code: null,
-  payment_status: "Unpaid",
-  notes: null,
+  paid_date: null, bank_code: null, serial_no: null,
+  etims_code: null, payment_status: "Unpaid", notes: null,
 });
+
+const makeEmptyGlobalForm = (): PayrollFormData => ({
+  project_id: null,
+  job_id: "",
+  worker_id: null,
+  employee_name: "",
+  rate: 0,
+  rate_type: "Per Month",
+  time_worked: "1 month",
+  gross_pay: 0,
+  nssf_tier1: 0, nssf_tier2: 0, nssf_total: 0,
+  shif: 0, housing_levy: 0, pension: 0,
+  taxable_income: 0, paye_gross_tax: 0,
+  personal_relief: 2400, insurance_relief: 0,
+  paye_net: 0, total_deductions: 0, net_pay: 0,
+  due_date: new Date().toISOString().slice(0, 10),
+  paid_date: null, bank_code: null, serial_no: null,
+  etims_code: null, payment_status: "Unpaid", notes: null,
+});
+
+// Reverse-derive the raw insurance premium from the stored relief value
+// relief = min(premium * 0.15, 5000)  →  premium = relief / 0.15  (when relief < 5000)
+const derivePremiumFromRelief = (relief: number): number =>
+  relief > 0 ? +(relief / 0.15).toFixed(2) : 0;
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const fmt = (n: number | null | undefined) => {
@@ -137,7 +150,7 @@ const n0 = (v: number | null | undefined): number =>
   typeof v === "number" && isFinite(v) ? v : 0;
 
 const fmtC = (n: number | null | undefined) => {
-  const safe = (typeof n === "number" && isFinite(n)) ? n : 0;
+  const safe = typeof n === "number" && isFinite(n) ? n : 0;
   return new Intl.NumberFormat("en-KE", { notation: "compact", maximumFractionDigits: 1 }).format(safe);
 };
 
@@ -169,7 +182,7 @@ function sanitizeEntry(raw: PayrollEntry): PayrollEntry {
     };
   }
   const pension = n0(raw.pension);
-  const insurancePremium = n0(raw.insurance_relief);
+  const insurancePremium = derivePremiumFromRelief(n0(raw.insurance_relief));
   const calc = calculateKenyaPayroll(gross, pension, insurancePremium);
   return { ...raw, gross_pay: gross, ...calc, pension, rate: n0(raw.rate) };
 }
@@ -229,20 +242,20 @@ function parseTimeWorked(timeStr: string): number {
   return match ? parseFloat(match[1]) : 1;
 }
 
-function computeGrossFromRate(rate: number, rateType: RateType, timeWorked: string): number {
+function computeGrossFromRate(rate: number, _rateType: RateType, timeWorked: string): number {
   return +(rate * parseTimeWorked(timeWorked)).toFixed(2);
 }
 
 function toWritable(form: PayrollFormData): PayrollFormData {
   const {
-    project_id, job_id, employee_name, rate, rate_type, time_worked,
+    project_id, job_id, worker_id, employee_name, rate, rate_type, time_worked,
     gross_pay, nssf_tier1, nssf_tier2, nssf_total, shif, housing_levy, pension,
     taxable_income, paye_gross_tax, personal_relief, insurance_relief, paye_net,
     total_deductions, net_pay, due_date, paid_date, bank_code, serial_no,
     etims_code, payment_status, notes,
   } = form;
   return {
-    project_id, job_id, employee_name, rate, rate_type, time_worked,
+    project_id, job_id, worker_id, employee_name, rate, rate_type, time_worked,
     gross_pay, nssf_tier1, nssf_tier2, nssf_total, shif, housing_levy, pension,
     taxable_income, paye_gross_tax, personal_relief, insurance_relief, paye_net,
     total_deductions, net_pay, due_date, paid_date, bank_code, serial_no,
@@ -261,7 +274,6 @@ const api = {
     return (data ?? []) as Project[];
   },
 
-  // Join worker_assignments → workers; workers table uses full_name and role (not name/trade)
   async workersForProject(projectId: string): Promise<Worker[]> {
     const { data, error } = await supabase
       .from("worker_assignments")
@@ -280,7 +292,6 @@ const api = {
     return workers.sort((a, b) => a.full_name.localeCompare(b.full_name));
   },
 
-  // All active workers for global/company payroll modal fallback
   async allWorkers(): Promise<Worker[]> {
     const { data, error } = await supabase
       .from("workers")
@@ -357,7 +368,9 @@ function ToastStack({ toasts }: { toasts: { id: number; msg: string; type: "succ
         {toasts.map((t) => (
           <motion.div key={t.id} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
             className={`pointer-events-auto px-4 py-2.5 rounded-xl text-sm font-semibold border backdrop-blur-xl shadow-lg ${
-              t.type === "success" ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300" : "bg-rose-950/90 border-rose-500/25 text-rose-300"
+              t.type === "success"
+                ? "bg-emerald-950/90 border-emerald-500/25 text-emerald-300"
+                : "bg-rose-950/90 border-rose-500/25 text-rose-300"
             }`}>{t.msg}</motion.div>
         ))}
       </AnimatePresence>
@@ -491,20 +504,189 @@ function PayslipBreakdown({ gross, computed, pension }: {
   );
 }
 
-// ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
-// Employee Name is a <select> dropdown sourced from workers via worker_assignments.
-// workers.full_name is the correct column — NOT name, NOT trade.
-// For project-level: workers from worker_assignments WHERE project_id = project.id
-// For global/company: if project selected → that project's workers; else all active workers
-function EntryModal({
-  initial, projects, projectWorkers, allWorkers,
-  isGlobal = false, onSave, onClose, loading,
+// ─── SHARED PAYROLL FORM FIELDS ───────────────────────────────────────────────
+// Extracted so both modals share identical pay/deduction/payment field rendering.
+// insurancePremium / setInsurancePremium are owned by the parent modal — this is
+// the fix for the self-erasing bug: the raw premium lives in separate local state
+// and is never overwritten by the computed-sync useEffect.
+function PayrollFormFields({
+  form, set, insurancePremium, setInsurancePremium,
+}: {
+  form: PayrollFormData;
+  set: <K extends keyof PayrollFormData>(k: K, v: PayrollFormData[K]) => void;
+  insurancePremium: number;
+  setInsurancePremium: (v: number) => void;
+}) {
+  const timeWorkedPlaceholder =
+    form.rate_type === "Per Hour" ? "e.g. 160 (hours)"
+    : form.rate_type === "Per Week" ? "e.g. 4 (weeks)"
+    : "e.g. 1 (month)";
+
+  return (
+    <>
+      {/* Pay Rate */}
+      <SectionLabel label="Pay Rate" dotColor="bg-violet-400" textColor="text-violet-400" sub="Gross auto-calculated from rate × time" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Field label="Rate (KES) *" hint="Amount per unit of time">
+          <input type="number" step="0.01" min="0" value={form.rate || ""}
+            onChange={(e) => set("rate", parseFloat(e.target.value) || 0)}
+            className={inputCls} placeholder="0.00" />
+        </Field>
+        <Field label="Rate Type *">
+          <div className="flex gap-1 h-10 rounded-xl bg-white/5 border border-white/10 p-1">
+            {RATE_TYPES.map((rt) => (
+              <button key={rt} type="button" onClick={() => set("rate_type", rt)}
+                className={`flex-1 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${
+                  form.rate_type === rt
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "hover:bg-white/10 text-muted-foreground"
+                }`}>{rt.replace("Per ", "")}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Time Worked *" hint={timeWorkedPlaceholder}>
+          <input value={form.time_worked} onChange={(e) => set("time_worked", e.target.value)}
+            placeholder={timeWorkedPlaceholder} className={inputCls} />
+        </Field>
+      </div>
+
+      <Field label="Gross Pay (KES) *" hint="Auto-calculated or enter manually">
+        <div className="relative">
+          <input type="number" step="0.01" min="0" value={form.gross_pay || ""}
+            onChange={(e) => set("gross_pay", parseFloat(e.target.value) || 0)}
+            className={inputCls + " pr-16 font-bold text-base"} placeholder="0.00" />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">KES</span>
+        </div>
+      </Field>
+
+      {/* Voluntary Deductions */}
+      <SectionLabel label="Voluntary Deductions" dotColor="bg-sky-400" textColor="text-sky-400" sub="Tax-deductible; updates live" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Pension Contribution (KES)" hint="Max KES 30,000 p.m. (tax exempt)">
+          <input type="number" step="0.01" min="0" max="30000"
+            value={form.pension || ""}
+            onChange={(e) => set("pension", Math.min(parseFloat(e.target.value) || 0, 30_000))}
+            placeholder="0.00" className={inputCls} />
+        </Field>
+
+        {/* ── Fixed field: raw premium in its own state, never clobbered by computed sync ── */}
+        <Field label="Annual Insurance Premium (KES)" hint="Relief = 15% of premium, max KES 5,000 p.m.">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={insurancePremium || ""}
+            onChange={(e) => setInsurancePremium(parseFloat(e.target.value) || 0)}
+            placeholder="0.00"
+            className={inputCls}
+          />
+          {insurancePremium > 0 && (
+            <span className="text-[9px] text-emerald-400/80 mt-0.5">
+              Relief: {fmt(Math.min(insurancePremium * 0.15, 5_000))}
+            </span>
+          )}
+        </Field>
+      </div>
+
+      {/* Payment & References */}
+      <SectionLabel label="Payment & References" dotColor="bg-rose-400" textColor="text-rose-400" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Field label="Due Date">
+          <input type="date" value={form.due_date ?? ""}
+            onChange={(e) => set("due_date", e.target.value || null)}
+            className={inputCls + " [color-scheme:dark]"} />
+        </Field>
+        <Field label="Paid Date">
+          <input type="date" value={form.paid_date ?? ""}
+            onChange={(e) => set("paid_date", e.target.value || null)}
+            className={inputCls + " [color-scheme:dark]"} />
+        </Field>
+        <Field label="Payment Status *">
+          <div className="relative">
+            <select value={form.payment_status}
+              onChange={(e) => set("payment_status", e.target.value as PaymentStatus)}
+              className={selectCls}>
+              {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <SelectChevron />
+          </div>
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Field label="Bank Code">
+          <input value={form.bank_code ?? ""} onChange={(e) => set("bank_code", e.target.value || null)}
+            placeholder="e.g. 1002" className={inputCls} />
+        </Field>
+        <Field label="Serial No.">
+          <input value={form.serial_no ?? ""} onChange={(e) => set("serial_no", e.target.value || null)}
+            placeholder="S-1001" className={inputCls} />
+        </Field>
+        <Field label="eTIMS Code">
+          <input value={form.etims_code ?? ""} onChange={(e) => set("etims_code", e.target.value || null)}
+            placeholder="ETIMS-55555" className={inputCls} />
+        </Field>
+      </div>
+
+      <Field label="Notes">
+        <textarea value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value || null)}
+          rows={2} placeholder="Additional remarks…" className={inputCls + " resize-none"} />
+      </Field>
+    </>
+  );
+}
+
+// ─── SHARED MODAL COMPUTED SYNC HOOK ─────────────────────────────────────────
+// Centralises the useEffect logic that syncs calculator output back into form state.
+// Crucially, insurance_relief IS included here (it's a computed output from the
+// calculator, not a user-typed input), but the raw premium that DRIVES it lives
+// separately in insurancePremium state — so there is no feedback loop.
+function usePayrollSync(
+  form: PayrollFormData,
+  setForm: React.Dispatch<React.SetStateAction<PayrollFormData>>,
+  insurancePremium: number,
+) {
+  // Auto-compute gross from rate × time
+  useEffect(() => {
+    if (form.rate <= 0) return;
+    const calcGross = computeGrossFromRate(form.rate, form.rate_type, form.time_worked);
+    if (Math.abs(calcGross - form.gross_pay) > 0.005)
+      setForm((p) => ({ ...p, gross_pay: calcGross }));
+  }, [form.rate, form.rate_type, form.time_worked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const computed = useMemo(
+    () => calculateKenyaPayroll(form.gross_pay, form.pension, insurancePremium),
+    [form.gross_pay, form.pension, insurancePremium],
+  );
+
+  // Sync all statutory outputs back into form — including insurance_relief (computed output).
+  // The raw premium input field uses its own `insurancePremium` state so it is never touched here.
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      nssf_tier1: computed.nssf_tier1,
+      nssf_tier2: computed.nssf_tier2,
+      nssf_total: computed.nssf_total,
+      shif: computed.shif,
+      housing_levy: computed.housing_levy,
+      taxable_income: computed.taxable_income,
+      paye_gross_tax: computed.paye_gross_tax,
+      personal_relief: computed.personal_relief,
+      insurance_relief: computed.insurance_relief, // ← computed output, safe to sync
+      paye_net: computed.paye_net,
+      total_deductions: computed.total_deductions,
+      net_pay: computed.net_pay,
+    }));
+  }, [computed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return computed;
+}
+
+// ─── PROJECT ENTRY MODAL ──────────────────────────────────────────────────────
+function ProjectEntryModal({
+  initial, projectWorkers, onSave, onClose, loading,
 }: {
   initial: PayrollFormData & { id?: number; updated_at?: string };
-  projects?: Project[];
-  projectWorkers?: Worker[];   // for project-level modal
-  allWorkers?: Worker[];       // for global modal fallback
-  isGlobal?: boolean;
+  projectWorkers: Worker[];
   onSave: (d: PayrollFormData) => void;
   onClose: () => void;
   loading: boolean;
@@ -512,57 +694,36 @@ function EntryModal({
   const [form, setForm] = useState<PayrollFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
 
-  // For global modal: dynamic workers based on selected project
-  const [dynamicProjectWorkers, setDynamicProjectWorkers] = useState<Worker[]>([]);
-  const [loadingWorkers, setLoadingWorkers] = useState(false);
+  // Raw insurance premium in its own state — NOT derived from form.insurance_relief
+  // on every render, only initialised once from the stored relief value.
+  const [insurancePremium, setInsurancePremium] = useState<number>(
+    () => derivePremiumFromRelief(initial.insurance_relief),
+  );
 
   const set = <K extends keyof PayrollFormData>(k: K, v: PayrollFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  // When project selection changes in global modal, fetch that project's workers
-  useEffect(() => {
-    if (!isGlobal || !form.project_id) { setDynamicProjectWorkers([]); return; }
-    setLoadingWorkers(true);
-    api.workersForProject(form.project_id).then(setDynamicProjectWorkers).finally(() => setLoadingWorkers(false));
-  }, [form.project_id, isGlobal]);
+  const computed = usePayrollSync(form, setForm, insurancePremium);
 
-  // Auto-compute gross from rate × time
-  useEffect(() => {
-    if (form.rate <= 0) return;
-    const calcGross = computeGrossFromRate(form.rate, form.rate_type, form.time_worked);
-    if (Math.abs(calcGross - form.gross_pay) > 0.005) set("gross_pay", calcGross);
-  }, [form.rate, form.rate_type, form.time_worked]);
-
-  const computed = useMemo(
-    () => calculateKenyaPayroll(form.gross_pay, form.pension, form.insurance_relief),
-    [form.gross_pay, form.pension, form.insurance_relief]
-  );
-
-  // Sync computed statutory fields back into form
-  useEffect(() => {
-    setForm((prev) => ({
-      ...prev,
-      nssf_tier1: computed.nssf_tier1, nssf_tier2: computed.nssf_tier2,
-      nssf_total: computed.nssf_total, shif: computed.shif,
-      housing_levy: computed.housing_levy, taxable_income: computed.taxable_income,
-      paye_gross_tax: computed.paye_gross_tax, personal_relief: computed.personal_relief,
-      insurance_relief: computed.insurance_relief, paye_net: computed.paye_net,
-      total_deductions: computed.total_deductions, net_pay: computed.net_pay,
-    }));
-  }, [computed]);
-
-  // Determine which worker list to display in the dropdown
-  const workerList: Worker[] = (() => {
-    if (isGlobal) {
-      if (form.project_id && dynamicProjectWorkers.length > 0) return dynamicProjectWorkers;
-      return allWorkers ?? [];
+  const handleWorkerSelect = (workerId: string) => {
+    const worker = projectWorkers.find((w) => w.id === workerId);
+    if (!worker) {
+      set("worker_id", null);
+      set("employee_name", "");
+      set("job_id", "");
+      return;
     }
-    return projectWorkers ?? [];
-  })();
+    set("worker_id", workerId);
+    set("employee_name", worker.full_name);
+    if (!isEdit) {
+      const nameSlug = worker.full_name.replace(/\s+/g, "").slice(0, 3).toUpperCase();
+      const idSlug = workerId.slice(0, 4).toUpperCase();
+      set("job_id", `${nameSlug}-${idSlug}`);
+    }
+  };
 
-  const hasWorkers = workerList.length > 0;
-  const isValid = form.job_id.trim() !== "" && form.employee_name.trim() !== "" && form.gross_pay > 0;
-  const timeWorkedPlaceholder = form.rate_type === "Per Hour" ? "e.g. 160 (hours)" : form.rate_type === "Per Week" ? "e.g. 4 (weeks)" : "e.g. 1 (month)";
+  const hasWorkers = projectWorkers.length > 0;
+  const isValid = form.worker_id != null && form.employee_name.trim() !== "" && form.gross_pay > 0;
   const lastUpdatedDisplay = isEdit
     ? fmtDateTime(initial.updated_at ?? new Date().toISOString())
     : fmtDateTime(new Date().toISOString());
@@ -584,10 +745,10 @@ function EntryModal({
             </div>
             <div>
               <h2 className="text-sm font-bold text-foreground tracking-tight">
-                {isEdit ? "Edit Payroll Entry" : isGlobal ? "New Company Payroll Entry" : "New Project Payroll Entry"}
+                {isEdit ? "Edit Payroll Entry" : "New Project Payroll Entry"}
               </h2>
               <p className="text-[10px] text-muted-foreground">
-                {isGlobal ? "Company-wide entry — project link is optional" : "Kenya statutory calculations applied automatically"}
+                Select a worker assigned to this project · Kenya statutory calculations applied automatically
               </p>
             </div>
           </div>
@@ -596,26 +757,195 @@ function EntryModal({
               <p className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-bold">Last Updated</p>
               <p className="text-[10px] font-mono text-muted-foreground">{lastUpdatedDisplay}</p>
             </div>
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-xl hover:bg-white/10">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            <button onClick={onClose}
+              className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-xl hover:bg-white/10">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
             </button>
           </div>
         </div>
 
-        {/* Body — 2-col */}
+        {/* Body */}
         <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
-          {/* LEFT */}
           <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
 
-            {/* Project link — global modal only */}
-            {isGlobal && projects && (
+            {/* Worker select */}
+            <SectionLabel label="Employee" dotColor="bg-sky-400" textColor="text-sky-400"
+              sub={hasWorkers ? `${projectWorkers.length} workers assigned to this project` : "No workers assigned"} />
+
+            {hasWorkers ? (
+              <Field label="Select Worker *" hint="Only workers assigned to this project via worker_assignments are listed">
+                <div className="relative">
+                  <select
+                    value={form.worker_id ?? ""}
+                    onChange={(e) => handleWorkerSelect(e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="">— Select worker —</option>
+                    {projectWorkers.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.full_name}{w.role ? ` · ${w.role}` : ""}
+                      </option>
+                    ))}
+                    {isEdit && form.worker_id && !projectWorkers.find((w) => w.id === form.worker_id) && (
+                      <option value={form.worker_id}>{form.employee_name} (saved — no longer assigned)</option>
+                    )}
+                  </select>
+                  <SelectChevron />
+                </div>
+                {form.employee_name && (
+                  <p className="text-[10px] text-emerald-400/80 mt-1">
+                    ✓ {form.employee_name}{form.job_id ? ` · Ref: ${form.job_id}` : ""}
+                  </p>
+                )}
+              </Field>
+            ) : (
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm text-amber-300">
+                No workers are currently assigned to this project. Please assign workers via Project Management first.
+              </div>
+            )}
+
+            <PayrollFormFields
+              form={form}
+              set={set}
+              insurancePremium={insurancePremium}
+              setInsurancePremium={setInsurancePremium}
+            />
+
+            <Field label="Last Updated" hint="Auto-filled — cannot be changed manually">
+              <div className={inputCls + " cursor-not-allowed opacity-60 font-mono text-xs select-none bg-white/3"}>
+                {lastUpdatedDisplay}
+              </div>
+            </Field>
+          </div>
+
+          {/* Live Payslip */}
+          <div className="lg:col-span-2 px-5 py-5">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">Live Payslip Preview</p>
+            <PayslipBreakdown gross={form.gross_pay} computed={computed} pension={form.pension} />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/3">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+            Cancel
+          </button>
+          <button onClick={() => onSave(form)} disabled={loading || !isValid}
+            className="px-6 py-2.5 text-sm font-bold rounded-2xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center gap-2"
+            style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+            {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            {isEdit ? "Save Changes" : "Add Entry"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ─── GLOBAL ENTRY MODAL ───────────────────────────────────────────────────────
+function GlobalEntryModal({
+  initial, projects, allWorkers, onSave, onClose, loading,
+}: {
+  initial: PayrollFormData & { id?: number; updated_at?: string };
+  projects?: Project[];
+  allWorkers?: Worker[];
+  onSave: (d: PayrollFormData) => void;
+  onClose: () => void;
+  loading: boolean;
+}) {
+  const [form, setForm] = useState<PayrollFormData>({ ...initial });
+  const isEdit = Boolean(initial.id);
+
+  // Raw insurance premium — separate state, never overwritten by computed sync
+  const [insurancePremium, setInsurancePremium] = useState<number>(
+    () => derivePremiumFromRelief(initial.insurance_relief),
+  );
+
+  const [dynamicProjectWorkers, setDynamicProjectWorkers] = useState<Worker[]>([]);
+  const [loadingWorkers, setLoadingWorkers] = useState(false);
+
+  const set = <K extends keyof PayrollFormData>(k: K, v: PayrollFormData[K]) =>
+    setForm((p) => ({ ...p, [k]: v }));
+
+  const computed = usePayrollSync(form, setForm, insurancePremium);
+
+  useEffect(() => {
+    if (!form.project_id) { setDynamicProjectWorkers([]); return; }
+    setLoadingWorkers(true);
+    api.workersForProject(form.project_id)
+      .then(setDynamicProjectWorkers)
+      .finally(() => setLoadingWorkers(false));
+  }, [form.project_id]);
+
+  const workerList: Worker[] = form.project_id && dynamicProjectWorkers.length > 0
+    ? dynamicProjectWorkers
+    : (allWorkers ?? []);
+
+  const hasWorkers = workerList.length > 0;
+  const isValid = form.job_id.trim() !== "" && form.employee_name.trim() !== "" && form.gross_pay > 0;
+  const lastUpdatedDisplay = isEdit
+    ? fmtDateTime(initial.updated_at ?? new Date().toISOString())
+    : fmtDateTime(new Date().toISOString());
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+      <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95"
+        initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 10 }} transition={{ duration: 0.22, ease: "easeOut" }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
+              <span className="text-base">🇰🇪</span>
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-foreground tracking-tight">
+                {isEdit ? "Edit Payroll Entry" : "New Company Payroll Entry"}
+              </h2>
+              <p className="text-[10px] text-muted-foreground">
+                Company-wide entry — project link is optional
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-bold">Last Updated</p>
+              <p className="text-[10px] font-mono text-muted-foreground">{lastUpdatedDisplay}</p>
+            </div>
+            <button onClick={onClose}
+              className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-xl hover:bg-white/10">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
+          <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
+
+            {/* Project link */}
+            {projects && (
               <>
-                <SectionLabel label="Link to Project" dotColor="bg-primary/50" textColor="text-primary/70" sub="Optional — leave blank for company-wide entry" />
-                <Field label="Project (optional)" hint="Selecting a project filters the employee dropdown to that project's workers">
+                <SectionLabel label="Link to Project" dotColor="bg-primary/50" textColor="text-primary/70"
+                  sub="Optional — leave blank for company-wide entry" />
+                <Field label="Project (optional)"
+                  hint="Selecting a project filters the employee dropdown to that project's workers">
                   <div className="relative">
                     <select
                       value={form.project_id ?? ""}
-                      onChange={(e) => { set("project_id", e.target.value || null); set("employee_name", ""); }}
+                      onChange={(e) => {
+                        set("project_id", e.target.value || null);
+                        set("employee_name", "");
+                        set("worker_id", null);
+                      }}
                       className={selectCls}
                     >
                       <option value="">— No project (company-wide entry) —</option>
@@ -632,10 +962,14 @@ function EntryModal({
                     </p>
                   )}
                   {form.project_id && !loadingWorkers && dynamicProjectWorkers.length > 0 && (
-                    <p className="text-[10px] text-emerald-400/80 mt-1">✓ {dynamicProjectWorkers.length} workers found for this project</p>
+                    <p className="text-[10px] text-emerald-400/80 mt-1">
+                      ✓ {dynamicProjectWorkers.length} workers found for this project
+                    </p>
                   )}
                   {form.project_id && !loadingWorkers && dynamicProjectWorkers.length === 0 && (
-                    <p className="text-[10px] text-amber-400/80 mt-1">No assigned workers found — showing all active company workers</p>
+                    <p className="text-[10px] text-amber-400/80 mt-1">
+                      No assigned workers found — showing all active company workers
+                    </p>
                   )}
                 </Field>
               </>
@@ -648,17 +982,13 @@ function EntryModal({
                 <input value={form.job_id} onChange={(e) => set("job_id", e.target.value)}
                   placeholder="J-001" className={inputCls} />
               </Field>
-
-              {/* ── Employee Name — <select> dropdown from workers ── */}
               <Field
                 label="Employee Name *"
                 hint={
                   hasWorkers
-                    ? isGlobal
-                      ? form.project_id
-                        ? `${workerList.length} workers assigned to selected project`
-                        : `${workerList.length} active company workers`
-                      : `${workerList.length} workers assigned to this project`
+                    ? form.project_id
+                      ? `${workerList.length} workers assigned to selected project`
+                      : `${workerList.length} active company workers`
                     : "No workers found — enter name manually"
                 }
               >
@@ -675,7 +1005,6 @@ function EntryModal({
                           {w.full_name}{w.role ? ` (${w.role})` : ""}
                         </option>
                       ))}
-                      {/* Preserve existing name if editing and not in current list */}
                       {form.employee_name && !workerList.find((w) => w.full_name === form.employee_name) && (
                         <option value={form.employee_name}>{form.employee_name} (saved)</option>
                       )}
@@ -683,107 +1012,28 @@ function EntryModal({
                     <SelectChevron />
                   </div>
                 ) : (
-                  // Fallback: plain text input when no workers available
-                  <input
-                    value={form.employee_name}
+                  <input value={form.employee_name}
                     onChange={(e) => set("employee_name", e.target.value)}
-                    placeholder="Full Name"
-                    className={inputCls}
-                    autoComplete="off"
-                  />
+                    placeholder="Full Name" className={inputCls} autoComplete="off" />
                 )}
               </Field>
             </div>
 
-            {/* Pay Rate */}
-            <SectionLabel label="Pay Rate" dotColor="bg-violet-400" textColor="text-violet-400" sub="Gross auto-calculated from rate × time" />
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Rate (KES) *" hint="Amount per unit of time">
-                <input type="number" step="0.01" min="0" value={form.rate || ""}
-                  onChange={(e) => set("rate", parseFloat(e.target.value) || 0)}
-                  className={inputCls} placeholder="0.00" />
-              </Field>
-              <Field label="Rate Type *">
-                <div className="flex gap-1 h-10 rounded-xl bg-white/5 border border-white/10 p-1">
-                  {RATE_TYPES.map((rt) => (
-                    <button key={rt} type="button" onClick={() => set("rate_type", rt)}
-                      className={`flex-1 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${
-                        form.rate_type === rt ? "bg-primary text-primary-foreground shadow-sm" : "hover:bg-white/10 text-muted-foreground"
-                      }`}>{rt.replace("Per ", "")}</button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Time Worked *" hint={timeWorkedPlaceholder}>
-                <input value={form.time_worked} onChange={(e) => set("time_worked", e.target.value)}
-                  placeholder={timeWorkedPlaceholder} className={inputCls} />
-              </Field>
-            </div>
-
-            <Field label="Gross Pay (KES) *" hint="Auto-calculated or enter manually">
-              <div className="relative">
-                <input type="number" step="0.01" min="0" value={form.gross_pay || ""}
-                  onChange={(e) => set("gross_pay", parseFloat(e.target.value) || 0)}
-                  className={inputCls + " pr-16 font-bold text-base"} placeholder="0.00" />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">KES</span>
-              </div>
-            </Field>
-
-            {/* Voluntary Deductions */}
-            <SectionLabel label="Voluntary Deductions" dotColor="bg-sky-400" textColor="text-sky-400" sub="Tax-deductible; updates live" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Pension Contribution (KES)" hint="Max KES 30,000 p.m. (tax exempt)">
-                <input type="number" step="0.01" min="0" max="30000" value={form.pension || ""}
-                  onChange={(e) => set("pension", Math.min(parseFloat(e.target.value) || 0, 30_000))}
-                  placeholder="0.00" className={inputCls} />
-              </Field>
-              <Field label="Annual Insurance Premium (KES)" hint="Relief = 15% of premium, max KES 5,000 p.m.">
-                <input type="number" step="0.01" min="0" value={form.insurance_relief || ""}
-                  onChange={(e) => set("insurance_relief", parseFloat(e.target.value) || 0)}
-                  placeholder="0.00" className={inputCls} />
-              </Field>
-            </div>
-
-            {/* Payment & References */}
-            <SectionLabel label="Payment & References" dotColor="bg-rose-400" textColor="text-rose-400" />
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Due Date">
-                <input type="date" value={form.due_date ?? ""}
-                  onChange={(e) => set("due_date", e.target.value || null)}
-                  className={inputCls + " [color-scheme:dark]"} />
-              </Field>
-              <Field label="Paid Date">
-                <input type="date" value={form.paid_date ?? ""}
-                  onChange={(e) => set("paid_date", e.target.value || null)}
-                  className={inputCls + " [color-scheme:dark]"} />
-              </Field>
-              <Field label="Payment Status *">
-                <div className="relative">
-                  <select value={form.payment_status}
-                    onChange={(e) => set("payment_status", e.target.value as PaymentStatus)}
-                    className={selectCls}>
-                    {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <SelectChevron />
-                </div>
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Field label="Bank Code"><input value={form.bank_code ?? ""} onChange={(e) => set("bank_code", e.target.value || null)} placeholder="e.g. 1002" className={inputCls} /></Field>
-              <Field label="Serial No."><input value={form.serial_no ?? ""} onChange={(e) => set("serial_no", e.target.value || null)} placeholder="S-1001" className={inputCls} /></Field>
-              <Field label="eTIMS Code"><input value={form.etims_code ?? ""} onChange={(e) => set("etims_code", e.target.value || null)} placeholder="ETIMS-55555" className={inputCls} /></Field>
-            </div>
+            <PayrollFormFields
+              form={form}
+              set={set}
+              insurancePremium={insurancePremium}
+              setInsurancePremium={setInsurancePremium}
+            />
 
             <Field label="Last Updated" hint="Auto-filled — cannot be changed manually">
-              <div className={inputCls + " cursor-not-allowed opacity-60 font-mono text-xs select-none bg-white/3"}>{lastUpdatedDisplay}</div>
-            </Field>
-
-            <Field label="Notes">
-              <textarea value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value || null)}
-                rows={2} placeholder="Additional remarks…" className={inputCls + " resize-none"} />
+              <div className={inputCls + " cursor-not-allowed opacity-60 font-mono text-xs select-none bg-white/3"}>
+                {lastUpdatedDisplay}
+              </div>
             </Field>
           </div>
 
-          {/* RIGHT – Live Payslip */}
+          {/* Live Payslip */}
           <div className="lg:col-span-2 px-5 py-5">
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">Live Payslip Preview</p>
             <PayslipBreakdown gross={form.gross_pay} computed={computed} pension={form.pension} />
@@ -792,7 +1042,10 @@ function EntryModal({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/3">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+            Cancel
+          </button>
           <button onClick={() => onSave(form)} disabled={loading || !isValid}
             className="px-6 py-2.5 text-sm font-bold rounded-2xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
@@ -813,7 +1066,8 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
-      <motion.div className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-2xl bg-[#0d0d0d]/95"
+      <motion.div
+        className="relative w-full max-w-sm rounded-2xl border border-white/10 p-6 shadow-2xl backdrop-blur-2xl bg-[#0d0d0d]/95"
         initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.18 }}>
         <div className="flex items-start gap-4 mb-6">
@@ -826,13 +1080,16 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
             <h3 className="font-bold text-foreground mb-1">Delete Payroll Entry</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Permanently remove the payroll record for{" "}
-              <span className="text-foreground font-semibold">{entry.employee_name}</span>{" "}
-              ({entry.job_id})? This action cannot be undone.
+              <span className="text-foreground font-semibold">{entry.employee_name}</span>?{" "}
+              This action cannot be undone.
             </p>
           </div>
         </div>
         <div className="flex gap-3 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">Cancel</button>
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+            Cancel
+          </button>
           <button onClick={onConfirm} disabled={loading}
             className="px-4 py-2 text-sm font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition-all disabled:opacity-50 flex items-center gap-2">
             {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
@@ -846,7 +1103,8 @@ function DeleteConfirm({ entry, onConfirm, onClose, loading }: {
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
 function ProjectCard({ project, onSelect, counts }: {
-  project: Project; onSelect: (p: Project) => void;
+  project: Project;
+  onSelect: (p: Project) => void;
   counts: { total: number; unpaid: number; overdue: number };
 }) {
   const status = project.status ?? "planning";
@@ -856,19 +1114,29 @@ function ProjectCard({ project, onSelect, counts }: {
       className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/4 p-5 hover:border-primary/35 hover:bg-white/7 transition-all duration-200 shadow-sm group">
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg tracking-tight">{project.project_number}</span>
-          <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusCls}`}>{status.replace(/_/g, " ")}</span>
+          <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg tracking-tight">
+            {project.project_number}
+          </span>
+          <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusCls}`}>
+            {status.replace(/_/g, " ")}
+          </span>
         </div>
         {counts.total > 0 && (
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <span className="text-[9px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded-full tabular-nums">{counts.total}</span>
+            <span className="text-[9px] bg-white/5 border border-white/10 text-muted-foreground px-2 py-0.5 rounded-full tabular-nums">
+              {counts.total}
+            </span>
             {counts.overdue > 0 && (
-              <span className="text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full">{counts.overdue} overdue</span>
+              <span className="text-[9px] bg-orange-500/10 border border-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full">
+                {counts.overdue} overdue
+              </span>
             )}
           </div>
         )}
       </div>
-      <h3 className="font-bold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors line-clamp-1">{project.title}</h3>
+      <h3 className="font-bold text-foreground text-sm mb-1.5 group-hover:text-primary transition-colors line-clamp-1">
+        {project.title}
+      </h3>
       {project.description && (
         <p className="text-xs text-muted-foreground line-clamp-2 mb-3 leading-relaxed">{project.description}</p>
       )}
@@ -876,14 +1144,17 @@ function ProjectCard({ project, onSelect, counts }: {
         {project.site_city && (
           <span className="flex items-center gap-1">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/>
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+              <circle cx="12" cy="9" r="2.5"/>
             </svg>
             {project.site_city}
           </span>
         )}
         {project.budget_numeric != null && (
           <span className="flex items-center gap-1 text-emerald-400/80">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
             {fmt(project.budget_numeric)}
           </span>
         )}
@@ -918,21 +1189,31 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
 
   return (
     <>
-      <motion.tr className={`border-b border-white/8 cursor-pointer transition-colors ${s.row}`}
-        onClick={() => setExpanded((x) => !x)}>
+      <motion.tr
+        className={`border-b border-white/8 cursor-pointer transition-colors ${s.row}`}
+        onClick={() => setExpanded((x) => !x)}
+      >
         {showProject && (
           <td className="px-4 py-3.5 whitespace-nowrap">
             {entry.project_id && projectMap?.[entry.project_id] ? (
               <div>
-                <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{projectMap[entry.project_id].project_number}</span>
-                <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[100px] truncate">{projectMap[entry.project_id].title}</div>
+                <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
+                  {projectMap[entry.project_id].project_number}
+                </span>
+                <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[100px] truncate">
+                  {projectMap[entry.project_id].title}
+                </div>
               </div>
             ) : (
-              <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">Company</span>
+              <span className="text-[10px] text-muted-foreground italic px-1.5 py-0.5 rounded border border-white/10 bg-white/5">
+                Company
+              </span>
             )}
           </td>
         )}
-        <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">{entry.job_id}</td>
+        {showProject && (
+          <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">{entry.job_id || "—"}</td>
+        )}
         <td className="px-4 py-3.5 font-semibold text-sm">{entry.employee_name}</td>
         <td className="px-4 py-3.5 tabular-nums text-sm font-semibold">{fmt(entry.gross_pay)}</td>
         <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300">{fmt(entry.nssf_total)}</td>
@@ -942,14 +1223,24 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
         <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm">{fmt(entry.net_pay)}</td>
         <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell">{fmtDate(entry.due_date)}</td>
         <td className="px-4 py-3.5 whitespace-nowrap">
-          <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">{fmtDateTime(entry.updated_at ?? entry.created_at)}</span>
+          <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">
+            {fmtDateTime(entry.updated_at ?? entry.created_at)}
+          </span>
         </td>
-        <td className="px-4 py-3.5"><Badge className={`text-[9px] font-bold ${s.badge}`}>{entry.payment_status}</Badge></td>
+        <td className="px-4 py-3.5">
+          <Badge className={`text-[9px] font-bold ${s.badge}`}>{entry.payment_status}</Badge>
+        </td>
         {canEdit && (
           <td className="px-4 py-3.5">
             <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-              <button onClick={onEdit} className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium">Edit</button>
-              <button onClick={onDelete} className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium">Del</button>
+              <button onClick={onEdit}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium">
+                Edit
+              </button>
+              <button onClick={onDelete}
+                className="text-xs text-rose-400 hover:text-rose-300 transition-colors px-2 py-1 rounded-lg hover:bg-rose-500/10 font-medium">
+                Del
+              </button>
             </div>
           </td>
         )}
@@ -957,19 +1248,20 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
       <AnimatePresence>
         {expanded && (
           <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="bg-white/2">
-            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 12 : 11)} className="px-6 py-4">
+            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 10 : 9)} className="px-6 py-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px]">
                 {[
-                  { label: "Rate",             value: `${fmt(entry.rate)} / ${entry.rate_type}` },
-                  { label: "Time Worked",       value: entry.time_worked || "—" },
-                  { label: "NSSF Tier I",       value: fmt(entry.nssf_tier1) },
-                  { label: "NSSF Tier II",      value: fmt(entry.nssf_tier2) },
-                  { label: "Pension",           value: fmt(entry.pension) },
-                  { label: "Taxable Income",    value: fmt(entry.taxable_income) },
-                  { label: "PAYE Gross",        value: fmt(entry.paye_gross_tax) },
-                  { label: "Personal Relief",   value: fmt(entry.personal_relief) },
-                  { label: "Insurance Relief",  value: fmt(entry.insurance_relief) },
-                  { label: "Total Deductions",  value: fmt(entry.total_deductions) },
+                  { label: "Rate",            value: `${fmt(entry.rate)} / ${entry.rate_type}` },
+                  { label: "Time Worked",      value: entry.time_worked || "—" },
+                  { label: "NSSF Tier I",      value: fmt(entry.nssf_tier1) },
+                  { label: "NSSF Tier II",     value: fmt(entry.nssf_tier2) },
+                  { label: "Pension",          value: fmt(entry.pension) },
+                  { label: "Taxable Income",   value: fmt(entry.taxable_income) },
+                  { label: "PAYE Gross",       value: fmt(entry.paye_gross_tax) },
+                  { label: "Personal Relief",  value: fmt(entry.personal_relief) },
+                  { label: "Insurance Relief", value: fmt(entry.insurance_relief) },
+                  { label: "Total Deductions", value: fmt(entry.total_deductions) },
+                  ...(showProject && entry.job_id ? [{ label: "Job Ref",   value: entry.job_id   }] : []),
                   ...(entry.bank_code  ? [{ label: "Bank Code",  value: entry.bank_code  }] : []),
                   ...(entry.serial_no  ? [{ label: "Serial No.", value: entry.serial_no  }] : []),
                   ...(entry.etims_code ? [{ label: "eTIMS Code", value: entry.etims_code }] : []),
@@ -990,7 +1282,7 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
   );
 }
 
-// ─── GRAND TOTAL FOOTER (shared) ──────────────────────────────────────────────
+// ─── GRAND TOTAL FOOTER ───────────────────────────────────────────────────────
 function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: PayrollEntry[]; label?: string }) {
   const gross      = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
   const net        = entries.reduce((a, e) => a + n0(e.net_pay), 0);
@@ -1034,11 +1326,10 @@ function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: Payroll
   );
 }
 
-// ─── GROUPED TABLE BODY (shared between project and global views) ───────────
+// ─── GROUPED TABLE BODY ───────────────────────────────────────────────────────
 function GroupedPayrollBody({
   entries, filtered, grouped, fetching, canEdit,
-  showProject, projectMap, onEdit, onDelete, onCreateFirst,
-  tableHeaders,
+  showProject, projectMap, onEdit, onDelete, onCreateFirst, tableHeaders,
 }: {
   entries: PayrollEntry[];
   filtered: PayrollEntry[];
@@ -1053,7 +1344,7 @@ function GroupedPayrollBody({
   tableHeaders: string[];
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
-    Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true]))
+    Object.fromEntries(PAYMENT_STATUSES.map((s) => [s, true])),
   );
 
   if (fetching) {
@@ -1072,7 +1363,11 @@ function GroupedPayrollBody({
           <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/>
         </svg>
         <p className="text-sm">No payroll entries found.</p>
-        {canEdit && <button onClick={onCreateFirst} className="text-sm text-primary hover:underline">Add the first entry →</button>}
+        {canEdit && (
+          <button onClick={onCreateFirst} className="text-sm text-primary hover:underline">
+            Add the first entry →
+          </button>
+        )}
       </div>
     );
   }
@@ -1104,19 +1399,24 @@ function GroupedPayrollBody({
                   </p>
                 </div>
                 <svg className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
               </div>
             </button>
             <AnimatePresence initial={false}>
               {isOpen && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="overflow-hidden">
+                  exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm min-w-[700px]">
+                    <table className="w-full text-sm min-w-[600px]">
                       <thead>
                         <tr className="border-y border-white/8 bg-white/3">
                           {tableHeaders.map((h) => (
-                            <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                            <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                              {h}
+                            </th>
                           ))}
                         </tr>
                       </thead>
@@ -1140,9 +1440,6 @@ function GroupedPayrollBody({
 }
 
 // ─── GLOBAL PAYROLL VIEW ──────────────────────────────────────────────────────
-// Mirrors GlobalAPView from AccountsPayablePage exactly:
-//   Consolidated tab → all entries (project-linked + company-wide), "Scope" column visible
-//   By Project tab   → dropdown filter by specific project or "Company-wide only"
 type GlobalPayrollTab = "consolidated" | "by_project";
 
 function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
@@ -1193,12 +1490,15 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   const handleDelete = async () => {
     if (!deleting) return;
     setSaving(true);
-    try { await api.remove(deleting.id); setAllEntries((p) => p.filter((e) => e.id !== deleting.id)); push("Entry deleted"); setDeleting(null); }
+    try {
+      await api.remove(deleting.id);
+      setAllEntries((p) => p.filter((e) => e.id !== deleting.id));
+      push("Entry deleted"); setDeleting(null);
+    }
     catch (err: unknown) { push(err instanceof Error ? err.message : "Failed.", "error"); }
     finally { setSaving(false); }
   };
 
-  // Derive display rows based on active tab + project filter
   const displayRows = useMemo(() => {
     if (activeTab === "by_project") {
       if (projectFilter === "company") return allEntries.filter((e) => e.project_id === null);
@@ -1229,7 +1529,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
     return g;
   }, [filtered]);
 
-  // Entry counts per project for the By Project dropdown
   const entryCountByProject = useMemo(() => {
     const c: Record<string, number> = {};
     allEntries.forEach((e) => { if (e.project_id) c[e.project_id] = (c[e.project_id] ?? 0) + 1; });
@@ -1239,7 +1538,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   const companyCount = allEntries.filter((e) => !e.project_id).length;
   const projectsWithEntries = useMemo(
     () => projects.filter((p) => entryCountByProject[p.id] > 0),
-    [projects, entryCountByProject]
+    [projects, entryCountByProject],
   );
 
   const grandGross = allEntries.reduce((a, e) => a + n0(e.gross_pay), 0);
@@ -1254,8 +1553,8 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   [allEntries]);
 
   const tabs: { key: GlobalPayrollTab; label: string; count: number; description: string }[] = [
-    { key: "consolidated", label: "Consolidated", count: allEntries.length, description: "All payroll entries — project-linked + company-wide. Scope column visible." },
-    { key: "by_project",   label: "By Project",   count: projectsWithEntries.length, description: "Filter by a specific project or show company-wide only." },
+    { key: "consolidated", label: "Consolidated",  count: allEntries.length,           description: "All payroll entries — project-linked + company-wide. Scope + Job ID columns visible." },
+    { key: "by_project",   label: "By Project",    count: projectsWithEntries.length,  description: "Filter by a specific project or show company-wide only." },
   ];
 
   const TABLE_HEADERS_GLOBAL = [
@@ -1270,22 +1569,20 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
 
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal
-            initial={makeEmptyForm(null)}
+          <GlobalEntryModal
+            initial={makeEmptyGlobalForm()}
             projects={projects}
             allWorkers={allWorkers}
-            isGlobal={true}
             onSave={handleCreate}
             onClose={() => setModal(null)}
             loading={saving}
           />
         )}
         {modal === "edit" && editing && (
-          <EntryModal
+          <GlobalEntryModal
             initial={{ ...editing }}
             projects={projects}
             allWorkers={allWorkers}
-            isGlobal={true}
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
@@ -1296,7 +1593,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
         )}
       </AnimatePresence>
 
-      {/* ── Company Payroll Hero Banner ── */}
+      {/* Hero Banner */}
       <div className="relative rounded-2xl overflow-hidden mb-6 border border-white/10">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />
         <div className="absolute inset-0 opacity-30"
@@ -1308,9 +1605,13 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">🇰🇪</span>
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/70">Firm Overview · Company Payroll</span>
+                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/70">
+                  Firm Overview · Company Payroll
+                </span>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">Company-Wide Payroll Register</h2>
+              <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
+                Company-Wide Payroll Register
+              </h2>
               <p className="text-sm text-muted-foreground mt-1 max-w-lg">
                 All payroll obligations across the company — project-linked and standalone entries.
                 KRA / NSSF / SHIF / AHL compliant · 2026
@@ -1320,21 +1621,24 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
               <button onClick={() => setModal("create")}
                 className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-lg"
                 style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
                 New Entry
               </button>
             )}
           </div>
-          {/* Quick stat pills */}
           <div className="flex flex-wrap gap-2 mt-5">
             {[
-              { label: "Total Entries",   value: allEntries.length,           color: "text-foreground",    bg: "bg-white/8"        },
-              { label: "Company-wide",    value: companyCount,                color: "text-sky-300",       bg: "bg-sky-500/10"     },
-              { label: "Project-linked",  value: allEntries.length - companyCount, color: "text-violet-300", bg: "bg-violet-500/10" },
-              { label: "Gross Payroll",   value: `KES ${fmtC(grandGross)}`,   color: "text-foreground",    bg: "bg-white/8"        },
-              { label: "Net Payroll",     value: `KES ${fmtC(grandNet)}`,     color: "text-emerald-300",   bg: "bg-emerald-500/10" },
-              { label: "% Paid",          value: `${allEntries.length ? Math.round((paidCount / allEntries.length) * 100) : 0}%`,
-                color: paidCount === allEntries.length && allEntries.length > 0 ? "text-emerald-400" : "text-amber-300", bg: "bg-white/8" },
+              { label: "Total Entries",  value: allEntries.length,                 color: "text-foreground",    bg: "bg-white/8"        },
+              { label: "Company-wide",   value: companyCount,                      color: "text-sky-300",       bg: "bg-sky-500/10"     },
+              { label: "Project-linked", value: allEntries.length - companyCount,  color: "text-violet-300",    bg: "bg-violet-500/10"  },
+              { label: "Gross Payroll",  value: `KES ${fmtC(grandGross)}`,         color: "text-foreground",    bg: "bg-white/8"        },
+              { label: "Net Payroll",    value: `KES ${fmtC(grandNet)}`,           color: "text-emerald-300",   bg: "bg-emerald-500/10" },
+              { label: "% Paid",
+                value: `${allEntries.length ? Math.round((paidCount / allEntries.length) * 100) : 0}%`,
+                color: paidCount === allEntries.length && allEntries.length > 0 ? "text-emerald-400" : "text-amber-300",
+                bg: "bg-white/8" },
             ].map((stat) => (
               <div key={stat.label} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 ${stat.bg}`}>
                 <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold">{stat.label}</span>
@@ -1347,7 +1651,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
 
       <Card className="backdrop-blur-xl bg-white/5 border border-white/12 rounded-2xl shadow-xl overflow-hidden">
         <CardHeader className="pb-0 border-b border-white/8">
-          {/* Status summary pills */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 pt-4">
             {PAYMENT_STATUSES.map((ps) => {
               const s = STATUS_STYLE[ps];
@@ -1369,12 +1672,11 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             })}
           </div>
 
-          {/* Tab switcher — Consolidated | By Project */}
           <div className="flex gap-1 mb-4 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
             {tabs.map((tab) => (
               <button key={tab.key}
                 onClick={() => { setActiveTab(tab.key); setProjectFilter("all"); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === tab.key ? "bg-white/10 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}>
                 {tab.label}
@@ -1385,7 +1687,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             ))}
           </div>
 
-          {/* By Project dropdown — only shown in by_project tab */}
           {activeTab === "by_project" && (
             <div className="flex items-center gap-3 mb-3">
               <div className="relative w-80">
@@ -1401,7 +1702,10 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
                 <SelectChevron />
               </div>
               {projectFilter !== "all" && (
-                <button onClick={() => setProjectFilter("all")} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Clear</button>
+                <button onClick={() => setProjectFilter("all")}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  Clear
+                </button>
               )}
             </div>
           )}
@@ -1410,7 +1714,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             {tabs.find((t) => t.key === activeTab)?.description}
           </p>
 
-          {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-3 pb-4">
             <div className="relative flex-1">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -1421,7 +1724,8 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
                 className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
             </div>
             <div className="relative">
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
+              <select value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
                 className={selectCls} style={{ minWidth: "9rem" }}>
                 <option value="All">All Statuses</option>
                 {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1436,12 +1740,8 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
 
         <CardContent className="p-0">
           <GroupedPayrollBody
-            entries={displayRows}
-            filtered={filtered}
-            grouped={grouped}
-            fetching={fetching}
-            canEdit={canEdit}
-            showProject={activeTab === "consolidated"}
+            entries={displayRows} filtered={filtered} grouped={grouped}
+            fetching={fetching} canEdit={canEdit} showProject={true}
             projectMap={projectMap}
             onEdit={(e) => { setEditing(e); setModal("edit"); }}
             onDelete={setDeleting}
@@ -1519,8 +1819,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       <ToastStack toasts={toasts} />
-
       <div className="container mx-auto px-4 py-12 max-w-7xl">
+
         {/* Hero */}
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mb-12">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -1531,7 +1831,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               </p>
               <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black leading-none tracking-tighter">
                 Payroll{" "}
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">Checklist</span>
+                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+                  Checklist
+                </span>
               </h1>
               <p className="text-base sm:text-lg text-muted-foreground mt-3 max-w-xl">
                 Fully compliant statutory payroll — NSSF, SHIF, AHL & PAYE auto-applied.
@@ -1555,7 +1857,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </div>
         </motion.div>
 
-        {/* Section: Project Payrolls */}
+        {/* Project Payrolls section */}
         <div className="flex items-center gap-3 mb-5">
           <div className="w-1 h-6 rounded-full bg-gradient-to-b from-violet-400 to-primary" />
           <h2 className="text-xl font-black text-foreground">Project Payrolls</h2>
@@ -1563,7 +1865,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           <span className="text-xs text-muted-foreground">Click a project to manage its payroll</span>
         </div>
 
-        {/* Filter bar */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -1574,7 +1875,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
           </div>
           <div className="relative">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectCls} style={{ minWidth: "9rem" }}>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+              className={selectCls} style={{ minWidth: "9rem" }}>
               <option value="all">All Statuses</option>
               {Array.from(new Set(projects.map((p) => p.status ?? "planning"))).map((s) => (
                 <option key={s} value={s}>{s.replace(/_/g, " ").toUpperCase()}</option>
@@ -1584,7 +1886,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </div>
         </div>
 
-        {/* Project grid */}
         {fetching ? (
           <div className="flex items-center justify-center py-32 text-muted-foreground">
             <span className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin mr-3" />
@@ -1594,7 +1895,8 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           <div className="text-center py-32 text-muted-foreground">No projects found.</div>
         ) : (
           <motion.div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-14"
-            initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.05 } }, hidden: {} }}>
+            initial="hidden" animate="visible"
+            variants={{ visible: { transition: { staggerChildren: 0.05 } }, hidden: {} }}>
             {filtered.map((p) => (
               <motion.div key={p.id} variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0 } }}>
                 <ProjectCard project={p} onSelect={onSelect} counts={counts[p.id] ?? { total: 0, unpaid: 0, overdue: 0 }} />
@@ -1603,7 +1905,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           </motion.div>
         )}
 
-        {/* ── Section: Company-Wide Payroll Register (GlobalPayrollView) ── */}
+        {/* Company-Wide Payroll Register */}
         {!fetching && (
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }}>
             <div className="flex items-center gap-3 mb-5">
@@ -1632,7 +1934,6 @@ function PayrollView({ project, canEdit, onBack }: {
   const [editing,        setEditing]        = useState<PayrollEntry | null>(null);
   const [deleting,       setDeleting]       = useState<PayrollEntry | null>(null);
   const [saving,         setSaving]         = useState(false);
-  // Workers from worker_assignments JOIN workers for this project (uses full_name)
   const [projectWorkers, setProjectWorkers] = useState<Worker[]>([]);
   const { toasts, push } = useToast();
 
@@ -1683,9 +1984,7 @@ function PayrollView({ project, canEdit, onBack }: {
   const filtered = useMemo(() =>
     entries.filter((e) => {
       const statusMatch = filterStatus === "All" || e.payment_status === filterStatus;
-      const searchMatch = !search ||
-        e.employee_name.toLowerCase().includes(search.toLowerCase()) ||
-        e.job_id.toLowerCase().includes(search.toLowerCase());
+      const searchMatch = !search || e.employee_name.toLowerCase().includes(search.toLowerCase());
       return statusMatch && searchMatch;
     }), [entries, filterStatus, search]);
 
@@ -1704,7 +2003,7 @@ function PayrollView({ project, canEdit, onBack }: {
   const paidPct    = entries.length ? Math.round((paidCount / entries.length) * 100) : 0;
 
   const TABLE_HEADERS = [
-    "Job ID", "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
+    "Employee", "Gross", "NSSF", "SHIF", "AHL", "PAYE",
     "Net Pay", "Due Date", "Last Updated", "Status",
     ...(canEdit ? ["Actions"] : []),
   ];
@@ -1715,20 +2014,18 @@ function PayrollView({ project, canEdit, onBack }: {
 
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal
-            initial={makeEmptyForm(project.id)}
+          <ProjectEntryModal
+            initial={makeEmptyProjectForm(project.id)}
             projectWorkers={projectWorkers}
-            isGlobal={false}
             onSave={handleCreate}
             onClose={() => setModal(null)}
             loading={saving}
           />
         )}
         {modal === "edit" && editing && (
-          <EntryModal
+          <ProjectEntryModal
             initial={{ ...editing }}
             projectWorkers={projectWorkers}
-            isGlobal={false}
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
@@ -1740,8 +2037,8 @@ function PayrollView({ project, canEdit, onBack }: {
       </AnimatePresence>
 
       <div className="container mx-auto px-4 py-10 max-w-[1400px]">
-        {/* Back */}
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group">
+        <button onClick={onBack}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors group">
           <svg className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path d="M19 12H5M12 5l-7 7 7 7"/>
           </svg>
@@ -1751,7 +2048,9 @@ function PayrollView({ project, canEdit, onBack }: {
         {/* Project Header */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl tracking-tight font-bold">{project.project_number}</span>
+            <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl tracking-tight font-bold">
+              {project.project_number}
+            </span>
             {project.status && (
               <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${PROJECT_STATUS_STYLE[project.status] ?? PROJECT_STATUS_STYLE.planning}`}>
                 {project.status.replace(/_/g, " ")}
@@ -1790,7 +2089,9 @@ function PayrollView({ project, canEdit, onBack }: {
                 }`}>
                 <div className={`text-[9px] uppercase tracking-widest font-black mb-1 ${s.accent}`}>{ps}</div>
                 <div className="text-2xl sm:text-3xl font-black tabular-nums">{rows.length}</div>
-                <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">KES {fmtC(rows.reduce((a, e) => a + n0(e.net_pay), 0))} net</div>
+                <div className="text-[9px] text-muted-foreground mt-0.5 tabular-nums">
+                  KES {fmtC(rows.reduce((a, e) => a + n0(e.net_pay), 0))} net
+                </div>
               </button>
             );
           })}
@@ -1813,14 +2114,16 @@ function PayrollView({ project, canEdit, onBack }: {
               <div>
                 <CardTitle className="text-2xl font-black">Payroll Entries</CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Click any row to expand · Employee dropdown sourced from project worker assignments (workers.full_name)
+                  Click any row to expand · Workers sourced exclusively from this project's worker_assignments
                 </p>
               </div>
               {canEdit && (
                 <button onClick={() => setModal("create")}
                   className="flex-shrink-0 px-5 py-2.5 rounded-2xl font-bold text-sm text-primary-foreground flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
                   style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
                   New Entry
                 </button>
               )}
@@ -1831,11 +2134,12 @@ function PayrollView({ project, canEdit, onBack }: {
                   <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
                 </svg>
                 <input value={search} onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search employee name or job ID…"
+                  placeholder="Search employee name…"
                   className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all text-foreground placeholder-muted-foreground" />
               </div>
               <div className="relative">
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
+                <select value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as PaymentStatus | "All")}
                   className={selectCls} style={{ minWidth: "9rem" }}>
                   <option value="All">All Statuses</option>
                   {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1847,12 +2151,8 @@ function PayrollView({ project, canEdit, onBack }: {
 
           <CardContent className="p-0">
             <GroupedPayrollBody
-              entries={entries}
-              filtered={filtered}
-              grouped={grouped}
-              fetching={fetching}
-              canEdit={canEdit}
-              showProject={false}
+              entries={entries} filtered={filtered} grouped={grouped}
+              fetching={fetching} canEdit={canEdit} showProject={false}
               onEdit={(e) => { setEditing(e); setModal("edit"); }}
               onDelete={setDeleting}
               onCreateFirst={() => setModal("create")}
@@ -1872,7 +2172,8 @@ export default function PayrollChecklistPage({ projectId, canEdit = true }: Prop
 
   useEffect(() => {
     if (!projectId) return;
-    supabase.from("projects")
+    supabase
+      .from("projects")
       .select("id,project_number,title,description,status,progress_percent,budget_numeric,currency,site_address,site_city,site_country,start_date,expected_completion_date,created_at")
       .eq("id", projectId)
       .single()
@@ -1885,7 +2186,11 @@ export default function PayrollChecklistPage({ projectId, canEdit = true }: Prop
         <motion.div key="payroll"
           initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -40 }} transition={{ duration: 0.25 }}>
-          <PayrollView project={selectedProject} canEdit={canEdit} onBack={() => { if (!projectId) setSelectedProject(null); }} />
+          <PayrollView
+            project={selectedProject}
+            canEdit={canEdit}
+            onBack={() => { if (!projectId) setSelectedProject(null); }}
+          />
         </motion.div>
       ) : (
         <motion.div key="picker"
