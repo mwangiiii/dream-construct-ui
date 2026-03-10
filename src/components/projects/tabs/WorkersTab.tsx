@@ -1242,13 +1242,21 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                   </div>
                   <div className="flex gap-2 items-center">
                     <label className="text-sm">Status:</label>
-                    <select value={attendanceFilter.status || 'all'} onChange={e => setAttendanceFilter(f => ({ ...f, status: e.target.value === 'all' ? '' : e.target.value }))} className="px-3 py-2 rounded-xl border border-white/20 bg-white/5 text-sm">
-                      <option value="all">All</option>
-                      <option value="present">Present</option>
-                      <option value="absent">Absent</option>
-                      <option value="late">Late</option>
-                      <option value="on_leave">On Leave</option>
-                    </select>
+                    <Select
+                      value={attendanceFilter.status || 'all'}
+                      onValueChange={value => setAttendanceFilter(f => ({ ...f, status: value === 'all' ? '' : value }))}
+                    >
+                      <SelectTrigger className="w-36 px-3 py-2 border-2 border-white/10 rounded-xl bg-white/5 text-sm">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="present">Present</SelectItem>
+                        <SelectItem value="absent">Absent</SelectItem>
+                        <SelectItem value="late">Late</SelectItem>
+                        <SelectItem value="on_leave">On Leave</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   {canEdit && (
                     <button onClick={() => setShowMarkAttendance(true)} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300">
