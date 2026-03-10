@@ -448,7 +448,11 @@ ${inv.status === "cancelled" ? '<div class="watermark">Cancelled</div>' : ""}
 <div class="page">
   <div class="header-band">
     <div class="company-block">
-      <div class="company-name">${inv.company_name || "Your Company"}</div>
+      <div class="company-name">${
+        inv.company_name && inv.company_name.toLowerCase() === "reve construct limited"
+          ? "Reve Construct Limited"
+          : inv.company_name || "Your Company"
+      }</div>
       <div class="company-detail">
         ${[inv.company_address, inv.company_city_state_zip].filter(Boolean).join(", ")}${inv.company_phone ? `<br/>${inv.company_phone}` : ""}${inv.company_email ? `<br/>${inv.company_email}` : ""}
       </div>
@@ -556,7 +560,11 @@ ${inv.status === "cancelled" ? '<div class="watermark">Cancelled</div>' : ""}
 
   <div class="footer">
     <div class="footer-text">
-      ${inv.company_name || ""}${inv.company_email ? ` &nbsp;·&nbsp; ${inv.company_email}` : ""}${inv.company_phone ? ` &nbsp;·&nbsp; ${inv.company_phone}` : ""}<br/>
+      ${
+        inv.company_name && inv.company_name.toLowerCase() === "reve construct limited"
+          ? "Reve Construct Limited"
+          : inv.company_name || ""
+      }${inv.company_email ? ` &nbsp;·&nbsp; ${inv.company_email}` : ""}${inv.company_phone ? ` &nbsp;·&nbsp; ${inv.company_phone}` : ""}<br/>
       Generated ${new Date().toLocaleDateString("en-KE", { day: "2-digit", month: "long", year: "numeric" })}
     </div>
     <div class="footer-inv">

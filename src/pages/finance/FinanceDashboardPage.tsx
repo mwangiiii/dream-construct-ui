@@ -107,6 +107,15 @@ const financeGroups = [
         desc: "Track client invoices & receipts",
       },
       {
+        label: "Invoices",
+        short: "INV",
+        path: "/finance/invoices",
+        icon: Receipt,
+        accent: "from-accent/30 to-primary/20",
+        iconColor: "text-accent",
+        desc: "Project invoices & billing",
+      },
+      {
         label: "Work in Progress",
         short: "WIP",
         path: "/finance/work-in-progress",

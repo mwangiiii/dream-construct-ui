@@ -60,7 +60,7 @@ interface StatementEntry {
   updated_at?: string;
 }
 
-type EntryFormData = Omit<StatementEntry, "id" | "running_balance" | "created_at" | "updated_at">;
+type EntryFormData = Omit<StatementEntry, "id" | "running_balance" | "created_at">;
 
 interface Props {
   projectId?: string;
@@ -753,6 +753,7 @@ function BalanceBar({
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
+
 function EntryModal({
   initial,
   onSave,
@@ -761,14 +762,15 @@ function EntryModal({
   projects = [],
   showProjectSelector = false,
 }: {
-  initial: EntryFormData & { id?: number };
+  initial: EntryFormData & { id?: number; updated_at?: string };
   onSave: (d: EntryFormData) => void;
   onClose: () => void;
   loading: boolean;
   projects?: Project[];
   showProjectSelector?: boolean;
 }) {
-  const [form, setForm] = useState<EntryFormData>({ ...initial });
+  // Always keep updated_at in state for display, but not editable
+  const [form, setForm] = useState<EntryFormData & { updated_at?: string }>({ ...initial });
   const isEdit = Boolean(initial.id);
 
   const set = <K extends keyof EntryFormData>(k: K, v: EntryFormData[K]) =>
@@ -1044,11 +1046,11 @@ function EntryModal({
                 className={inputCls}
               />
             </Field>
-            {isEdit && initial.updated_at && (
+            {form.updated_at && (
               <Field label="Last Updated">
                 <input
                   type="text"
-                  value={new Date(initial.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  value={new Date(form.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                   readOnly
                   className={readonlyCls}
                   tabIndex={-1}
@@ -1077,7 +1079,11 @@ function EntryModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(form)}
+            onClick={() => {
+              // Always set updated_at to now (ISO string) on save
+              const now = new Date().toISOString();
+              onSave({ ...form, updated_at: now });
+            }}
             disabled={loading || !isValid}
             className="px-6 py-2.5 text-sm font-bold rounded-2xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center gap-2"
             style={{

@@ -33,7 +33,8 @@ type FinanceTab =
   | "accounts-receivable"
   | "balance-sheet"
   | "bank-reconciliation"
-  | "cash-flow";
+  | "cash-flow"
+  | "invoices";
 
 interface Toast {
   id: string;
@@ -43,6 +44,8 @@ interface Toast {
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 
+import InvoicePage from "@/pages/finance/InvoicePage";
+
 const FINANCE_TABS: {
   id: FinanceTab;
   label: string;
@@ -51,6 +54,14 @@ const FINANCE_TABS: {
   description: string;
   color: string;
 }[] = [
+    {
+      id: "invoices",
+      label: "Invoices",
+      shortLabel: "Invoices",
+      icon: DollarSign,
+      description: "Project invoices & billing",
+      color: "text-cyan-400",
+    },
   {
     id: "accounts-payable",
     label: "Accounts Payable",
@@ -424,11 +435,11 @@ export default function FinanceDetailPage() {
           )}
 
           {activeTab === "balance-sheet" && id && (
-  <BalanceSheetPage
-    projectId={id}
-    canEdit={canEdit}
-  />
-)}
+            <BalanceSheetPage
+              projectId={id}
+              canEdit={canEdit}
+            />
+          )}
 
           {activeTab === "bank-reconciliation" && (
             <BankReconciliationPage
@@ -442,6 +453,10 @@ export default function FinanceDetailPage() {
               projectId={id!}
               canEdit={canEdit}
             />
+          )}
+
+          {activeTab === "invoices" && (
+            <InvoicePage projectId={id!} canEdit={canEdit} />
           )}
         </motion.div>
       </AnimatePresence>

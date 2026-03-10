@@ -750,7 +750,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       if (workerIds.length === 0) { setAttendance([]); return; }
 
       const { data, error } = await supabase
-        .from('attendance')
+        .from('worker_attendance')
         .select('*')
         .in('worker_id', workerIds)
         .eq('date', date);

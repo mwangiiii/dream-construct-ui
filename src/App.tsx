@@ -102,6 +102,9 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
+// ─── Invoice View Page (deep-link from email) ─────────────────────────────────
+import InvoiceViewPage from "./pages/InvoiceViewPage";
+
 const queryClient = new QueryClient();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -404,6 +407,24 @@ const App = () => {
 
         <BrowserRouter>
           <Routes>
+
+            {/* ══════════════════════════════════════════════════════════════
+                INVOICE DEEP-LINK ROUTE
+                Accessible by all authenticated internal staff + finance.
+                Used when a recipient clicks "View Invoice Online" in email.
+                URL pattern: /invoices/:id
+                e.g. https://reveconstruct.vercel.app/invoices/02265aa3-06f9-4eeb-81c5-86f89b4fb244
+            ══════════════════════════════════════════════════════════════ */}
+            <Route
+              path="/invoices/:id"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.FINANCE}>
+                  <FinanceLayout>
+                    <InvoiceViewPage />
+                  </FinanceLayout>
+                </ProtectedRoute>
+              }
+            />
 
             {/* ══════════════════════════════════════════════════════════════
                 FINANCE ROUTES
