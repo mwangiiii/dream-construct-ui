@@ -46,7 +46,14 @@ type JobPhase =
   | "Finishes"
   | "Handover";
 
-interface JobPosting {
+// The four stage values stored in the backend `stage` column
+type CostingStage =
+  | "Conception and Feasibility"
+  | "Preconstruction"
+  | "Construction"
+  | "Inspections and Snagging";
+
+interface JobCosting {
   id: string;
   project_id: string;
   phase: JobPhase;
@@ -67,7 +74,7 @@ interface Milestone {
   title: string;
 }
 
-type FormData = Omit<JobPosting, "id" | "profit_loss" | "created_at" | "updated_at">;
+type FormData = Omit<JobCosting, "id" | "profit_loss" | "created_at" | "updated_at">;
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -79,6 +86,13 @@ const PHASES: JobPhase[] = [
   "Roofing",
   "Finishes",
   "Handover",
+];
+
+const COSTING_STAGES: CostingStage[] = [
+  "Conception and Feasibility",
+  "Preconstruction",
+  "Construction",
+  "Inspections and Snagging",
 ];
 
 // Alias used by JobCostingView
@@ -169,7 +183,7 @@ const api = {
     return (data ?? []) as Milestone[];
   },
 
-  list: async (projectId: string): Promise<JobPosting[]> => {
+  list: async (projectId: string): Promise<JobCosting[]> => {
     const { data, error } = await supabase
       .from("job_postings")
       .select("*")
@@ -177,10 +191,10 @@ const api = {
       .order("phase")
       .order("stage");
     if (error) throw new Error(error.message);
-    return (data ?? []) as JobPosting[];
+    return (data ?? []) as JobCosting[];
   },
 
-  create: async (form: FormData): Promise<JobPosting> => {
+  create: async (form: FormData): Promise<JobCosting> => {
     const pl = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
     const { data, error } = await supabase
       .from("job_postings")
@@ -188,10 +202,10 @@ const api = {
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return data as JobPosting;
+    return data as JobCosting;
   },
 
-  update: async (id: string, form: FormData): Promise<JobPosting> => {
+  update: async (id: string, form: FormData): Promise<JobCosting> => {
     const pl = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
     const { data, error } = await supabase
       .from("job_postings")
@@ -200,7 +214,7 @@ const api = {
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return data as JobPosting;
+    return data as JobCosting;
   },
 
   remove: async (id: string): Promise<void> => {
@@ -234,16 +248,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// ─── POSTING MODAL ────────────────────────────────────────────────────────────
+// ─── COSTING MODAL ────────────────────────────────────────────────────────────
 
-function PostingModal({
-  initial, onSave, onClose, loading, milestones,
+function CostingModal({
+  initial, onSave, onClose, loading,
 }: {
   initial: FormData;
   onSave: (f: FormData) => void;
   onClose: () => void;
   loading: boolean;
-  milestones: Milestone[];
 }) {
   const [form, setForm] = useState<FormData>(initial);
   const isEdit = "id" in initial;
@@ -267,7 +280,7 @@ function PostingModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-lg font-bold text-foreground">{isEdit ? "Edit Job Posting" : "New Job Posting"}</h2>
+          <h2 className="text-lg font-bold text-foreground">{isEdit ? "Edit Job Costing" : "New Job Costing"}</h2>
           <button onClick={onClose} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M18 6 6 18M6 6l12 12" />
@@ -298,44 +311,27 @@ function PostingModal({
             </div>
           </Field>
 
-          {/* Stage / Milestone */}
-          <Field label="Stage / Milestone *">
-            {milestones.length > 0 ? (
-              <div className="relative">
-                <select
-                  value={form.stage}
-                  onChange={e => set("stage", e.target.value)}
-                  className={inputCls + " appearance-none pr-10 font-medium text-sm"}
-                >
-                  <option value="" className="bg-background text-muted-foreground">— Select a milestone —</option>
-                  {milestones.map(m => (
-                    <option key={m.id} value={m.title} className="bg-background text-foreground font-medium">
-                      {m.title}
-                    </option>
-                  ))}
-                </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-1">
-                <input
-                  value={form.stage}
-                  onChange={e => set("stage", e.target.value)}
-                  placeholder="e.g. Excavation"
-                  className={inputCls}
-                />
-                <p className="text-[10px] text-amber-400/80 flex items-center gap-1">
-                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  </svg>
-                  No milestones found for this project. Create milestones in the Tasks tab first.
-                </p>
-              </div>
-            )}
+          {/* Costing Stage */}
+          <Field label="Costing Stage *">
+            <div className="relative">
+              <select
+                value={form.stage}
+                onChange={e => set("stage", e.target.value)}
+                className={inputCls + " appearance-none pr-10 font-medium text-sm"}
+              >
+                <option value="" className="bg-background text-muted-foreground">— Select a stage —</option>
+                {COSTING_STAGES.map(s => (
+                  <option key={s} value={s} className="bg-background text-foreground font-medium">
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
+            </div>
           </Field>
 
           {/* Description */}
@@ -429,8 +425,8 @@ function PostingModal({
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────
 
-function DeleteConfirm({ posting, onConfirm, onClose, loading }: {
-  posting: JobPosting; onConfirm: () => void; onClose: () => void; loading: boolean;
+function DeleteConfirm({ costing, onConfirm, onClose, loading }: {
+  costing: JobCosting; onConfirm: () => void; onClose: () => void; loading: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -447,11 +443,11 @@ function DeleteConfirm({ posting, onConfirm, onClose, loading }: {
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-foreground mb-1">Delete Job costing</h3>
+            <h3 className="font-semibold text-foreground mb-1">Delete Job Costing</h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Permanently delete{" "}
-              <span className="text-foreground font-medium">{posting.stage}</span>{" "}
-              (<span className="font-mono text-primary text-xs">{posting.account_code}</span>)?{" "}
+              <span className="text-foreground font-medium">{costing.stage}</span>{" "}
+              (<span className="font-mono text-primary text-xs">{costing.account_code}</span>)?{" "}
               This cannot be undone.
             </p>
           </div>
@@ -463,7 +459,7 @@ function DeleteConfirm({ posting, onConfirm, onClose, loading }: {
           <button onClick={onConfirm} disabled={loading}
             className="px-4 py-2 text-sm font-medium rounded-xl bg-rose-500/80 hover:bg-rose-500 text-white transition-all disabled:opacity-50 flex items-center gap-2">
             {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-            Delete Posting
+            Delete Costing
           </button>
         </div>
       </motion.div>
@@ -473,8 +469,8 @@ function DeleteConfirm({ posting, onConfirm, onClose, loading }: {
 
 // ─── PROJECT CARD ─────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, onSelect, postingCount }: {
-  project: Project; onSelect: (p: Project) => void; postingCount: number;
+function ProjectCard({ project, onSelect, costingCount }: {
+  project: Project; onSelect: (p: Project) => void; costingCount: number;
 }) {
   const status    = project.status ?? "planning";
   const statusCls = STATUS_STYLE[status] ?? STATUS_STYLE.planning;
@@ -497,9 +493,9 @@ function ProjectCard({ project, onSelect, postingCount }: {
             {status.replace(/_/g, " ")}
           </span>
         </div>
-        {postingCount > 0 && (
+        {costingCount > 0 && (
           <span className="text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full flex-shrink-0 tabular-nums">
-            {postingCount} {postingCount === 1 ? "costing" : "costings"}
+            {costingCount} {costingCount === 1 ? "costing" : "costings"}
           </span>
         )}
       </div>
@@ -581,7 +577,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   const [fetching,      setFetching]      = useState(true);
   const [search,        setSearch]        = useState("");
   const [statusFilter,  setStatusFilter]  = useState("all");
-  const [postingCounts, setPostingCounts] = useState<Record<string, number>>({});
+  const [costingCounts, setCostingCounts] = useState<Record<string, number>>({});
   const { toasts, push } = useToast();
 
   useEffect(() => {
@@ -591,7 +587,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         setProjects(data);
         if (data.length > 0) {
           const counts = await api.postingCounts(data.map(p => p.id));
-          setPostingCounts(counts);
+          setCostingCounts(counts);
         }
       })
       .catch((err: unknown) => push(err instanceof Error ? err.message : "Failed to load projects.", "error"))
@@ -616,7 +612,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
     }),
   [projects, search, statusFilter]);
 
-  const totalPostings = Object.values(postingCounts).reduce((a, b) => a + b, 0);
+  const totalCostings = Object.values(costingCounts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -658,9 +654,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Total Projects",         value: projects.length,                   sub: "in system"           },
-            { label: "Projects with Costings", value: Object.keys(postingCounts).length, sub: "have job costings"   },
-            { label: "Total Job Costings",     value: totalPostings,                     sub: "across all projects" },
+            { label: "Total Projects",          value: projects.length,                    sub: "in system"           },
+            { label: "Projects with Costings",  value: Object.keys(costingCounts).length,  sub: "have job costings"   },
+            { label: "Total Job Costings",      value: totalCostings,                      sub: "across all projects" },
           ].map(card => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
               <div className="text-[10px] uppercase tracking-widest font-semibold mb-2 text-muted-foreground">{card.label}</div>
@@ -720,7 +716,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             ) : (
               <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filtered.map(p => (
-                  <ProjectCard key={p.id} project={p} onSelect={onSelect} postingCount={postingCounts[p.id] ?? 0} />
+                  <ProjectCard key={p.id} project={p} onSelect={onSelect} costingCount={costingCounts[p.id] ?? 0} />
                 ))}
               </div>
             )}
@@ -728,7 +724,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             {!fetching && projects.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
                 <span className="tabular-nums">
-                  {projects.length} total projects · {Object.keys(postingCounts).length} with job ostings
+                  {projects.length} total projects · {Object.keys(costingCounts).length} with job costings
                 </span>
               </div>
             )}
@@ -739,13 +735,12 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   );
 }
 
-// ─── POSTINGS VIEW ────────────────────────────────────────────────────────────
+// ─── COSTINGS VIEW ────────────────────────────────────────────────────────────
 
-function PostingsView({ project, canEdit, onBack }: {
+function CostingsView({ project, canEdit, onBack }: {
   project: Project; canEdit: boolean; onBack: () => void;
 }) {
-  const [postings,    setPostings]    = useState<JobPosting[]>([]);
-  const [milestones,  setMilestones]  = useState<Milestone[]>([]);
+  const [costings,    setCostings]    = useState<JobCosting[]>([]);
   const [fetching,    setFetching]    = useState(false);
   const [search,      setSearch]      = useState("");
   const [filterPhase, setFilterPhase] = useState<JobPhase | "All">("All");
@@ -753,38 +748,30 @@ function PostingsView({ project, canEdit, onBack }: {
     Object.fromEntries(PHASES.map(ph => [ph, true]))
   );
   const [modal,    setModal]    = useState<null | "create" | "edit">(null);
-  const [editing,  setEditing]  = useState<JobPosting | null>(null);
-  const [deleting, setDeleting] = useState<JobPosting | null>(null);
+  const [editing,  setEditing]  = useState<JobCosting | null>(null);
+  const [deleting, setDeleting] = useState<JobCosting | null>(null);
   const [saving,   setSaving]   = useState(false);
 
   const { toasts, push } = useToast();
 
-  useEffect(() => {
-    api.milestones(project.id)
-      .then(setMilestones)
-      .catch((e: unknown) =>
-        push(e instanceof Error ? e.message : "Failed to load milestones.", "error")
-      );
-  }, [project.id, push]);
-
-  const fetchPostings = useCallback(async () => {
-    setFetching(true); setPostings([]);
+  const fetchCostings = useCallback(async () => {
+    setFetching(true); setCostings([]);
     try {
       const data = await api.list(project.id);
-      setPostings(data);
+      setCostings(data);
     } catch (e: unknown) {
-      push(e instanceof Error ? e.message : "Failed to load job postings.", "error");
+      push(e instanceof Error ? e.message : "Failed to load job costings.", "error");
     } finally { setFetching(false); }
   }, [project.id, push]);
 
-  useEffect(() => { fetchPostings(); }, [fetchPostings]);
+  useEffect(() => { fetchCostings(); }, [fetchCostings]);
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleCreate = async (form: FormData) => {
     setSaving(true);
     try {
       const row = await api.create({ ...form, project_id: project.id });
-      setPostings(p => [...p, row].sort((a, b) => a.phase.localeCompare(b.phase) || a.stage.localeCompare(b.stage)));
+      setCostings(p => [...p, row].sort((a, b) => a.phase.localeCompare(b.phase) || a.stage.localeCompare(b.stage)));
       push("Job Costing added."); setModal(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to add costing.", "error"); }
     finally { setSaving(false); }
@@ -794,7 +781,7 @@ function PostingsView({ project, canEdit, onBack }: {
     if (!editing) return; setSaving(true);
     try {
       const row = await api.update(editing.id, form);
-      setPostings(p => p.map(x => x.id === editing.id ? row : x));
+      setCostings(p => p.map(x => x.id === editing.id ? row : x));
       push("Job Costing updated."); setModal(null); setEditing(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to update costing.", "error"); }
     finally { setSaving(false); }
@@ -804,7 +791,7 @@ function PostingsView({ project, canEdit, onBack }: {
     if (!deleting) return; setSaving(true);
     try {
       await api.remove(deleting.id);
-      setPostings(p => p.filter(x => x.id !== deleting.id));
+      setCostings(p => p.filter(x => x.id !== deleting.id));
       push("Job Costing deleted."); setDeleting(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to delete costing.", "error"); }
     finally { setSaving(false); }
@@ -812,7 +799,7 @@ function PostingsView({ project, canEdit, onBack }: {
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const filtered = useMemo(() =>
-    postings.filter(p => {
+    costings.filter(p => {
       if (filterPhase !== "All" && p.phase !== filterPhase) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -825,10 +812,10 @@ function PostingsView({ project, canEdit, onBack }: {
       }
       return true;
     }),
-  [postings, filterPhase, search]);
+  [costings, filterPhase, search]);
 
   const grouped = useMemo(() => {
-    const g: Partial<Record<JobPhase, JobPosting[]>> = {};
+    const g: Partial<Record<JobPhase, JobCosting[]>> = {};
     filtered.forEach(p => {
       if (!g[p.phase]) g[p.phase] = [];
       g[p.phase]!.push(p);
@@ -837,24 +824,24 @@ function PostingsView({ project, canEdit, onBack }: {
   }, [filtered]);
 
   const grandTotals = useMemo(() => ({
-    budgeted: postings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
-    actual:   postings.reduce((s, p) => s + Number(p.actual_amount_used),   0),
-    pl:       postings.reduce((s, p) => s + Number(p.profit_loss),          0),
-    amount:   postings.reduce((s, p) => s + Number(p.amount),               0),
-  }), [postings]);
+    budgeted: costings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
+    actual:   costings.reduce((s, p) => s + Number(p.actual_amount_used),   0),
+    pl:       costings.reduce((s, p) => s + Number(p.profit_loss),          0),
+    amount:   costings.reduce((s, p) => s + Number(p.amount),               0),
+  }), [costings]);
 
   const phaseSummary = useMemo(() =>
     Object.fromEntries(
       PHASES.map(ph => [ph, {
-        count:    postings.filter(p => p.phase === ph).length,
-        budgeted: postings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
-        actual:   postings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.actual_amount_used),   0),
-        pl:       postings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.profit_loss),          0),
+        count:    costings.filter(p => p.phase === ph).length,
+        budgeted: costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
+        actual:   costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.actual_amount_used),   0),
+        pl:       costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.profit_loss),          0),
       }])
     ) as Record<JobPhase, { count: number; budgeted: number; actual: number; pl: number }>,
-  [postings]);
+  [costings]);
 
-  const status  = project.status ?? "planning";
+  const status = project.status ?? "planning";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -878,25 +865,23 @@ function PostingsView({ project, canEdit, onBack }: {
       {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <PostingModal
+          <CostingModal
             initial={makeEmptyForm(project.id)}
             onSave={handleCreate}
             onClose={() => setModal(null)}
             loading={saving}
-            milestones={milestones}
           />
         )}
         {modal === "edit" && editing && (
-          <PostingModal
+          <CostingModal
             initial={(({ id: _id, profit_loss: _pl, created_at: _ca, updated_at: _ua, ...rest }) => rest)(editing)}
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
-            milestones={milestones}
           />
         )}
         {deleting && (
-          <DeleteConfirm posting={deleting} onConfirm={handleDelete}
+          <DeleteConfirm costing={deleting} onConfirm={handleDelete}
             onClose={() => setDeleting(null)} loading={saving} />
         )}
       </AnimatePresence>
@@ -1027,7 +1012,7 @@ function PostingsView({ project, canEdit, onBack }: {
                 </span>
               </div>
               <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
-                {filtered.length} / {postings.length} shown
+                {filtered.length} / {costings.length} shown
               </div>
             </div>
           </CardHeader>
@@ -1050,7 +1035,7 @@ function PostingsView({ project, canEdit, onBack }: {
                 )}
                 {canEdit && !search && filterPhase === "All" && (
                   <button onClick={() => setModal("create")}
-                    className="text-xs text-primary hover:underline">Add first posting</button>
+                    className="text-xs text-primary hover:underline">Add first costing</button>
                 )}
               </div>
             ) : (
@@ -1108,7 +1093,7 @@ function PostingsView({ project, canEdit, onBack }: {
                                 <thead>
                                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                                     {[
-                                      "Stage / Milestone",
+                                      "Costing Stage",
                                       "Description",
                                       "Account Code",
                                       "eTIMS Code",
@@ -1125,43 +1110,43 @@ function PostingsView({ project, canEdit, onBack }: {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {rows.map((posting, ri) => {
-                                    const pl  = Number(posting.profit_loss);
-                                    const pct = Number(posting.budgeted_amount_paid) > 0
-                                      ? Math.min(200, Math.round((Number(posting.actual_amount_used) / Number(posting.budgeted_amount_paid)) * 100))
+                                  {rows.map((costing, ri) => {
+                                    const pl  = Number(costing.profit_loss);
+                                    const pct = Number(costing.budgeted_amount_paid) > 0
+                                      ? Math.min(200, Math.round((Number(costing.actual_amount_used) / Number(costing.budgeted_amount_paid)) * 100))
                                       : 0;
                                     return (
-                                      <motion.tr key={posting.id}
+                                      <motion.tr key={costing.id}
                                         initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                                         transition={{ delay: ri * 0.02, duration: 0.16 }}
                                         className={`border-b border-white/5 transition-colors ${s.row}`}
                                       >
-                                        {/* Stage */}
+                                        {/* Costing Stage */}
                                         <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
-                                          {posting.stage}
+                                          {costing.stage}
                                         </td>
                                         {/* Description */}
                                         <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[180px]">
-                                          <span className="line-clamp-1">{posting.description || "—"}</span>
+                                          <span className="line-clamp-1">{costing.description || "—"}</span>
                                         </td>
                                         {/* Account Code */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <Badge variant="outline" className="font-mono text-xs px-2 py-0.5 border border-white/15 text-muted-foreground">
-                                            {posting.account_code}
+                                            {costing.account_code}
                                           </Badge>
                                         </td>
                                         {/* eTIMS Code */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
-                                          <span className="font-mono text-xs text-muted-foreground">{posting.etims_code || "—"}</span>
+                                          <span className="font-mono text-xs text-muted-foreground">{costing.etims_code || "—"}</span>
                                         </td>
                                         {/* Budgeted */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
-                                          <span className="text-sm tabular-nums text-foreground font-mono">{fmt(Number(posting.budgeted_amount_paid))}</span>
+                                          <span className="text-sm tabular-nums text-foreground font-mono">{fmt(Number(costing.budgeted_amount_paid))}</span>
                                         </td>
                                         {/* Actual + utilisation bar */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <div>
-                                            <span className="text-sm tabular-nums text-foreground font-mono">{fmt(Number(posting.actual_amount_used))}</span>
+                                            <span className="text-sm tabular-nums text-foreground font-mono">{fmt(Number(costing.actual_amount_used))}</span>
                                             <div className="mt-1 w-16 h-1 bg-white/10 rounded-full overflow-hidden">
                                               <div
                                                 className={`h-full rounded-full transition-all duration-500 ${pct > 100 ? "bg-rose-400/60" : "bg-emerald-400/60"}`}
@@ -1179,20 +1164,20 @@ function PostingsView({ project, canEdit, onBack }: {
                                         </td>
                                         {/* Amount */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
-                                          <span className="text-sm tabular-nums text-sky-400 font-mono">{fmt(Number(posting.amount))}</span>
+                                          <span className="text-sm tabular-nums text-sky-400 font-mono">{fmt(Number(costing.amount))}</span>
                                         </td>
                                         {/* Actions */}
                                         {canEdit && (
                                           <td className="px-5 py-3.5 whitespace-nowrap">
                                             <div className="flex items-center gap-1.5">
-                                              <button onClick={() => { setEditing(posting); setModal("edit"); }} title="Edit"
+                                              <button onClick={() => { setEditing(costing); setModal("edit"); }} title="Edit"
                                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                                 </svg>
                                               </button>
-                                              <button onClick={() => setDeleting(posting)} title="Delete"
+                                              <button onClick={() => setDeleting(costing)} title="Delete"
                                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all">
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                                   <polyline points="3 6 5 6 21 6" />
@@ -1230,7 +1215,7 @@ function PostingsView({ project, canEdit, onBack }: {
                 })}
 
                 {/* Grand total bar */}
-                {postings.length > 0 && (
+                {costings.length > 0 && (
                   <div className="px-6 py-4 flex flex-wrap items-center gap-6 text-xs font-mono bg-emerald-950/20">
                     <span className="text-muted-foreground font-sans text-xs font-semibold uppercase tracking-wider">Grand Total</span>
                     <span className="text-foreground">Budgeted {fmt(grandTotals.budgeted)}</span>
@@ -1239,7 +1224,7 @@ function PostingsView({ project, canEdit, onBack }: {
                     <span className="text-muted-foreground">=</span>
                     <span className={`font-bold ${grandTotals.pl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{fmtSign(grandTotals.pl)}</span>
                     <Badge className="ml-auto bg-emerald-500/10 border-emerald-500/30 text-emerald-300">
-                      {postings.length} posting{postings.length !== 1 ? "s" : ""}
+                      {costings.length} costing{costings.length !== 1 ? "s" : ""}
                     </Badge>
                   </div>
                 )}
@@ -1247,10 +1232,10 @@ function PostingsView({ project, canEdit, onBack }: {
             )}
 
             {/* Footer */}
-            {!fetching && postings.length > 0 && (
+            {!fetching && costings.length > 0 && (
               <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
-                <span className="tabular-nums">{postings.length} total costing{postings.length !== 1 ? "s" : ""}</span>
-                <button onClick={fetchPostings} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
+                <span className="tabular-nums">{costings.length} total costing{costings.length !== 1 ? "s" : ""}</span>
+                <button onClick={fetchCostings} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                     <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
@@ -1288,7 +1273,7 @@ export default function JobCostingPage({ projectId, canEdit = true }: Props) {
         <motion.div key={selectedProject.id}
           initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
-          <PostingsView
+          <CostingsView
             project={selectedProject}
             canEdit={canEdit}
             onBack={() => { if (!projectId) setSelectedProject(null); }}

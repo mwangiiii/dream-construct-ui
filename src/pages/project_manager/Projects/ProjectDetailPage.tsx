@@ -224,8 +224,6 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  console.log('[ProjectDetailPage] HOOKS INITIALIZED', { id, hasNavigate: !!navigate });
-
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -239,10 +237,21 @@ export default function ProjectDetailPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
-  const [team, setTeam] = useState<TeamMember[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
 
-  console.log('[ProjectDetailPage] STATE INITIALIZED');
+  /**
+   * ─────────────────────────────────────────────────────────────────────
+   * PROJECT PROGRESS — computed automatically, never set manually.
+   *
+   * Source of truth: MilestonesTab calls onProgressChange(n) whenever
+   * task completion changes.  We store it here so OverviewTab can read it.
+   *
+   * Formula (inside MilestonesTab):
+   *   milestone %  = tasks_with_status_done / total_milestone_tasks * 100
+   *   project %    = average of all milestone percentages
+   * ─────────────────────────────────────────────────────────────────────
+   */
+  const [projectProgress, setProjectProgress] = useState<number>(0);
 
   const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
     const toastId = Date.now().toString();
@@ -253,7 +262,6 @@ export default function ProjectDetailPage() {
     setToasts((prev) => prev.filter((t) => t.id !== toastId));
   };
 
-  // Helper to enrich items with user full_names
   const enrichWithUsers = async (items: any[], userField: string, enrichField: string) => {
     if (!items || items.length === 0) return items;
     const userIds = [...new Set(items.map(item => item[userField]).filter(Boolean))];
@@ -278,40 +286,25 @@ export default function ProjectDetailPage() {
   };
 
   const fetchProjectAndData = async () => {
-    console.log('[ProjectDetailPage] fetchProjectAndData called', { id });
-    if (!id) {
-      console.log('[ProjectDetailPage] No ID provided to fetchProjectAndData');
-      setLoading(false);
-      return;
-    }
-
+    if (!id) { setLoading(false); return; }
     setLoading(true);
 
     try {
-      console.log('[ProjectDetailPage] fetchProjectAndData: starting fetches');
-
-      // ── Workers for this project ──────────────────────────────
-      // Uses: id, full_name, role, status, created_by, project_id
-      // NOTE: workers table has NO user_id column – do NOT select it.
+      // ── Workers ───────────────────────────────────────────────
       let workersList: Worker[] = [];
       try {
         const { data: workersRaw, error: workersError } = await supabase
           .from("workers")
           .select("id, full_name, role, status")
           .eq("project_id", id);
-
-        if (workersError) {
-          console.warn("[ProjectDetail] workers fetch error:", workersError.message);
-        } else {
-          workersList = (workersRaw || []) as Worker[];
-        }
-      } catch (workerErr) {
-        console.warn("[ProjectDetail] workers fetch threw:", workerErr);
-        workersList = [];
+        if (workersError) console.warn("[ProjectDetail] workers fetch error:", workersError.message);
+        else workersList = (workersRaw || []) as Worker[];
+      } catch (err) {
+        console.warn("[ProjectDetail] workers fetch threw:", err);
       }
       setWorkers(workersList);
 
-      // ── Core project data ────────────────────────────────────
+      // ── Core data ─────────────────────────────────────────────
       const [
         { data: proj },
         { data: tasksData },
@@ -366,15 +359,12 @@ export default function ProjectDetailPage() {
       const documentsEnriched = await enrichWithUsers(docsRaw || [], "uploaded_by", "uploaded_by_user");
       setDocuments(documentsEnriched);
 
-      console.log('[ProjectDetailPage] fetchProjectAndData: core state set');
-
-      // ── Photos ───────────────────────────────────────────────
+      // ── Photos ─────────────────────────────────────────────────
       let allPhotos: Document[] = [];
       try {
         const photosData = await projectApi.getProjectDocuments(id);
         allPhotos = photosData || [];
-      } catch (photosErr) {
-        console.warn("Photos API failed, using direct query:", photosErr);
+      } catch {
         const { data: fallback } = await supabase
           .from("documents")
           .select("*")
@@ -385,7 +375,7 @@ export default function ProjectDetailPage() {
       const photosEnriched = await enrichWithUsers(allPhotos, "uploaded_by", "uploaded_by_user");
       setPhotos(photosEnriched);
 
-      // ── Updates ──────────────────────────────────────────────
+      // ── Updates ────────────────────────────────────────────────
       const { data: activeUpdatesData } = await supabase
         .from("project_updates")
         .select("id, title, body, update_type, posted_at, posted_by, is_pinned, media_paths, is_deleted, deleted_at, deleted_by, updated_at")
@@ -395,7 +385,6 @@ export default function ProjectDetailPage() {
 
       const isAdminUser = currentUser?.roles.some((r: any) => r.role_name === "admin");
       let deletedUpdatesData = null;
-
       if (isAdminUser) {
         const { data: deleted } = await supabase
           .from("project_updates")
@@ -409,20 +398,17 @@ export default function ProjectDetailPage() {
       const activeUpdatesEnriched = await enrichWithUsers(activeUpdatesData || [], "posted_by", "posted_by_user");
       setActiveUpdates(activeUpdatesEnriched);
 
-      let deletedUpdatesEnriched: any[] = [];
       if (deletedUpdatesData) {
-        deletedUpdatesEnriched = await enrichWithUsers(
+        const deletedEnriched = await enrichWithUsers(
           await enrichWithUsers(deletedUpdatesData, "posted_by", "posted_by_user"),
           "deleted_by",
           "deleted_by_user"
         );
+        setDeletedUpdates(deletedEnriched);
       }
-      setDeletedUpdates(deletedUpdatesEnriched);
-
-      console.log('[ProjectDetailPage] Data loaded successfully');
 
     } catch (error) {
-      console.error('[ProjectDetailPage] Final error in fetch:', error);
+      console.error('[ProjectDetailPage] fetch error:', error);
       showToast('Error loading project data', 'error');
       setTimeout(() => navigate('/projects'), 2000);
     } finally {
@@ -430,34 +416,18 @@ export default function ProjectDetailPage() {
     }
   };
 
-  console.log('[ProjectDetailPage] ABOUT TO REGISTER useEffect');
-
   useEffect(() => {
-    console.log('[ProjectDetailPage] ============ useEffect FIRED ============', { id });
     let mounted = true;
 
     const initializePage = async () => {
-      console.log('[ProjectDetailPage] initializePage started', { id });
-
-      if (!id) {
-        console.log('[ProjectDetailPage] No ID, redirecting');
-        navigate("/projects");
-        return;
-      }
+      if (!id) { navigate("/projects"); return; }
 
       try {
         setLoading(true);
-
-        // Step 1: Get current user
         const user = await getCurrentUser();
-
         if (!mounted) return;
 
-        if (!user) {
-          navigate("/login");
-          return;
-        }
-
+        if (!user) { navigate("/login"); return; }
         if (!user.status.is_active) {
           showToast("Your account is not active. Contact admin.", "error");
           setTimeout(() => navigate("/"), 2000);
@@ -466,18 +436,15 @@ export default function ProjectDetailPage() {
 
         setCurrentUser(user);
 
-        // Step 2: Check role permissions
         const hasProjectManagerRole = user.roles.some(
-          (r: any) => r.role_name === "project_manager" || r.role_name === "admin" || r.role_name === "manager"
+          (r: any) => ["project_manager", "admin", "manager"].includes(r.role_name)
         );
-
         if (!hasProjectManagerRole) {
           showToast("You do not have permission to access this project.", "error");
           setTimeout(() => navigate("/projects"), 2000);
           return;
         }
 
-        // Step 3: Fetch project basic info for authorization
         const { data: projectData, error: projectError } = await supabase
           .from("projects")
           .select("id, manager_id, client_id")
@@ -485,20 +452,17 @@ export default function ProjectDetailPage() {
           .single();
 
         if (!mounted) return;
-
         if (projectError || !projectData) {
-          console.error("[ProjectDetailPage] Project not found:", projectError);
           showToast("Project not found.", "error");
           setTimeout(() => navigate("/projects"), 2000);
           return;
         }
 
-        // Step 4: Verify user authorization
-        const isAdminUser  = user.roles.some((r: any) => r.role_name === "admin");
+        const isAdminUser      = user.roles.some((r: any) => r.role_name === "admin");
         const isGeneralManager = user.roles.some((r: any) => r.role_name === "manager");
-        const isAssignedPM = projectData.manager_id === user.profile?.id;
-        const isClientUser = user.roles.some((r: any) => r.role_name === "client");
-        const isProjectClient = isClientUser && projectData.client_id === user.profile?.id;
+        const isAssignedPM     = projectData.manager_id === user.profile?.id;
+        const isClientUser     = user.roles.some((r: any) => r.role_name === "client");
+        const isProjectClient  = isClientUser && projectData.client_id === user.profile?.id;
 
         if (!isAdminUser && !isGeneralManager && !isAssignedPM && !isProjectClient) {
           showToast("You are not authorized to view this project.", "error");
@@ -506,11 +470,9 @@ export default function ProjectDetailPage() {
           return;
         }
 
-        // Step 5: Fetch all project data
         await fetchProjectAndData();
-
       } catch (error) {
-        console.error("[ProjectDetailPage] Initialization error:", error);
+        console.error("[ProjectDetailPage] init error:", error);
         if (mounted) {
           showToast("Error loading project.", "error");
           setTimeout(() => navigate("/projects"), 2000);
@@ -521,17 +483,11 @@ export default function ProjectDetailPage() {
     };
 
     initializePage();
-
-    return () => {
-      console.log('[ProjectDetailPage] useEffect cleanup called');
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [id]);
 
-  console.log('[ProjectDetailPage] useEffect REGISTERED');
-
-  const isClient  = currentUser?.roles.some((r: any) => r.role_name === "client");
-  const isAdmin   = currentUser?.roles.some((r: any) => r.role_name === "admin");
+  const isClient = currentUser?.roles.some((r: any) => r.role_name === "client");
+  const isAdmin  = currentUser?.roles.some((r: any) => r.role_name === "admin");
 
   const canEdit =
     currentUser?.roles.some((r: any) => ["admin", "manager", "project_manager"].includes(r.role_name)) ||
@@ -556,10 +512,7 @@ export default function ProjectDetailPage() {
   const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];
   const tabs = isClient ? allTabs.filter((tab) => clientTabs.includes(tab.id)) : allTabs;
 
-  console.log('[ProjectDetailPage] ABOUT TO RENDER', { loading, project: !!project });
-
   if (loading) {
-    console.log('[ProjectDetailPage] RENDERING LOADING STATE');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
@@ -573,7 +526,6 @@ export default function ProjectDetailPage() {
   }
 
   if (!project) {
-    console.log('[ProjectDetailPage] RENDERING NOT FOUND STATE');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center">
@@ -583,8 +535,6 @@ export default function ProjectDetailPage() {
       </div>
     );
   }
-
-  console.log('[ProjectDetailPage] RENDERING MAIN CONTENT');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -627,17 +577,6 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
               </div>
-              {/* {canEdit && (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => showToast("Edit project functionality coming soon!", "warning")}
-                  className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all text-sm sm:text-base w-full sm:w-auto justify-center"
-                >
-                  <Edit className="w-4 h-4 sm:w-5 sm:h-5" />
-                  Edit Project
-                </motion.button>
-              )} */}
             </div>
           </motion.div>
 
@@ -676,6 +615,7 @@ export default function ProjectDetailPage() {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
           >
+
             {activeTab === "overview" && (
               <OverviewTab
                 project={project}
@@ -686,6 +626,14 @@ export default function ProjectDetailPage() {
                 canEdit={canEdit}
                 isClient={isClient}
                 onProjectUpdate={fetchProjectAndData}
+                // ── Auto-computed progress — read-only for all users ──────
+                // Sourced from MilestonesTab via onProgressChange below.
+                // OverviewTab must display this value and must NOT render
+                // any input/slider/button that lets a user change it.
+                projectProgress={projectProgress}
+                // ── Auto counts — derived from live data arrays ───────────
+                documentsCount={documents.length}
+                updatesCount={activeUpdates.length}
               />
             )}
 
@@ -695,6 +643,12 @@ export default function ProjectDetailPage() {
                 milestones={milestones}
                 canEdit={canEdit}
                 onUpdate={fetchProjectAndData}
+                // ── This is the single callback that feeds the progress bar ──
+                // MilestonesTab calculates:
+                //   milestone % = tasks with status='done' / total tasks * 100
+                //   project %   = average of all milestone %s
+                // and calls this whenever a task changes.
+                onProgressChange={setProjectProgress}
               />
             )}
 
@@ -793,6 +747,7 @@ export default function ProjectDetailPage() {
                 </motion.div>
               </GlassCard>
             )}
+
           </motion.div>
         </AnimatePresence>
       </div>

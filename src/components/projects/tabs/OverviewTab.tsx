@@ -17,6 +17,10 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Props
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface OverviewTabProps {
   project: any;
   milestones: any[];
@@ -26,7 +30,32 @@ interface OverviewTabProps {
   canEdit: boolean;
   isClient: boolean;
   onProjectUpdate: () => void;
+
+  /**
+   * Auto-computed project progress — task-driven, read-only.
+   * Formula: average of (done_tasks / total_tasks * 100) per milestone.
+   * Source: MilestonesTab → onProgressChange → ProjectDetailPage state.
+   * No user — including admin — can manually change this value.
+   */
+  projectProgress: number;
+
+  /**
+   * Auto-counted from the documents array in ProjectDetailPage.
+   * Replaces documents.length used in Quick Stats so the count is
+   * always in sync with the real fetched data.
+   */
+  documentsCount: number;
+
+  /**
+   * Auto-counted from the active updates array in ProjectDetailPage.
+   * Replaces updates.length used in Quick Stats.
+   */
+  updatesCount: number;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
@@ -35,13 +64,17 @@ const GlassCard = ({ children, className = "" }: { children: React.ReactNode; cl
 );
 
 const statusOptions = [
-  { value: "planning", label: "Planning", color: "bg-gray-500/20 text-gray-300 border-gray-500/30" },
-  { value: "pre_construction", label: "Pre-Construction", color: "bg-blue-500/20 text-blue-300 border-blue-500/30" },
-  { value: "in_construction", label: "In Construction", color: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30" },
-  { value: "inspections", label: "Inspections", color: "bg-purple-500/20 text-purple-300 border-purple-500/30" },
-  { value: "completed", label: "Completed", color: "bg-green-500/20 text-green-300 border-green-500/30" },
-  { value: "on_hold", label: "On Hold", color: "bg-red-500/20 text-red-300 border-red-500/30" },
+  { value: "planning",          label: "Planning",          color: "bg-gray-500/20 text-gray-300 border-gray-500/30"     },
+  { value: "pre_construction",  label: "Pre-Construction",  color: "bg-blue-500/20 text-blue-300 border-blue-500/30"     },
+  { value: "in_construction",   label: "In Construction",   color: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30" },
+  { value: "inspections",       label: "Inspections",       color: "bg-purple-500/20 text-purple-300 border-purple-500/30" },
+  { value: "completed",         label: "Completed",         color: "bg-green-500/20 text-green-300 border-green-500/30"  },
+  { value: "on_hold",           label: "On Hold",           color: "bg-red-500/20 text-red-300 border-red-500/30"        },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function OverviewTab({
   project,
@@ -52,151 +85,121 @@ export default function OverviewTab({
   canEdit,
   isClient,
   onProjectUpdate,
+  projectProgress,
+  documentsCount,
+  updatesCount,
 }: OverviewTabProps) {
+
+  // ── Edit state — progress editing intentionally removed ───────────────────
   const [isEditingStatus, setIsEditingStatus] = useState(false);
-  const [isEditingProgress, setIsEditingProgress] = useState(false);
-  const [isEditingDates, setIsEditingDates] = useState(false);
+  const [isEditingDates,  setIsEditingDates]  = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const [statusValue, setStatusValue] = useState(project.status);
-  const [progressValue, setProgressValue] = useState(project.progress_percent);
-  const [startDate, setStartDate] = useState(project.start_date || "");
-  const [expectedDate, setExpectedDate] = useState(project.expected_completion_date || "");
-  const [actualDate, setActualDate] = useState(project.actual_completion_date || "");
-  const [dateError, setDateError] = useState("");
+  const [statusValue,   setStatusValue]   = useState(project.status);
+  const [startDate,     setStartDate]     = useState(project.start_date || "");
+  const [expectedDate,  setExpectedDate]  = useState(project.expected_completion_date || "");
+  const [actualDate,    setActualDate]    = useState(project.actual_completion_date || "");
+  const [dateError,     setDateError]     = useState("");
 
-  // Get project creation date (cannot set dates before this)
-  const projectCreatedDate = project.created_at ? new Date(project.created_at).toISOString().split('T')[0] : null;
-  const today = new Date().toISOString().split('T')[0];
+  const projectCreatedDate = project.created_at
+    ? new Date(project.created_at).toISOString().split("T")[0]
+    : null;
 
-  // Date validation function
+  // ── Date validation ────────────────────────────────────────────────────────
   const validateDates = (start: string, expected: string, actual: string): string | null => {
-    const startDateObj = start ? new Date(start) : null;
-    const expectedDateObj = expected ? new Date(expected) : null;
-    const actualDateObj = actual ? new Date(actual) : null;
-    const createdDateObj = projectCreatedDate ? new Date(projectCreatedDate) : null;
+    const s = start    ? new Date(start)    : null;
+    const e = expected ? new Date(expected) : null;
+    const a = actual   ? new Date(actual)   : null;
+    const c = projectCreatedDate ? new Date(projectCreatedDate) : null;
 
-    // Start date cannot be before project creation date
-    if (startDateObj && createdDateObj && startDateObj < createdDateObj) {
-      return "Start date cannot be before the project was created";
-    }
-
-    // Expected completion cannot be before start date
-    if (startDateObj && expectedDateObj && expectedDateObj < startDateObj) {
-      return "Expected completion date cannot be before start date";
-    }
-
-    // Actual completion cannot be before project creation date
-    if (actualDateObj && createdDateObj && actualDateObj < createdDateObj) {
-      return "Actual completion date cannot be before the project was created";
-    }
-
-    // Actual completion cannot be before start date (if both exist)
-    if (startDateObj && actualDateObj && actualDateObj < startDateObj) {
-      return "Actual completion date cannot be before start date";
-    }
-
+    if (s && c && s < c) return "Start date cannot be before the project was created";
+    if (s && e && e < s) return "Expected completion date cannot be before start date";
+    if (a && c && a < c) return "Actual completion date cannot be before the project was created";
+    if (s && a && a < s) return "Actual completion date cannot be before start date";
     return null;
   };
 
-  // Handle date changes with validation
-  const handleStartDateChange = (value: string) => {
-    setStartDate(value);
-    const error = validateDates(value, expectedDate, actualDate);
-    setDateError(error || "");
+  const handleStartDateChange = (v: string) => {
+    setStartDate(v);
+    setDateError(validateDates(v, expectedDate, actualDate) ?? "");
+  };
+  const handleExpectedDateChange = (v: string) => {
+    setExpectedDate(v);
+    setDateError(validateDates(startDate, v, actualDate) ?? "");
+  };
+  const handleActualDateChange = (v: string) => {
+    setActualDate(v);
+    setDateError(validateDates(startDate, expectedDate, v) ?? "");
   };
 
-  const handleExpectedDateChange = (value: string) => {
-    setExpectedDate(value);
-    const error = validateDates(startDate, value, actualDate);
-    setDateError(error || "");
-  };
-
-  const handleActualDateChange = (value: string) => {
-    setActualDate(value);
-    const error = validateDates(startDate, expectedDate, value);
-    setDateError(error || "");
-  };
-
-  // Edge Function #1: Update Project Status
+  // ── Edge Function: Update Project Status (no progress_percent) ─────────────
   const handleUpdateStatus = async () => {
     if (!canEdit) return;
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("update-project-status", {
-        body: {
-          projectId: project.id,
-          status: statusValue,
-          progress_percent: progressValue,
-        },
+        body: { projectId: project.id, status: statusValue },
       });
-
       if (error) throw error;
-
-      // Check if the response contains an error
-      if (data && !data.success) {
-        throw new Error(data.error || "Failed to update status");
-      }
-
+      if (data && !data.success) throw new Error(data.error || "Failed to update status");
       alert("Project status updated successfully!");
       setIsEditingStatus(false);
-      setIsEditingProgress(false);
       onProjectUpdate();
-    } catch (error: any) {
-      console.error("Error updating status:", error);
-      alert(error.message || "Failed to update status");
+    } catch (err: any) {
+      console.error("Error updating status:", err);
+      alert(err.message || "Failed to update status");
     } finally {
       setLoading(false);
     }
   };
 
-  // Edge Function #2: Update Project Dates
+  // ── Edge Function: Update Project Dates ────────────────────────────────────
   const handleUpdateDates = async () => {
     if (!canEdit) return;
-
-    // Final validation before submission
     const validationError = validateDates(startDate, expectedDate, actualDate);
-    if (validationError) {
-      setDateError(validationError);
-      return;
-    }
+    if (validationError) { setDateError(validationError); return; }
 
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("update-project-dates", {
         body: {
           projectId: project.id,
-          start_date: startDate || null,
-          expected_completion_date: expectedDate || null,
-          actual_completion_date: actualDate || null,
+          start_date:                startDate   || null,
+          expected_completion_date:  expectedDate || null,
+          actual_completion_date:    actualDate   || null,
         },
       });
-
       if (error) throw error;
-
-      // Check if the response contains an error
-      if (data && !data.success) {
-        throw new Error(data.error || "Failed to update dates");
-      }
-
+      if (data && !data.success) throw new Error(data.error || "Failed to update dates");
       alert("Project dates updated successfully!");
       setIsEditingDates(false);
       setDateError("");
       onProjectUpdate();
-    } catch (error: any) {
-      console.error("Error updating dates:", error);
-      alert(error.message || "Failed to update dates");
+    } catch (err: any) {
+      console.error("Error updating dates:", err);
+      alert(err.message || "Failed to update dates");
     } finally {
       setLoading(false);
     }
   };
 
-  const currentStatus = statusOptions.find((s) => s.value === project.status) || statusOptions[0];
+  const currentStatus = statusOptions.find((s) => s.value === project.status) ?? statusOptions[0];
 
+  // ── Progress bar colour ────────────────────────────────────────────────────
+  const progressGradient =
+    projectProgress === 100
+      ? "from-green-400 to-green-500"
+      : "from-primary to-accent";
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
-      {/* Left Column - Main Info */}
+
+      {/* ── LEFT COLUMN ── */}
       <div className="lg:col-span-2 space-y-4 sm:space-y-8">
+
         {/* Project Status Card */}
         <GlassCard>
           <div className="flex items-center justify-between mb-4 sm:mb-6">
@@ -231,22 +234,16 @@ export default function OverviewTab({
               </div>
               <div className="flex gap-3">
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleUpdateStatus}
-                  disabled={loading}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                  onClick={handleUpdateStatus} disabled={loading}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-background font-semibold rounded-xl transition-all"
                 >
                   <Save className="w-4 h-4" />
                   {loading ? "Saving..." : "Save"}
                 </motion.button>
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setStatusValue(project.status);
-                    setIsEditingStatus(false);
-                  }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                  onClick={() => { setStatusValue(project.status); setIsEditingStatus(false); }}
                   className="px-4 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
                 >
                   <X className="w-5 h-5" />
@@ -262,78 +259,47 @@ export default function OverviewTab({
           )}
         </GlassCard>
 
-        {/* Progress Card */}
+        {/* ════════════════════════════════════════════════════════
+            PROJECT PROGRESS CARD
+            ── Read-only for ALL users. No edit button. No input. ──
+            Value = projectProgress prop (task-driven from MilestonesTab).
+            Changes only when tasks are marked done in the Tasks tab.
+            ════════════════════════════════════════════════════════ */}
         <GlassCard>
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
+          <div className="mb-4 sm:mb-6">
             <h3 className="text-lg sm:text-xl md:text-2xl font-bold">Project Progress</h3>
-            {canEdit && !isEditingProgress && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setIsEditingProgress(true)}
-                className="p-2 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
-              >
-                <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
-              </motion.button>
-            )}
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+              Automatically calculated from completed tasks across all milestones
+            </p>
           </div>
 
-          {isEditingProgress ? (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Progress Percentage</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={progressValue}
-                  onChange={(e) => setProgressValue(parseInt(e.target.value) || 0)}
-                  className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
-                />
-              </div>
-              <div className="flex gap-3">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleUpdateStatus}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-background font-semibold rounded-xl transition-all"
-                >
-                  <Save className="w-4 h-4" />
-                  {loading ? "Saving..." : "Save"}
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setProgressValue(project.progress_percent);
-                    setIsEditingProgress(false);
-                  }}
-                  className="px-4 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
-                >
-                  <X className="w-5 h-5" />
-                </motion.button>
-              </div>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="font-medium text-sm sm:text-base">Overall Progress</span>
+              <span className="font-bold text-primary text-lg sm:text-xl tabular-nums">
+                {projectProgress}%
+              </span>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex justify-between text-sm sm:text-base mb-3">
-                <span className="font-medium">Overall Progress</span>
-                <span className="font-bold text-primary text-lg sm:text-xl">{project.progress_percent}%</span>
-              </div>
-              <div className="w-full bg-white/10 rounded-full h-3 sm:h-4 overflow-hidden backdrop-blur-xl border border-white/20">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${project.progress_percent}%` }}
-                  transition={{ duration: 1, ease: "easeOut" }}
-                  className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
-                />
-              </div>
+
+            {/* Bar — purely display, no interactive elements */}
+            <div className="w-full bg-white/10 rounded-full h-3 sm:h-4 overflow-hidden backdrop-blur-xl border border-white/20">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${projectProgress}%` }}
+                transition={{ duration: 1, ease: "easeOut" }}
+                className={`bg-gradient-to-r ${progressGradient} h-full rounded-full`}
+              />
             </div>
-          )}
+
+            {/* Summary line */}
+            <p className="text-xs text-muted-foreground">
+              {tasks.filter((t) => t.status === "done").length} of {tasks.length} tasks marked done
+              {milestones.length > 0 && ` · ${milestones.length} milestone${milestones.length !== 1 ? "s" : ""}`}
+            </p>
+          </div>
         </GlassCard>
 
-        {/* Key Dates Card */}
+        {/* Key Dates Card — unchanged from original */}
         <GlassCard>
           <div className="flex items-center justify-between mb-4 sm:mb-6">
             <h3 className="text-lg sm:text-xl md:text-2xl font-bold">Key Dates</h3>
@@ -341,10 +307,7 @@ export default function OverviewTab({
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  setIsEditingDates(true);
-                  setDateError("");
-                }}
+                onClick={() => { setIsEditingDates(true); setDateError(""); }}
                 className="p-2 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
               >
                 <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -360,7 +323,7 @@ export default function OverviewTab({
                   <p className="text-sm text-red-300">{dateError}</p>
                 </div>
               )}
-              
+
               <div>
                 <label className="block text-sm font-medium mb-2">Start Date</label>
                 <input
@@ -369,13 +332,13 @@ export default function OverviewTab({
                   min={projectCreatedDate || undefined}
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-                  [&::-webkit-calendar-picker-indicator]:cursor-pointer 
-                  [&::-webkit-calendar-picker-indicator]:opacity-70
-                  [&::-webkit-calendar-picker-indicator]:hover:opacity-100
-                  [&::-webkit-calendar-picker-indicator]:transition-opacity
-                  [&::-webkit-datetime-edit]:text-foreground
-                  [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
-                  [&::-webkit-datetime-edit-text]:text-muted-foreground"
+                    [&::-webkit-calendar-picker-indicator]:cursor-pointer 
+                    [&::-webkit-calendar-picker-indicator]:opacity-70
+                    [&::-webkit-calendar-picker-indicator]:hover:opacity-100
+                    [&::-webkit-calendar-picker-indicator]:transition-opacity
+                    [&::-webkit-datetime-edit]:text-foreground
+                    [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
+                    [&::-webkit-datetime-edit-text]:text-muted-foreground"
                 />
                 {projectCreatedDate && (
                   <p className="text-xs text-muted-foreground mt-1">
@@ -383,7 +346,7 @@ export default function OverviewTab({
                   </p>
                 )}
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium mb-2">Expected Completion</label>
                 <input
@@ -392,13 +355,13 @@ export default function OverviewTab({
                   min={startDate || projectCreatedDate || undefined}
                   onChange={(e) => handleExpectedDateChange(e.target.value)}
                   className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-                  [&::-webkit-calendar-picker-indicator]:cursor-pointer 
-                  [&::-webkit-calendar-picker-indicator]:opacity-70
-                  [&::-webkit-calendar-picker-indicator]:hover:opacity-100
-                  [&::-webkit-calendar-picker-indicator]:transition-opacity
-                  [&::-webkit-datetime-edit]:text-foreground
-                  [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
-                  [&::-webkit-datetime-edit-text]:text-muted-foreground"
+                    [&::-webkit-calendar-picker-indicator]:cursor-pointer 
+                    [&::-webkit-calendar-picker-indicator]:opacity-70
+                    [&::-webkit-calendar-picker-indicator]:hover:opacity-100
+                    [&::-webkit-calendar-picker-indicator]:transition-opacity
+                    [&::-webkit-datetime-edit]:text-foreground
+                    [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
+                    [&::-webkit-datetime-edit-text]:text-muted-foreground"
                 />
                 {startDate && (
                   <p className="text-xs text-muted-foreground mt-1">
@@ -406,7 +369,7 @@ export default function OverviewTab({
                   </p>
                 )}
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium mb-2">Actual Completion (if completed)</label>
                 <input
@@ -415,23 +378,20 @@ export default function OverviewTab({
                   min={projectCreatedDate || undefined}
                   onChange={(e) => handleActualDateChange(e.target.value)}
                   className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-                  [&::-webkit-calendar-picker-indicator]:cursor-pointer 
-                  [&::-webkit-calendar-picker-indicator]:opacity-70
-                  [&::-webkit-calendar-picker-indicator]:hover:opacity-100
-                  [&::-webkit-calendar-picker-indicator]:transition-opacity
-                  [&::-webkit-datetime-edit]:text-foreground
-                  [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
-                  [&::-webkit-datetime-edit-text]:text-muted-foreground"
+                    [&::-webkit-calendar-picker-indicator]:cursor-pointer 
+                    [&::-webkit-calendar-picker-indicator]:opacity-70
+                    [&::-webkit-calendar-picker-indicator]:hover:opacity-100
+                    [&::-webkit-calendar-picker-indicator]:transition-opacity
+                    [&::-webkit-datetime-edit]:text-foreground
+                    [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
+                    [&::-webkit-datetime-edit-text]:text-muted-foreground"
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Cannot be before project creation
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">Cannot be before project creation</p>
               </div>
-              
+
               <div className="flex gap-3">
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   onClick={handleUpdateDates}
                   disabled={loading || !!dateError}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 disabled:cursor-not-allowed text-background font-semibold rounded-xl transition-all"
@@ -440,8 +400,7 @@ export default function OverviewTab({
                   {loading ? "Saving..." : "Save"}
                 </motion.button>
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     setStartDate(project.start_date || "");
                     setExpectedDate(project.expected_completion_date || "");
@@ -483,7 +442,7 @@ export default function OverviewTab({
           )}
         </GlassCard>
 
-        {/* Project Description */}
+        {/* Project Description — unchanged */}
         <GlassCard>
           <h3 className="text-lg sm:text-xl md:text-2xl font-bold mb-4 sm:mb-6">Project Description</h3>
           <p className="text-sm sm:text-base leading-relaxed text-muted-foreground">
@@ -492,8 +451,10 @@ export default function OverviewTab({
         </GlassCard>
       </div>
 
-      {/* Right Column - Stats & Summary */}
+      {/* ── RIGHT COLUMN ── */}
       <div className="space-y-4 sm:space-y-8">
+
+        {/* Budget — unchanged, hidden from client */}
         {!isClient && (
           <GlassCard>
             <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
@@ -504,14 +465,20 @@ export default function OverviewTab({
           </GlassCard>
         )}
 
+        {/* ════════════════════════════════════════════════════
+            QUICK STATS
+            - documents count → documentsCount prop (auto from DB)
+            - updates count   → updatesCount prop (auto from DB)
+            - tasks / milestones → from their arrays as before
+            ════════════════════════════════════════════════════ */}
         <GlassCard>
           <h3 className="text-base sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">Quick Stats</h3>
           <div className="space-y-4 sm:space-y-5">
             {[
-              { label: "Milestones", value: milestones.length, icon: Calendar },
+              { label: "Milestones", value: milestones.length,  icon: Calendar      },
               ...(isClient ? [] : [{ label: "Tasks", value: tasks.length, icon: CheckCircle2 }]),
-              { label: "Updates", value: updates.length, icon: MessageSquare },
-              { label: "Documents", value: documents.length, icon: FileText },
+              { label: "Updates",   value: updatesCount,        icon: MessageSquare },
+              { label: "Documents", value: documentsCount,      icon: FileText      },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
@@ -527,7 +494,7 @@ export default function OverviewTab({
           </div>
         </GlassCard>
 
-        {/* Project Timeline Summary */}
+        {/* Timeline — unchanged */}
         <GlassCard>
           <h3 className="text-base sm:text-lg md:text-xl font-bold mb-4 sm:mb-6">Timeline</h3>
           <div className="space-y-3">

@@ -1,6 +1,6 @@
 // src/components/projects/tabs/MilestonesTab.tsx
 import { useState, useEffect, useCallback } from "react";
-import { format, differenceInDays, isAfter, isBefore, isValid, parseISO, startOfDay } from "date-fns";
+import { format, isAfter, isBefore, parseISO, startOfDay } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -8,351 +8,421 @@ import {
   Plus,
   Edit2,
   GripVertical,
-  Trash2,
   CheckCircle2,
   Clock,
   AlertCircle,
+  ListTodo,
+  User,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { projectApi } from "@/lib/api/projectApi";
 import { Milestone, MilestoneStatus } from "@/types/project";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  // 'done' is the completed state in your DB constraint
+  status: "todo" | "in_progress" | "review" | "done";
+  priority: "low" | "medium" | "high" | "urgent";
+  milestone_id: string | null;
+  project_id: string;
+  assigned_to: string | null;
+  due_date: string | null;
+  start_date: string | null;
+  completed_at: string | null;
+  // joined from workers table via tasks_assigned_to_fkey
+  worker?: { id: string; full_name: string } | null;
+}
 
 interface MilestonesTabProps {
   projectId: string;
   milestones: Milestone[];
   canEdit: boolean;
   onUpdate: () => void;
+  /**
+   * Fires every time overall project progress recalculates.
+   * Wire this to a useState setter in your project home page and client page
+   * to drive the top-level project progress bar.
+   *
+   * Example:
+   *   const [projectProgress, setProjectProgress] = useState(0);
+   *   <MilestonesTab ... onProgressChange={setProjectProgress} />
+   */
+  onProgressChange?: (overallPercent: number) => void;
 }
-
-const GlassCard = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}>
-    {children}
-  </div>
-);
-
-const statusOptions = [
-  { value: "not_started", label: "Not Started", color: "bg-gray-500/20 text-gray-300 border-gray-500/30", icon: Clock },
-  { value: "in_progress", label: "In Progress", color: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30", icon: Clock },
-  { value: "completed", label: "Completed", color: "bg-green-500/20 text-green-300 border-green-500/30", icon: CheckCircle2 },
-  { value: "delayed", label: "Delayed", color: "bg-red-500/20 text-red-300 border-red-500/30", icon: AlertCircle },
-];
 
 interface ProjectDates {
   start_date: string | null;
   created_at: string;
 }
 
-export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate }: MilestonesTabProps) {
+// ─────────────────────────────────────────────────────────────────────────────
+// ███  PROGRESS CALCULATION — TASK COUNT ONLY, NO DATES  ███
+//
+// Formula:  progress = (tasks where status='done') / (total tasks) * 100
+//
+// Dates are NEVER used in this calculation. Dates only affect the milestone
+// STATUS badge (not_started / in_progress / completed / delayed).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Returns true only when the task's status matches your DB enum value 'done' */
+function isTaskDone(task: Task): boolean {
+  return task.status === "done";
+}
+
+/**
+ * Progress for a single milestone.
+ * Returns 0 when the milestone has no tasks yet (bar stays empty).
+ * Returns 100 only when every linked task has status='done'.
+ */
+function milestoneProgress(tasks: Task[]): number {
+  if (tasks.length === 0) return 0;
+  const doneCount = tasks.filter(isTaskDone).length;
+  return Math.round((doneCount / tasks.length) * 100);
+}
+
+/**
+ * Project-level progress = simple average of all milestone progresses.
+ * This is what feeds the project home bar and the client view bar.
+ */
+function projectProgress(
+  milestones: Milestone[],
+  tasksByMilestone: Record<string, Task[]>
+): number {
+  if (milestones.length === 0) return 0;
+  const sum = milestones.reduce(
+    (acc, m) => acc + milestoneProgress(tasksByMilestone[m.id] ?? []),
+    0
+  );
+  return Math.round(sum / milestones.length);
+}
+
+/**
+ * Milestone STATUS badge — this is the only place dates are used.
+ * Progress percentage is NOT changed here, only the label/colour.
+ */
+function milestoneBadgeStatus(
+  progress: number,
+  milestone: Milestone
+): MilestoneStatus {
+  if (progress === 100) return "completed";
+  if (progress > 0) return "in_progress";
+  // 0% and planned end has already passed → delayed
+  if (
+    milestone.planned_end_date &&
+    isAfter(new Date(), parseISO(milestone.planned_end_date))
+  ) {
+    return "delayed";
+  }
+  return "not_started";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STATUS_OPTIONS = [
+  { value: "not_started", label: "Not Started", color: "bg-gray-500/20 text-gray-300 border-gray-500/30",        icon: Clock         },
+  { value: "in_progress", label: "In Progress",  color: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30", icon: Clock         },
+  { value: "completed",   label: "Completed",    color: "bg-green-500/20 text-green-300 border-green-500/30",    icon: CheckCircle2  },
+  { value: "delayed",     label: "Delayed",      color: "bg-red-500/20 text-red-300 border-red-500/30",          icon: AlertCircle   },
+];
+
+const TASK_LABEL: Record<Task["status"], string> = {
+  todo:        "To Do",
+  in_progress: "In Progress",
+  review:      "In Review",
+  done:        "Done",
+};
+
+const TASK_COLOR: Record<Task["status"], string> = {
+  todo:        "bg-gray-500/20 text-gray-300 border-gray-500/30",
+  in_progress: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
+  review:      "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  done:        "bg-green-500/20 text-green-300 border-green-500/30",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GlassCard
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GlassCard = ({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <div
+    className={`backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 sm:p-6 hover:bg-white/15 transition-all duration-300 ${className}`}
+  >
+    {children}
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function MilestonesTab({
+  projectId,
+  milestones,
+  canEdit,
+  onUpdate,
+  onProgressChange,
+}: MilestonesTabProps) {
+  // ── state ──────────────────────────────────────────────────────────────────
   const [projectDates, setProjectDates] = useState<ProjectDates | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dynamicMilestones, setDynamicMilestones] = useState<Milestone[]>(milestones);
 
-  // Fetch project start/created dates on mount
+  /**
+   * The single source of truth for progress.
+   * Keys = milestone IDs. Values = Task[] for that milestone.
+   * When this changes, all progress bars re-render automatically.
+   */
+  const [tasksByMilestone, setTasksByMilestone] = useState<Record<string, Task[]>>({});
+
+  const [editingId, setEditingId]             = useState<string | null>(null);
+  const [editForm, setEditForm]               = useState<Partial<Milestone>>({});
+  const [loading, setLoading]                 = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [draggedItem, setDraggedItem]         = useState<string | null>(null);
+  const [expandedTasks, setExpandedTasks]     = useState<Record<string, boolean>>({});
+
+  // ── fetch project dates ────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchProjectDates = async () => {
-      if (!projectId) return;
-      const { data } = await supabase
-        .from("projects")
-        .select("start_date, created_at")
-        .eq("id", projectId)
-        .single();
-      setProjectDates(data || null);
-    };
-    fetchProjectDates();
+    if (!projectId) return;
+    supabase
+      .from("projects")
+      .select("start_date, created_at")
+      .eq("id", projectId)
+      .single()
+      .then(({ data }) => setProjectDates(data ?? null));
   }, [projectId]);
 
-  // Get effective project start: start_date or created_at floored
-  const getProjectStart = useCallback((): Date | null => {
-    if (!projectDates) return null;
-    const start = projectDates.start_date ? parseISO(projectDates.start_date) : parseISO(projectDates.created_at);
-    return startOfDay(start);
-  }, [projectDates]);
-
-  // Sync props with local state
+  // ── keep local milestones in sync with prop ────────────────────────────────
   useEffect(() => {
-    setDynamicMilestones(milestones.map(m => ({
-      ...m,
-      status: computeStatus(m),
-      progress_percent: computeProgress(m),
-    })));
+    setDynamicMilestones(milestones);
   }, [milestones]);
 
-  // Live progress timer: Update every 5 minutes
-  useEffect(() => {
-    if (!canEdit || editingId) return;
-    const interval = setInterval(() => {
-      setDynamicMilestones(prev => prev.map(m => ({
-        ...m,
-        progress_percent: computeProgress(m),
-        status: computeStatus(m),
-      })));
-    }, 300000); // 5 min
-    return () => clearInterval(interval);
-  }, [canEdit, editingId]);
+  // ── fetch tasks from DB ────────────────────────────────────────────────────
+  /**
+   * Pulls every task for this project that has a milestone_id set,
+   * joins the assigned worker name, then groups by milestone_id.
+   *
+   * This is the ONLY place that determines what progress each bar shows.
+   */
+  const fetchTasks = useCallback(async () => {
+    if (!projectId) return;
 
-  // Edit form state (no progress_percent)
-  const [editForm, setEditForm] = useState<Partial<Milestone>>({});
+    const { data, error } = await supabase
+      .from("tasks")
+      .select(
+        `id,
+         title,
+         description,
+         status,
+         priority,
+         milestone_id,
+         project_id,
+         assigned_to,
+         due_date,
+         start_date,
+         completed_at,
+         worker:workers!tasks_assigned_to_fkey ( id, full_name )`
+      )
+      .eq("project_id", projectId)
+      .not("milestone_id", "is", null);   // only tasks linked to a milestone
 
-  // Enhanced progress: Blocks early dates, time-based
-  const computeProgress = useCallback((milestone: Milestone): number => {
-    const now = new Date();
-    const projectStart = getProjectStart();
-    const actualStart = milestone.actual_start_date ? parseISO(milestone.actual_start_date) : null;
-    const plannedEnd = milestone.planned_end_date ? parseISO(milestone.planned_end_date) : null;
-    const actualEnd = milestone.actual_end_date ? parseISO(milestone.actual_end_date) : null;
-
-    // Block/flag dates before project start
-    const dates = [actualStart, plannedEnd, actualEnd].filter(Boolean);
-    if (projectStart && dates.some(d => isBefore(d!, projectStart))) {
-      return 0; // Invalid: No progress
-    }
-
-    // Scenario 1: No actual start → 0%
-    if (!actualStart || !isValid(actualStart)) return 0;
-
-    // Scenario 2: Actual end set → 100%
-    if (actualEnd && isValid(actualEnd)) return 100;
-
-    // Scenario 3: Time-based (actual start to planned end)
-    if (plannedEnd && isValid(plannedEnd)) {
-      const duration = differenceInDays(plannedEnd, actualStart);
-      const elapsed = differenceInDays(now, actualStart);
-      if (duration <= 0) return 100; // Invalid duration
-      const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
-      return Math.round(progress);
-    }
-
-    // Scenario 4: Started but no planned end → 10% (initiated)
-    return 10;
-  }, [getProjectStart]);
-
-  // Enhanced status: Covers delays, invalids, overlaps (basic), early/late
-  const computeStatus = useCallback((milestone: Milestone): MilestoneStatus => {
-    const now = new Date();
-    const projectStart = getProjectStart();
-    const plannedStart = milestone.planned_start_date ? parseISO(milestone.planned_start_date) : null;
-    const plannedEnd = milestone.planned_end_date ? parseISO(milestone.planned_end_date) : null;
-    const actualStart = milestone.actual_start_date ? parseISO(milestone.actual_start_date) : null;
-    const actualEnd = milestone.actual_end_date ? parseISO(milestone.actual_end_date) : null;
-
-    // Block early dates: Any date before project start → delayed
-    const dates = [plannedStart, plannedEnd, actualStart, actualEnd].filter(Boolean);
-    if (projectStart && dates.some(d => isBefore(d!, projectStart))) {
-      return "delayed";
-    }
-
-    // Invalid sequences: start > end
-    const invalidSeq = (plannedStart && plannedEnd && isAfter(plannedStart, plannedEnd)) ||
-                       (actualStart && actualEnd && isAfter(actualStart, actualEnd));
-    if (invalidSeq) return "delayed";
-
-    // Basic overlap check: Actual start after previous milestone's planned end (simplified; assumes sequential)
-    // Note: For full overlap prevention, backend trigger or separate validation needed
-
-    // No dates → not_started
-    if (!dates.length) return "not_started";
-
-    // Planned start overdue without actual → delayed (e.g., permit delay)
-    if (plannedStart && isAfter(now, plannedStart) && !actualStart) return "delayed";
-
-    // Actual start set → in_progress (unless completed/delayed)
-    if (actualStart) {
-      // Early start (before planned): Allow, but check if before project
-      if (plannedStart && isBefore(actualStart, plannedStart)) {
-        // Real-life: Acceleration OK, but flag if extreme
-      }
-      if (actualEnd) {
-        // Completion: Late if after planned end (weather/supply issues)
-        if (plannedEnd && isAfter(actualEnd, plannedEnd)) return "delayed";
-        return "completed"; // On-time/early
-      }
-      // Ongoing: Delayed if past planned end (e.g., labor shortage)
-      if (plannedEnd && isAfter(now, plannedEnd)) return "delayed";
-      return "in_progress";
-    }
-
-    // Planned end passed without actuals → completed (assumed done) or delayed if start overdue
-    if (plannedEnd && isAfter(now, plannedEnd)) {
-      if (plannedStart && isAfter(plannedStart, now)) return "delayed"; // Future start, past end: Invalid
-      return "completed";
-    }
-
-    return "not_started";
-  }, [getProjectStart]);
-
-  // Enhanced validation: All scenarios, including project start
-  const validateDateLogic = useCallback((form: Partial<Milestone>): string | null => {
-    const projectStart = getProjectStart();
-    if (!projectStart) return "Project dates unavailable.";
-
-    const plannedStart = form.planned_start_date ? parseISO(form.planned_start_date) : null;
-    const plannedEnd = form.planned_end_date ? parseISO(form.planned_end_date) : null;
-    const actualStart = form.actual_start_date ? parseISO(form.actual_start_date) : null;
-    const actualEnd = form.actual_end_date ? parseISO(form.actual_end_date) : null;
-
-    // All dates >= project start (no backdating)
-    const dates = [plannedStart, plannedEnd, actualStart, actualEnd].filter(Boolean);
-    if (dates.some(d => isBefore(d!, projectStart))) {
-      return `Dates cannot precede project start (${format(projectStart, 'MMM dd, yyyy')}).`;
-    }
-
-    // Planned: start <= end
-    if (plannedStart && plannedEnd && isAfter(plannedStart, plannedEnd)) {
-      return "Planned start cannot be after planned end.";
-    }
-
-    // Actual: start <= end
-    if (actualStart && actualEnd && isAfter(actualStart, actualEnd)) {
-      return "Actual start cannot be after actual end.";
-    }
-
-    // Soft: Actual start >= planned start (allow early for acceleration)
-    if (plannedStart && actualStart && isBefore(actualStart, plannedStart)) {
-      // OK, but warn if too early (e.g., >30 days)
-      const earlyDays = differenceInDays(plannedStart, actualStart);
-      if (earlyDays > 30) return "Actual start is significantly before planned—confirm acceleration.";
-    }
-
-    // Status rules
-    if (form.status === "in_progress" && !actualStart) {
-      return "In Progress requires Actual Start Date.";
-    }
-    if (form.status === "completed" && !actualEnd && (!plannedEnd || isBefore(new Date(), plannedEnd))) {
-      return "Completed requires Actual End Date or past Planned End.";
-    }
-    if (form.status === "delayed" && !actualEnd && !plannedEnd) {
-      return "Delayed typically follows a missed date.";
-    }
-
-    // Construction-specific: No future actual end if ongoing
-    if (actualEnd && isAfter(actualEnd, new Date())) {
-      return "Actual End cannot be in the future.";
-    }
-
-    return null;
-  }, [getProjectStart]);
-
-  // Update with auto-logic
-  const handleUpdateMilestone = async () => {
-    if (!editingId || !canEdit) return;
-
-    const validationError = validateDateLogic(editForm);
-    if (validationError) {
-      alert(validationError);
+    if (error) {
+      console.error("[MilestonesTab] fetchTasks error:", error.message);
       return;
     }
 
-    const autoStatus = computeStatus({ ...editForm, actual_start_date: editForm.actual_start_date } as any);
-    const autoProgress = computeProgress({ ...editForm, actual_start_date: editForm.actual_start_date } as any);
+    // Group by milestone_id
+    const grouped: Record<string, Task[]> = {};
+    for (const task of (data ?? []) as Task[]) {
+      if (!task.milestone_id) continue;
+      grouped[task.milestone_id] ??= [];
+      grouped[task.milestone_id].push(task);
+    }
+
+    setTasksByMilestone(grouped);
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
+  // ── realtime: re-fetch whenever any task in this project changes ───────────
+  /**
+   * Covers all cases:
+   *  - Task created with a milestone_id          → bar appears / updates
+   *  - Task status changed to 'done'             → bar advances
+   *  - Task status changed from 'done' to other  → bar retreats
+   *  - Task deleted                              → bar recalculates
+   *  - Task's milestone_id changed               → moves between milestones
+   */
+  useEffect(() => {
+    if (!projectId) return;
+
+    const channel = supabase
+      .channel(`tasks-progress-${projectId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",            // INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "tasks",
+          filter: `project_id=eq.${projectId}`,
+        },
+        () => fetchTasks()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [projectId, fetchTasks]);
+
+  // ── bubble overall project progress to parent ──────────────────────────────
+  useEffect(() => {
+    if (!onProgressChange) return;
+    const overall = projectProgress(dynamicMilestones, tasksByMilestone);
+    onProgressChange(overall);
+  }, [dynamicMilestones, tasksByMilestone, onProgressChange]);
+
+  // ── date helpers (only used for validation, never for progress) ────────────
+  const getProjectStart = useCallback((): Date | null => {
+    if (!projectDates) return null;
+    return startOfDay(parseISO(projectDates.start_date ?? projectDates.created_at));
+  }, [projectDates]);
+
+  const minDateStr = (): string => {
+    if (!projectDates) return "2020-01-01";
+    return projectDates.start_date
+      ? projectDates.start_date
+      : format(new Date(projectDates.created_at), "yyyy-MM-dd");
+  };
+
+  const validateDates = useCallback(
+    (form: Partial<Milestone>): string | null => {
+      const start = getProjectStart();
+      if (!start) return null; // skip validation if dates unavailable
+
+      const ps  = form.planned_start_date ? parseISO(form.planned_start_date) : null;
+      const pe  = form.planned_end_date   ? parseISO(form.planned_end_date)   : null;
+      const as_ = form.actual_start_date  ? parseISO(form.actual_start_date)  : null;
+      const ae  = form.actual_end_date    ? parseISO(form.actual_end_date)    : null;
+
+      if ([ps, pe, as_, ae].filter(Boolean).some((d) => isBefore(d!, start)))
+        return `Dates cannot be before project start (${format(start, "MMM dd, yyyy")}).`;
+      if (ps && pe && isAfter(ps, pe))   return "Planned start cannot be after planned end.";
+      if (as_ && ae && isAfter(as_, ae)) return "Actual start cannot be after actual end.";
+      if (ae && isAfter(ae, new Date())) return "Actual end cannot be in the future.";
+      return null;
+    },
+    [getProjectStart]
+  );
+
+  // ── save milestone ─────────────────────────────────────────────────────────
+  const handleUpdateMilestone = async () => {
+    if (!editingId || !canEdit) return;
+    const err = validateDates(editForm);
+    if (err) { alert(err); return; }
 
     setLoading(true);
     try {
       await projectApi.updateMilestone(editingId, {
-        title: editForm.title,
-        description: editForm.description,
-        status: autoStatus,
+        title:              editForm.title,
+        description:        editForm.description,
         planned_start_date: editForm.planned_start_date,
-        planned_end_date: editForm.planned_end_date,
-        actual_start_date: editForm.actual_start_date,
-        actual_end_date: editForm.actual_end_date,
-        progress_percent: autoProgress,
+        planned_end_date:   editForm.planned_end_date,
+        actual_start_date:  editForm.actual_start_date,
+        actual_end_date:    editForm.actual_end_date,
+        // progress_percent and status are NOT stored — they are always derived
+        // from tasks at render time, so stored values are irrelevant.
       });
-
-      alert("Milestone updated successfully!");
       setEditingId(null);
       setEditForm({});
       onUpdate();
-    } catch (error: any) {
-      console.error("Error updating milestone:", error);
-      alert(error.message || "Failed to update milestone");
+    } catch (e: any) {
+      alert(e.message ?? "Failed to update milestone");
     } finally {
       setLoading(false);
     }
   };
 
-  // Reorder (unchanged)
-  const handleReorder = async (fromIndex: number, toIndex: number) => {
+  // ── reorder ────────────────────────────────────────────────────────────────
+  const handleReorder = async (fromIdx: number, toIdx: number) => {
     if (!canEdit) return;
-
-    const reorderedMilestones = [...dynamicMilestones];
-    const [movedItem] = reorderedMilestones.splice(fromIndex, 1);
-    reorderedMilestones.splice(toIndex, 0, movedItem);
-
-    const updates = reorderedMilestones.map((m, idx) => ({
-      id: m.id,
-      sort_order: idx * 100,
-    }));
-
+    const arr = [...dynamicMilestones];
+    const [item] = arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, item);
     setLoading(true);
     try {
-      await projectApi.reorderMilestones(updates);
+      await projectApi.reorderMilestones(
+        arr.map((m, i) => ({ id: m.id, sort_order: i * 100 }))
+      );
       onUpdate();
-    } catch (error: any) {
-      console.error("Error reordering milestones:", error);
-      alert(error.message || "Failed to reorder milestones");
+    } catch (e: any) {
+      alert(e.message ?? "Failed to reorder");
     } finally {
       setLoading(false);
     }
   };
 
-  const startEdit = (milestone: Milestone) => {
-    setEditingId(milestone.id);
+  // ── edit helpers ───────────────────────────────────────────────────────────
+  const startEdit = (m: Milestone) => {
+    setEditingId(m.id);
     setEditForm({
-      title: milestone.title,
-      description: milestone.description,
-      status: milestone.status,
-      planned_start_date: milestone.planned_start_date,
-      planned_end_date: milestone.planned_end_date,
-      actual_start_date: milestone.actual_start_date,
-      actual_end_date: milestone.actual_end_date,
+      title:              m.title,
+      description:        m.description,
+      planned_start_date: m.planned_start_date,
+      planned_end_date:   m.planned_end_date,
+      actual_start_date:  m.actual_start_date,
+      actual_end_date:    m.actual_end_date,
     });
   };
+  const cancelEdit = () => { setEditingId(null); setEditForm({}); };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditForm({});
-  };
-
-  const getStatusConfig = (status: string) => {
-    return statusOptions.find((s) => s.value === status) || statusOptions[0];
-  };
-
-  const canSetInProgress = (form: Partial<Milestone>) => !!form.actual_start_date;
-
-  // Drag and Drop Handlers (unchanged)
-  const handleDragStart = (e: React.DragEvent, milestoneId: string) => {
-    setDraggedItem(milestoneId);
+  // ── drag handlers ──────────────────────────────────────────────────────────
+  const onDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedItem(id);
     e.dataTransfer.effectAllowed = "move";
   };
-
-  const handleDragOver = (e: React.DragEvent) => {
+  const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-
-  const handleDrop = (e: React.DragEvent, dropTargetId: string) => {
+  const onDrop = (e: React.DragEvent, dropId: string) => {
     e.preventDefault();
-    if (!draggedItem || draggedItem === dropTargetId) return;
-
-    const fromIndex = dynamicMilestones.findIndex((m) => m.id === draggedItem);
-    const toIndex = dynamicMilestones.findIndex((m) => m.id === dropTargetId);
-
-    if (fromIndex !== -1 && toIndex !== -1) {
-      handleReorder(fromIndex, toIndex);
-    }
-
+    if (!draggedItem || draggedItem === dropId) return;
+    const from = dynamicMilestones.findIndex((m) => m.id === draggedItem);
+    const to   = dynamicMilestones.findIndex((m) => m.id === dropId);
+    if (from !== -1 && to !== -1) handleReorder(from, to);
     setDraggedItem(null);
   };
 
-  // Render milestone with computed values
+  // ── overall project-level number (also shown in the summary card) ──────────
+  const overallPercent = projectProgress(dynamicMilestones, tasksByMilestone);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render single milestone card
+  // ─────────────────────────────────────────────────────────────────────────
   const renderMilestone = (milestone: Milestone, idx: number) => {
-    const computedProgress = computeProgress(milestone);
-    const computedStatus = computeStatus(milestone);
-    const statusConfig = getStatusConfig(computedStatus);
-    const StatusIcon = statusConfig.icon;
-    const isEditing = editingId === milestone.id;
+    const tasks      = tasksByMilestone[milestone.id] ?? [];
+    const pct        = milestoneProgress(tasks);          // ← task count only
+    const badge      = milestoneBadgeStatus(pct, milestone);
+    const badgeCfg   = STATUS_OPTIONS.find((s) => s.value === badge) ?? STATUS_OPTIONS[0];
+    const BadgeIcon  = badgeCfg.icon;
+    const isEditing  = editingId === milestone.id;
+    const doneCount  = tasks.filter(isTaskDone).length;
+    const showTasks  = expandedTasks[milestone.id] ?? false;
 
     return (
       <motion.div
@@ -361,29 +431,28 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: idx * 0.05 }}
         draggable={canEdit && !isEditing}
-        onDragStart={(e) => handleDragStart(e, milestone.id)}
-        onDragOver={handleDragOver}
-        onDrop={(e) => handleDrop(e, milestone.id)}
-        className={`${draggedItem === milestone.id ? "opacity-50" : ""}`}
+        onDragStart={(e) => onDragStart(e, milestone.id)}
+        onDragOver={onDragOver}
+        onDrop={(e) => onDrop(e, milestone.id)}
+        className={draggedItem === milestone.id ? "opacity-50" : ""}
       >
         <GlassCard className="relative">
-          {/* Drag Handle */}
           {canEdit && !isEditing && (
             <div className="absolute left-2 top-1/2 -translate-y-1/2 cursor-move opacity-30 hover:opacity-100 transition-opacity">
               <GripVertical className="w-5 h-5 text-muted-foreground" />
             </div>
           )}
 
-          <div className={`${canEdit && !isEditing ? "pl-6" : ""}`}>
+          <div className={canEdit && !isEditing ? "pl-6" : ""}>
             {isEditing ? (
-              /* Edit Mode */
+              /* ── EDIT MODE ────────────────────────────────── */
               <div className="space-y-4">
                 {/* Title */}
                 <div>
                   <label className="block text-sm font-medium mb-2">Title</label>
                   <input
                     type="text"
-                    value={editForm.title || ""}
+                    value={editForm.title ?? ""}
                     onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                     className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
                   />
@@ -393,99 +462,65 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
                 <div>
                   <label className="block text-sm font-medium mb-2">Description</label>
                   <textarea
-                    value={editForm.description || ""}
+                    value={editForm.description ?? ""}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                     rows={3}
                     className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                   />
                 </div>
 
-                {/* Status - With validation */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">Status</label>
-                  <select
-                    value={editForm.status || ""}
-                    onChange={(e) => {
-                      if (e.target.value === "in_progress" && !editForm.actual_start_date) {
-                        alert("Cannot set to In Progress without Actual Start Date. Set the date first.");
-                        return;
-                      }
-                      setEditForm({ ...editForm, status: e.target.value });
-                    }}
-                    disabled={!canSetInProgress(editForm)}
-                    className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value} className="bg-background">
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Dates Grid - Min date enforced via HTML attr */}
+                {/* Dates */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Planned Start</label>
-                    <input
-                      type="date"
-                      min={projectDates?.start_date || format(new Date(projectDates?.created_at || '2025-01-01'), 'yyyy-MM-dd')}
-                      value={editForm.planned_start_date || ""}
-                      onChange={(e) => setEditForm({ ...editForm, planned_start_date: e.target.value })}
-                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Planned End</label>
-                    <input
-                      type="date"
-                      min={editForm.planned_start_date || projectDates?.start_date || format(new Date(projectDates?.created_at || '2025-01-01'), 'yyyy-MM-dd')}
-                      value={editForm.planned_end_date || ""}
-                      onChange={(e) => setEditForm({ ...editForm, planned_end_date: e.target.value })}
-                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Actual Start</label>
-                    <input
-                      type="date"
-                      min={projectDates?.start_date || format(new Date(projectDates?.created_at || '2025-01-01'), 'yyyy-MM-dd')}
-                      value={editForm.actual_start_date || ""}
-                      onChange={(e) => setEditForm({ ...editForm, actual_start_date: e.target.value })}
-                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Actual End</label>
-                    <input
-                      type="date"
-                      max={format(new Date(), 'yyyy-MM-dd')}  // No future actual ends
-                      min={editForm.actual_start_date || projectDates?.start_date || format(new Date(projectDates?.created_at || '2025-01-01'), 'yyyy-MM-dd')}
-                      value={editForm.actual_end_date || ""}
-                      onChange={(e) => setEditForm({ ...editForm, actual_end_date: e.target.value })}
-                      className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
+                  {(
+                    [
+                      { label: "Planned Start", key: "planned_start_date" as const, max: "" },
+                      { label: "Planned End",   key: "planned_end_date"   as const, max: "" },
+                      { label: "Actual Start",  key: "actual_start_date"  as const, max: "" },
+                      { label: "Actual End",    key: "actual_end_date"    as const, max: format(new Date(), "yyyy-MM-dd") },
+                    ]
+                  ).map(({ label, key, max }) => (
+                    <div key={key}>
+                      <label className="block text-sm font-medium mb-2">{label}</label>
+                      <input
+                        type="date"
+                        min={minDateStr()}
+                        {...(max ? { max } : {})}
+                        value={(editForm[key] as string) ?? ""}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, [key]: e.target.value || null })
+                        }
+                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
+                  ))}
                 </div>
 
-                {/* Non-editable Progress */}
-                <div className="pt-2">
-                  <label className="block text-sm font-medium mb-2">
-                    Progress: {computedProgress}%
-                  </label>
-                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden backdrop-blur-xl border border-white/20">
+                {/* Progress preview — read-only, task-driven */}
+                <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="font-medium flex items-center gap-2">
+                      <ListTodo className="w-4 h-4" />
+                      Task progress
+                    </span>
+                    <span className="font-bold text-primary">{pct}%</span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden border border-white/20">
                     <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${computedProgress}%` }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
-                      className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
+                      animate={{ width: `${pct}%` }}
+                      transition={{ duration: 0.5 }}
+                      className={`h-full rounded-full bg-gradient-to-r ${
+                        pct === 100 ? "from-green-400 to-green-500" : "from-primary to-accent"
+                      }`}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">Auto-calculated based on dates</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {doneCount} of {tasks.length} tasks marked done
+                    {tasks.length === 0 && " — link tasks to this milestone in the Tasks tab"}
+                  </p>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-2">
+                {/* Buttons */}
+                <div className="flex gap-3 pt-1">
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
@@ -493,7 +528,7 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
                     disabled={loading}
                     className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-background font-semibold rounded-xl transition-all"
                   >
-                    {loading ? "Saving..." : "Save Changes"}
+                    {loading ? "Saving…" : "Save Changes"}
                   </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.02 }}
@@ -507,24 +542,33 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
                 </div>
               </div>
             ) : (
-              /* View Mode */
+              /* ── VIEW MODE ───────────────────────────────────── */
               <div>
+                {/* Header row */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="text-base sm:text-lg md:text-xl font-bold break-words">{milestone.title}</h4>
+                    <div className="flex items-center gap-3 mb-1">
+                      <h4 className="text-base sm:text-lg md:text-xl font-bold break-words">
+                        {milestone.title}
+                      </h4>
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
                         #{idx + 1}
                       </span>
                     </div>
                     {milestone.description && (
-                      <p className="text-xs sm:text-sm text-muted-foreground">{milestone.description}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">
+                        {milestone.description}
+                      </p>
                     )}
                   </div>
+
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap flex items-center gap-2 ${statusConfig.color}`}>
-                      <StatusIcon className="w-3.5 h-3.5" />
-                      {statusConfig.label}
+                    {/* Status badge — derived from task progress + dates */}
+                    <span
+                      className={`px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-xl border whitespace-nowrap flex items-center gap-1.5 ${badgeCfg.color}`}
+                    >
+                      <BadgeIcon className="w-3.5 h-3.5" />
+                      {badgeCfg.label}
                     </span>
                     {canEdit && (
                       <motion.button
@@ -539,57 +583,150 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
                   </div>
                 </div>
 
-                {/* Auto Progress Bar */}
+                {/* ════════════════════════════════════════════
+                    PROGRESS BAR — task count only, no date math
+                    ════════════════════════════════════════════ */}
                 <div className="mb-4">
                   <div className="flex justify-between text-xs sm:text-sm mb-2">
-                    <span className="text-muted-foreground">Progress</span>
-                    <span className="font-semibold text-primary">{computedProgress}%</span>
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <ListTodo className="w-3.5 h-3.5" />
+                      {tasks.length === 0
+                        ? "No tasks linked yet"
+                        : `${doneCount} / ${tasks.length} tasks done`}
+                    </span>
+                    <span className="font-bold text-primary">{pct}%</span>
                   </div>
-                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden backdrop-blur-xl border border-white/20">
+
+                  {/* The bar width = pct, which = doneCount/tasks.length*100 */}
+                  <div className="w-full bg-white/10 rounded-full h-2.5 overflow-hidden backdrop-blur-xl border border-white/20">
                     <motion.div
                       initial={{ width: 0 }}
-                      animate={{ width: `${computedProgress}%` }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
-                      className="bg-gradient-to-r from-primary to-accent h-full rounded-full"
+                      animate={{ width: `${pct}%` }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
+                      className={`h-full rounded-full bg-gradient-to-r ${
+                        pct === 100
+                          ? "from-green-400 to-green-500"
+                          : pct > 0
+                          ? "from-primary to-accent"
+                          : "from-gray-600 to-gray-500"
+                      }`}
                     />
                   </div>
                 </div>
 
-                {/* Dates */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                {/* Dates display (informational only) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm mb-4">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                    <div>
-                      <span className="text-muted-foreground">Planned: </span>
-                      <span className="font-medium">
-                        {milestone.planned_start_date
-                          ? format(new Date(milestone.planned_start_date), "dd MMM")
-                          : "N/A"}{" "}
-                        -{" "}
-                        {milestone.planned_end_date
-                          ? format(new Date(milestone.planned_end_date), "dd MMM yyyy")
-                          : "N/A"}
-                      </span>
-                    </div>
+                    <span className="text-muted-foreground">Planned:&nbsp;</span>
+                    <span className="font-medium">
+                      {milestone.planned_start_date
+                        ? format(new Date(milestone.planned_start_date), "dd MMM")
+                        : "N/A"}
+                      {" – "}
+                      {milestone.planned_end_date
+                        ? format(new Date(milestone.planned_end_date), "dd MMM yyyy")
+                        : "N/A"}
+                    </span>
                   </div>
                   {(milestone.actual_start_date || milestone.actual_end_date) && (
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="w-3.5 h-3.5 text-accent flex-shrink-0" />
-                      <div>
-                        <span className="text-muted-foreground">Actual: </span>
-                        <span className="font-medium">
-                          {milestone.actual_start_date
-                            ? format(new Date(milestone.actual_start_date), "dd MMM")
-                            : "N/A"}{" "}
-                          -{" "}
-                          {milestone.actual_end_date
-                            ? format(new Date(milestone.actual_end_date), "dd MMM yyyy")
-                            : "Ongoing"}
-                        </span>
-                      </div>
+                      <span className="text-muted-foreground">Actual:&nbsp;</span>
+                      <span className="font-medium">
+                        {milestone.actual_start_date
+                          ? format(new Date(milestone.actual_start_date), "dd MMM")
+                          : "N/A"}
+                        {" – "}
+                        {milestone.actual_end_date
+                          ? format(new Date(milestone.actual_end_date), "dd MMM yyyy")
+                          : "Ongoing"}
+                      </span>
                     </div>
                   )}
                 </div>
+
+                {/* Tasks list (expandable — visible to client too) */}
+                {tasks.length > 0 ? (
+                  <div>
+                    <button
+                      onClick={() =>
+                        setExpandedTasks((prev) => ({
+                          ...prev,
+                          [milestone.id]: !prev[milestone.id],
+                        }))
+                      }
+                      className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
+                    >
+                      <ListTodo className="w-3.5 h-3.5" />
+                      {showTasks ? "Hide" : "Show"} tasks ({tasks.length})
+                      {showTasks
+                        ? <ChevronUp className="w-3.5 h-3.5" />
+                        : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+
+                    <AnimatePresence>
+                      {showTasks && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-2 overflow-hidden"
+                        >
+                          {tasks.map((task) => (
+                            <div
+                              key={task.id}
+                              className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl p-3 flex items-start gap-3"
+                            >
+                              {isTaskDone(task) ? (
+                                <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+                              ) : (
+                                <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 justify-between">
+                                  <span
+                                    className={`text-sm font-medium truncate ${
+                                      isTaskDone(task)
+                                        ? "line-through text-muted-foreground"
+                                        : ""
+                                    }`}
+                                  >
+                                    {task.title}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-lg text-xs border whitespace-nowrap flex-shrink-0 ${TASK_COLOR[task.status]}`}
+                                  >
+                                    {TASK_LABEL[task.status]}
+                                  </span>
+                                </div>
+
+                                {task.worker && (
+                                  <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                                    <User className="w-3 h-3" />
+                                    {task.worker.full_name}
+                                  </div>
+                                )}
+
+                                {task.due_date && (
+                                  <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+                                    <Calendar className="w-3 h-3" />
+                                    Due {format(new Date(task.due_date), "dd MMM yyyy")}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <ListTodo className="w-3.5 h-3.5" />
+                    No tasks linked — set a task's milestone in the Tasks tab to track progress here.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -598,15 +735,21 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
     );
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Page
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">Project Milestones</h3>
+          <h3 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold">
+            Project Milestones
+          </h3>
           <p className="text-sm sm:text-base text-muted-foreground mt-2">
-            {dynamicMilestones.length} milestone{dynamicMilestones.length !== 1 ? "s" : ""} • 
-            {canEdit ? " Drag to reorder" : " View only"}
+            {dynamicMilestones.length} milestone
+            {dynamicMilestones.length !== 1 ? "s" : ""} •{" "}
+            {canEdit ? "Drag to reorder" : "View only"}
           </p>
         </div>
         {canEdit && (
@@ -621,13 +764,45 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
         )}
       </div>
 
-      {/* Empty State */}
+      {/* ════════════════════════════════════════════════════════
+          OVERALL PROJECT PROGRESS SUMMARY CARD
+          Shows on both editor view and client view.
+          Feeds onProgressChange so the project home bar updates too.
+          ════════════════════════════════════════════════════════ */}
+      {dynamicMilestones.length > 0 && (
+        <GlassCard className="!p-4 sm:!p-5">
+          <div className="flex justify-between text-sm mb-2">
+            <span className="font-semibold">Overall Project Progress</span>
+            <span className="font-bold text-primary">{overallPercent}%</span>
+          </div>
+          <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden backdrop-blur-xl border border-white/20">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${overallPercent}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className={`h-full rounded-full bg-gradient-to-r ${
+                overallPercent === 100
+                  ? "from-green-400 to-green-500"
+                  : "from-primary to-accent"
+              }`}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Average across {dynamicMilestones.length} milestone
+            {dynamicMilestones.length !== 1 ? "s" : ""} — updates live when tasks are marked done
+          </p>
+        </GlassCard>
+      )}
+
+      {/* Milestones list */}
       {dynamicMilestones.length === 0 ? (
         <GlassCard className="text-center py-12 sm:py-16">
           <Calendar className="w-16 h-16 sm:w-20 sm:h-20 text-primary/30 mx-auto mb-4 sm:mb-6" />
-          <p className="text-base sm:text-xl text-muted-foreground mb-4 sm:mb-6">No milestones yet</p>
+          <p className="text-base sm:text-xl text-muted-foreground mb-4 sm:mb-6">
+            No milestones yet
+          </p>
           {canEdit && (
-            <button 
+            <button
               onClick={() => setShowCreateModal(true)}
               className="text-primary hover:text-primary/80 font-semibold text-base sm:text-lg"
             >
@@ -637,11 +812,11 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
         </GlassCard>
       ) : (
         <div className="space-y-4">
-          {dynamicMilestones.map((milestone, idx) => renderMilestone(milestone, idx))}
+          {dynamicMilestones.map((m, idx) => renderMilestone(m, idx))}
         </div>
       )}
 
-      {/* Create Milestone Modal Placeholder */}
+      {/* Create modal placeholder */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div
@@ -650,9 +825,7 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
             className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
           >
             <h3 className="text-2xl font-bold mb-4">Create New Milestone</h3>
-            <p className="text-muted-foreground mb-6">
-              Create milestone modal coming soon! For now, milestones are auto-created.
-            </p>
+            <p className="text-muted-foreground mb-6">Milestone creation coming soon.</p>
             <button
               onClick={() => setShowCreateModal(false)}
               className="w-full px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
@@ -665,3 +838,41 @@ export default function MilestonesTab({ projectId, milestones, canEdit, onUpdate
     </div>
   );
 }
+
+/*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WIRING THE PROJECT HOME BAR  (ProjectHomePage + ClientPage)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  const [projectProgress, setProjectProgress] = useState(0);
+
+  <MilestonesTab
+    projectId={projectId}
+    milestones={milestones}
+    canEdit={isEditor}                       // false = client (read-only)
+    onUpdate={refetch}
+    onProgressChange={setProjectProgress}    // ← drives home + client bar
+  />
+
+  // Your project-level bar anywhere on the home / client page:
+  <div className="w-full bg-white/10 rounded-full h-3 border border-white/20 overflow-hidden">
+    <div
+      style={{ width: `${projectProgress}%` }}
+      className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-700"
+    />
+  </div>
+  <span>{projectProgress}%</span>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REQUIRED: Enable Supabase Realtime on the tasks table
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dashboard → Database → Replication → toggle ON `tasks`
+This makes bars update live when a worker marks a task done.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW PROGRESS IS CALCULATED (summary)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Milestone bar  = tasks where status='done'  ÷  total tasks  × 100
+Project bar    = average of all milestone bars
+Dates are NEVER used in the calculation — only in the status badge.
+*/

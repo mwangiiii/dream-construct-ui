@@ -935,10 +935,10 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
         <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">{entry.job_id}</td>
         <td className="px-4 py-3.5 font-semibold text-sm">{entry.employee_name}</td>
         <td className="px-4 py-3.5 tabular-nums text-sm font-semibold">{fmt(entry.gross_pay)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300 hidden md:table-cell">{fmt(entry.nssf_total)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300 hidden lg:table-cell">{fmt(entry.shif)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300 hidden lg:table-cell">{fmt(entry.housing_levy)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300 hidden xl:table-cell">{fmt(entry.paye_net)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300">{fmt(entry.nssf_total)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300">{fmt(entry.shif)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300">{fmt(entry.housing_levy)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300">{fmt(entry.paye_net)}</td>
         <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm">{fmt(entry.net_pay)}</td>
         <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell">{fmtDate(entry.due_date)}</td>
         <td className="px-4 py-3.5 whitespace-nowrap">

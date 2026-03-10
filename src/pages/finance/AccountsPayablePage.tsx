@@ -70,10 +70,27 @@ interface Props {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const AP_STATUSES: APStatus[] = ["open", "partial", "paid", "overdue"];
 
-function stripGenerated(body: Partial<APFormData>): Partial<APFormData> {
-  const clean = { ...body };
-  delete (clean as Record<string, unknown>)["balance"];
-  return clean;
+// ─── FIX: Explicitly build the payload with only writable DB columns ──────────
+// This prevents any generated/computed/client-only fields from being sent,
+// which was causing: column "retaining_amount" can only be updated to DEFAULT
+function buildDBPayload(form: APFormData): Record<string, unknown> {
+  return {
+    project_id:             form.project_id,
+    vendor_name:            form.vendor_name,
+    invoice_number:         form.invoice_number,
+    etims_code:             form.etims_code,
+    date:                   form.date,
+    due_date:               form.due_date,
+    total_amount:           Number(form.total_amount)      || 0,
+    paid_amount:            Number(form.paid_amount)       || 0,
+    status:                 form.status,
+    retaining_percent:      Number(form.retaining_percent) || 0,
+    date_of_payment:        form.date_of_payment || null,
+    receiving_account_code: form.receiving_account_code,
+    notes:                  form.notes || null,
+    // DO NOT include: balance (GENERATED ALWAYS), retaining_amount (doesn't exist),
+    //                 id, created_at, updated_at (handled by DB trigger)
+  };
 }
 
 const STATUS_STYLE: Record<APStatus, { badge: string; row: string }> = {
@@ -191,10 +208,11 @@ const api = {
   },
 
   async create(body: APFormData): Promise<AccountsPayable> {
-    const clean = stripGenerated(body);
+    // FIX: use buildDBPayload to send only writable columns
+    const payload = buildDBPayload(body);
     const { data, error } = await supabase
       .from("accounts_payable")
-      .insert([clean])
+      .insert([payload])
       .select("*")
       .single();
     if (error) throwSb(error, "create");
@@ -210,10 +228,12 @@ const api = {
   },
 
   async update(id: string, body: APFormData, oldRow: AccountsPayable): Promise<AccountsPayable> {
-    const clean = stripGenerated(body);
+    // FIX: use buildDBPayload — do NOT manually set updated_at (trigger handles it),
+    //      and do NOT spread body directly (risks sending balance, retaining_amount, etc.)
+    const payload = buildDBPayload(body);
     const { data, error } = await supabase
       .from("accounts_payable")
-      .update({ ...clean, updated_at: new Date().toISOString() })
+      .update(payload)
       .eq("id", id)
       .select("*")
       .single();
@@ -1202,8 +1222,24 @@ function ProjectAPView({ project, canEdit, onBack }: {
         )}
         {modal === "edit" && editing && (
           <APModal
-            initial={(({ id: _i, balance: _b, created_at: _c, updated_at: _u, ...rest }) =>
-              ({ ...rest, id: editing.id }))(editing)}
+            // FIX: build a clean APFormData from the editing row,
+            // explicitly excluding balance, created_at, updated_at
+            initial={{
+              id:                     editing.id,
+              project_id:             editing.project_id,
+              vendor_name:            editing.vendor_name,
+              invoice_number:         editing.invoice_number,
+              etims_code:             editing.etims_code,
+              date:                   editing.date,
+              due_date:               editing.due_date,
+              total_amount:           editing.total_amount,
+              paid_amount:            editing.paid_amount,
+              status:                 editing.status,
+              retaining_percent:      editing.retaining_percent,
+              date_of_payment:        editing.date_of_payment,
+              receiving_account_code: editing.receiving_account_code,
+              notes:                  editing.notes,
+            }}
             onSave={form =>
               handleUpdate(
                 editing.id, form, editing,
@@ -1332,10 +1368,6 @@ function ProjectAPView({ project, canEdit, onBack }: {
 }
 
 // ─── GLOBAL AP VIEW ───────────────────────────────────────────────────────────
-// Mirrors GlobalARView exactly:
-//   - Consolidated tab: all invoices across all projects
-//   - Per-Project tab: filter by a specific project
-//   - "Project" column shown in consolidated view
 type GlobalAPTab = "consolidated" | "by_project";
 
 function GlobalAPView({ canEdit, projects }: {
@@ -1364,7 +1396,6 @@ function GlobalAPView({ canEdit, projects }: {
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  // In "by_project" tab, filter by selected project; otherwise show all
   const displayRows = useMemo(() => {
     if (activeTab === "by_project" && projectFilter !== "all") {
       return allRows.filter(r => r.project_id === projectFilter);
@@ -1394,7 +1425,6 @@ function GlobalAPView({ canEdit, projects }: {
     overdue:  displayRows.filter(r => r.status === "overdue").length,
   }), [displayRows]);
 
-  // Count invoices per project for the by_project tab selector
   const invoiceCountByProject = useMemo(() => {
     const c: Record<string, number> = {};
     allRows.forEach(r => { c[r.project_id] = (c[r.project_id] ?? 0) + 1; });
@@ -1433,8 +1463,24 @@ function GlobalAPView({ canEdit, projects }: {
         )}
         {modal === "edit" && editing && (
           <APModal
-            initial={(({ id: _i, balance: _b, created_at: _c, updated_at: _u, ...rest }) =>
-              ({ ...rest, id: editing.id }))(editing)}
+            // FIX: build a clean APFormData from the editing row,
+            // explicitly excluding balance, created_at, updated_at
+            initial={{
+              id:                     editing.id,
+              project_id:             editing.project_id,
+              vendor_name:            editing.vendor_name,
+              invoice_number:         editing.invoice_number,
+              etims_code:             editing.etims_code,
+              date:                   editing.date,
+              due_date:               editing.due_date,
+              total_amount:           editing.total_amount,
+              paid_amount:            editing.paid_amount,
+              status:                 editing.status,
+              retaining_percent:      editing.retaining_percent,
+              date_of_payment:        editing.date_of_payment,
+              receiving_account_code: editing.receiving_account_code,
+              notes:                  editing.notes,
+            }}
             onSave={form =>
               handleUpdate(
                 editing.id, form, editing,
@@ -1535,7 +1581,6 @@ function GlobalAPView({ canEdit, projects }: {
             ))}
           </div>
 
-          {/* By-project dropdown — only shown in by_project tab */}
           {activeTab === "by_project" && (
             <div className="mt-3 flex items-center gap-3">
               <div className="relative w-72">
@@ -1661,7 +1706,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
     }),
   [projects, search, statusFilter]);
 
-  const totalInvoices      = Object.values(invoiceCounts).reduce((a, b) => a + b, 0);
+  const totalInvoices        = Object.values(invoiceCounts).reduce((a, b) => a + b, 0);
   const projectsWithInvoices = Object.keys(invoiceCounts).length;
 
   return (
@@ -1693,9 +1738,9 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
           className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8"
         >
           {[
-            { label: "Total Projects",          value: projects.length,       sub: "in system",          color: "" },
-            { label: "Projects with Invoices",  value: projectsWithInvoices,  sub: "have AP records",    color: "" },
-            { label: "Total Invoices",          value: totalInvoices,         sub: "across all projects",color: "" },
+            { label: "Total Projects",          value: projects.length,       sub: "in system",           color: "" },
+            { label: "Projects with Invoices",  value: projectsWithInvoices,  sub: "have AP records",     color: "" },
+            { label: "Total Invoices",          value: totalInvoices,         sub: "across all projects", color: "" },
             { label: "Projects without AP",     value: projects.length - projectsWithInvoices, sub: "no invoices yet", color: "text-muted-foreground" },
           ].map(card => (
             <div key={card.label} className="rounded-2xl border border-white/10 p-4 backdrop-blur-sm bg-white/5">
@@ -1792,8 +1837,6 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 export default function AccountsPayablePage({ projectId, canEdit = true }: Props) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
-  // If a projectId prop is passed (e.g. embedded in a project detail page),
-  // skip the picker entirely and go straight to that project's AP view.
   useEffect(() => {
     if (!projectId) return;
     supabase
@@ -1815,7 +1858,6 @@ export default function AccountsPayablePage({ projectId, canEdit = true }: Props
           <ProjectAPView
             project={selectedProject}
             canEdit={canEdit}
-            // If projectId was passed as a prop we are embedded — disable back navigation
             onBack={() => { if (!projectId) setSelectedProject(null); }}
           />
         </motion.div>

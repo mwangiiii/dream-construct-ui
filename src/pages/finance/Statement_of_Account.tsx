@@ -1005,13 +1005,15 @@ function EntryModal({
             dotColor="bg-sky-400"
             textColor="text-sky-400"
           />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Entry Date *">
               <input
                 type="date"
                 value={form.entry_date}
-                onChange={(e) => set("entry_date", e.target.value)}
-                className={inputCls}
+                readOnly
+                className={readonlyCls}
+                tabIndex={-1}
               />
             </Field>
             <Field label="Due Date">
@@ -1042,6 +1044,17 @@ function EntryModal({
                 className={inputCls}
               />
             </Field>
+            {isEdit && initial.updated_at && (
+              <Field label="Last Updated">
+                <input
+                  type="text"
+                  value={new Date(initial.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  readOnly
+                  className={readonlyCls}
+                  tabIndex={-1}
+                />
+              </Field>
+            )}
           </div>
 
           <Field label="Notes">
@@ -1459,6 +1472,7 @@ function StatementRow({
                       ]
                     : []),
                   ...(entry.notes ? [{ label: "Notes", value: entry.notes }] : []),
+                  ...(entry.updated_at ? [{ label: "Last Updated", value: new Date(entry.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) }] : []),
                 ].map((item) => (
                   <div
                     key={item.label}
