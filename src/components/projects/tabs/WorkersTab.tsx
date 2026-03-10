@@ -709,7 +709,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       let absentToday = 0;
       if (workerIds.length > 0) {
         const { data: attData } = await supabase
-          .from('attendance')
+          .from('worker_attendance')
           .select('status')
           .in('worker_id', workerIds)
           .eq('date', today);
@@ -910,7 +910,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       }));
     if (records.length === 0) { showToast('No changes to save', 'warning'); return; }
     try {
-      const { error } = await supabase.from('attendance').upsert(records, { onConflict: 'worker_id,date' });
+      const { error } = await supabase.from('worker_attendance').upsert(records, { onConflict: 'worker_id,date' });
       if (error) { showToast(error.message || 'Failed to save attendance', 'error'); return; }
       showToast('Attendance saved successfully!', 'success');
       setShowMarkAttendance(false);
