@@ -23,12 +23,10 @@ import {
   Building2,
   Wallet,
   FileText,
-  ChevronDown,
-  ChevronUp,
   Award,
-  DollarSign,
   ShieldAlert,
   Info,
+  Lock,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import {
@@ -40,7 +38,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 
-// ─── All worker roles from the enum migration ───────────────────────────────
+// ─── All worker roles ────────────────────────────────────────────────────────
 const ALL_WORKER_ROLES = [
   'mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'laborer',
   'supervisor', 'foreman', 'architect', 'engineer', 'site_manager', 'safety_officer',
@@ -102,7 +100,16 @@ interface AttendanceRecord {
   check_out: string | null;
   status: 'present' | 'absent' | 'late' | 'on_leave';
   notes: string | null;
-  worker?: { full_name: string } | null;
+}
+
+interface MilestoneTask {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  milestone_id: string | null;
+  start_date: string | null;
+  due_date: string | null;
 }
 
 interface Assignment {
@@ -110,14 +117,13 @@ interface Assignment {
   worker_id: string;
   project_id: string;
   milestone_id?: string | null;
-  milestone?: { id: string; name: string } | null;
+  task_id?: string | null;
+  milestone?: { id: string; title: string } | null;
+  task?: { id: string; title: string } | null;
   task_description?: string;
-  assigned_role?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   status: 'assigned' | 'in_progress' | 'completed' | 'on_hold';
-  tasks_assigned?: number;
-  tasks_completed?: number;
   quality_score?: number | null;
   notes?: string | null;
   created_at: string;
@@ -125,30 +131,36 @@ interface Assignment {
   worker?: { full_name: string; role: string } | null;
 }
 
-// ─── Quality Scoring Interfaces ───────────────────────────────────────────────
+// ─── Assignment Form State ────────────────────────────────────────────────────
+interface AssignmentFormState {
+  worker_id: string;
+  milestone_id: string;       // '' = no milestone (standalone)
+  task_id: string;
+  task_title: string;         // read-only, from tasks table
+  preset_description: string; // read-only, from tasks.description
+  additional_info: string;    // editable by admin
+  start_date: string;         // read-only when task selected, editable when custom
+  due_date: string;           // read-only when task selected, editable when custom
+  status: 'assigned' | 'in_progress' | 'completed' | 'on_hold';
+  notes: string;
+  is_custom: boolean;         // true when "None / Custom" task selected
+}
+
+// ─── Quality Scoring ──────────────────────────────────────────────────────────
 interface QualityScoreData {
-  // Structural (60%) — all-or-nothing
   structural_correct_measurements: boolean;
   structural_correct_methodology: boolean;
-
-  // Equipment (15%)
-  equipment_returned: boolean;       // if false → 0% for whole section
+  equipment_returned: boolean;
   equipment_condition: boolean;
   equipment_clean: boolean;
   equipment_notes: string;
-
-  // Timeliness (10%)
   completed_on_time: boolean | null;
   completion_delay_reason: string;
-
-  // Presentation (5%)
   presentation_neatness: boolean;
   presentation_texture: boolean;
   presentation_shape: boolean;
   presentation_alignment: boolean;
-
-  // Attendance (10%) — computed from check-in time
-  attendance_check_in: string; // HH:MM
+  attendance_check_in: string;
 }
 
 interface PayrollEligibility {
@@ -169,7 +181,6 @@ interface DashboardStats {
   total_workers: number;
   present_today: number;
   absent_today: number;
-  avg_performance: number;
 }
 
 interface Toast {
@@ -188,24 +199,19 @@ type TabType = 'attendance' | 'workers' | 'assignments' | 'performance';
 
 // ─── Quality Score Calculator ─────────────────────────────────────────────────
 function calculateQualityScore(data: QualityScoreData): PayrollEligibility {
-  // Structural (60%) — ALL checklist items must be ticked; else 0
-  const structuralPassed =
-    data.structural_correct_measurements && data.structural_correct_methodology;
+  const structuralPassed = data.structural_correct_measurements && data.structural_correct_methodology;
   const structural = structuralPassed ? 60 : 0;
 
-  // Equipment (15%) — if not returned → 0; else tick based
   let equipment = 0;
   if (data.equipment_returned) {
-    let count = 1; // returned itself counts
+    let count = 1;
     if (data.equipment_condition) count++;
     if (data.equipment_clean) count++;
     equipment = Math.round((count / 3) * 15);
   }
 
-  // Timeliness (10%)
   const timeliness = data.completed_on_time === true ? 10 : 0;
 
-  // Presentation (5%)
   const presChecks = [
     data.presentation_neatness,
     data.presentation_texture,
@@ -214,20 +220,17 @@ function calculateQualityScore(data: QualityScoreData): PayrollEligibility {
   ].filter(Boolean).length;
   const presentation = Math.round((presChecks / 4) * 5);
 
-  // Attendance (10%) — base 8:00 AM; -3% per 30 min late; min 1%
   let attendance = 10;
   if (data.attendance_check_in) {
     const [h, m] = data.attendance_check_in.split(':').map(Number);
     const totalMinutes = h * 60 + m;
-    const startMinutes = 8 * 60; // 8:00 AM
+    const startMinutes = 8 * 60;
     const lateMinutes = Math.max(0, totalMinutes - startMinutes);
     const halfHoursLate = Math.floor(lateMinutes / 30);
     attendance = Math.max(1, 10 - halfHoursLate * 3);
   }
 
   const totalScore = structural + equipment + timeliness + presentation + attendance;
-
-  // Payroll eligibility: need structural (60%) + at least 5% from equipment (i.e. just returned tools)
   const eligible = structural === 60 && equipment >= 5;
   let reason = '';
   if (structural < 60) {
@@ -330,6 +333,24 @@ const EmptyState = ({ icon: Icon, title, description, action, onAction }: any) =
   </motion.div>
 );
 
+// ─── Read-Only Field Component ────────────────────────────────────────────────
+const ReadOnlyField = ({ label, value }: { label: string; value: string }) => (
+  <div>
+    <Label className="mb-1 text-primary font-semibold flex items-center gap-1.5">
+      <Lock className="w-3 h-3 opacity-60" />
+      {label}
+    </Label>
+    <div
+      className="w-full px-4 py-3 rounded-xl text-sm font-normal bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none"
+    >
+      {value || <span className="opacity-40 italic">—</span>}
+    </div>
+    <span className="text-[10px] text-muted-foreground/60 mt-1 block">
+      Auto-filled from task — not editable
+    </span>
+  </div>
+);
+
 // ─── Quality Score Modal ───────────────────────────────────────────────────────
 const QualityScoreModal: React.FC<{
   assignment: Assignment;
@@ -391,7 +412,7 @@ const QualityScoreModal: React.FC<{
           <div>
             <h3 className="text-2xl font-bold">Quality Assessment</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              {worker?.full_name} — {assignment.task_description}
+              {worker?.full_name} — {assignment.task_description || assignment.task?.title}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg">
@@ -420,7 +441,6 @@ const QualityScoreModal: React.FC<{
               </span>
             ))}
           </div>
-          {/* Payroll Status */}
           <div className={`mt-3 p-3 rounded-xl border flex items-start gap-3 ${
             result.eligible ? 'border-green-500/40 bg-green-500/10' : 'border-red-500/40 bg-red-500/10'
           }`}>
@@ -445,7 +465,7 @@ const QualityScoreModal: React.FC<{
         </div>
 
         <div className="space-y-6">
-          {/* ── 1. Structural Integrity (60%) ── */}
+          {/* 1. Structural Integrity (60%) */}
           <div className="p-5 rounded-2xl border border-white/20 bg-white/5">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-bold text-base flex items-center gap-2">
@@ -468,7 +488,7 @@ const QualityScoreModal: React.FC<{
             </div>
           </div>
 
-          {/* ── 2. Equipment & Tool Maintenance (15%) ── */}
+          {/* 2. Equipment & Tool Maintenance (15%) */}
           <div className="p-5 rounded-2xl border border-white/20 bg-white/5">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-bold text-base flex items-center gap-2">
@@ -483,16 +503,8 @@ const QualityScoreModal: React.FC<{
             </div>
             <div className="space-y-2 mb-3">
               <CheckItem label="Returned tools and equipment" field="equipment_returned" />
-              <CheckItem
-                label="Appropriate condition of returned tools"
-                field="equipment_condition"
-                disabled={!scoreData.equipment_returned}
-              />
-              <CheckItem
-                label="Clean tools and equipment on returning"
-                field="equipment_clean"
-                disabled={!scoreData.equipment_returned}
-              />
+              <CheckItem label="Appropriate condition of returned tools" field="equipment_condition" disabled={!scoreData.equipment_returned} />
+              <CheckItem label="Clean tools and equipment on returning" field="equipment_clean" disabled={!scoreData.equipment_returned} />
             </div>
             {!scoreData.equipment_returned && (
               <p className="text-xs text-red-300/80 bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2">
@@ -512,7 +524,7 @@ const QualityScoreModal: React.FC<{
             </div>
           </div>
 
-          {/* ── 3. In-Time Finishing (10%) ── */}
+          {/* 3. In-Time Finishing (10%) */}
           <div className="p-5 rounded-2xl border border-white/20 bg-white/5">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-bold text-base flex items-center gap-2">
@@ -528,21 +540,13 @@ const QualityScoreModal: React.FC<{
             <div className="flex gap-3 mb-3">
               <button
                 onClick={() => setScoreData(prev => ({ ...prev, completed_on_time: true }))}
-                className={`flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition-all ${
-                  scoreData.completed_on_time === true
-                    ? 'border-green-500 bg-green-500/20 text-green-300'
-                    : 'border-white/20 bg-white/5 hover:bg-white/10'
-                }`}
+                className={`flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition-all ${scoreData.completed_on_time === true ? 'border-green-500 bg-green-500/20 text-green-300' : 'border-white/20 bg-white/5 hover:bg-white/10'}`}
               >
                 ✅ Yes — Completed on Time
               </button>
               <button
                 onClick={() => setScoreData(prev => ({ ...prev, completed_on_time: false }))}
-                className={`flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition-all ${
-                  scoreData.completed_on_time === false
-                    ? 'border-red-500 bg-red-500/20 text-red-300'
-                    : 'border-white/20 bg-white/5 hover:bg-white/10'
-                }`}
+                className={`flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition-all ${scoreData.completed_on_time === false ? 'border-red-500 bg-red-500/20 text-red-300' : 'border-white/20 bg-white/5 hover:bg-white/10'}`}
               >
                 ❌ No — Delayed
               </button>
@@ -561,7 +565,7 @@ const QualityScoreModal: React.FC<{
             )}
           </div>
 
-          {/* ── 4. Presentation (5%) ── */}
+          {/* 4. Presentation (5%) */}
           <div className="p-5 rounded-2xl border border-white/20 bg-white/5">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-bold text-base flex items-center gap-2">
@@ -582,7 +586,7 @@ const QualityScoreModal: React.FC<{
             </div>
           </div>
 
-          {/* ── 5. Attendance (10%) ── */}
+          {/* 5. Attendance (10%) */}
           <div className="p-5 rounded-2xl border border-white/20 bg-white/5">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-bold text-base flex items-center gap-2">
@@ -600,18 +604,13 @@ const QualityScoreModal: React.FC<{
               Start time: 8:00 AM. Each 30 minutes late deducts 3%. Minimum score: 1%.
             </p>
             <div>
-              <Label className="mb-2 text-sm">Check-in Time (linked from attendance)</Label>
+              <Label className="mb-2 text-sm">Check-in Time</Label>
               <input
                 type="time"
                 value={scoreData.attendance_check_in}
                 onChange={e => setScoreData(prev => ({ ...prev, attendance_check_in: e.target.value }))}
                 className="px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground focus:ring-2 focus:ring-primary focus:outline-none"
               />
-              {scoreData.attendance_check_in > '08:00' && (
-                <p className="text-xs text-orange-300 mt-2">
-                  {Math.floor((scoreData.attendance_check_in.split(':').reduce((h, m, i) => i === 0 ? +m * 60 : h + +m, 0) - 480) / 30)} half-hour(s) late → -{Math.min(9, Math.floor((scoreData.attendance_check_in.split(':').reduce((h, m, i) => i === 0 ? +m * 60 : h + +m, 0) - 480) / 30) * 3)}% deducted
-                </p>
-              )}
             </div>
           </div>
         </div>
@@ -658,7 +657,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     mobile_money_number: '',
     card_type: '' as '' | 'visa' | 'mastercard' | 'amex' | 'discover' | 'other',
     card_number_last4: '', card_holder_name: '', cheque_payable_to: '',
-    payment_notes: '', quality_score: '' as string, notes: '',
+    payment_notes: '', notes: '',
   });
 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -669,18 +668,36 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [showAssignTask, setShowAssignTask] = useState(false);
-  const [assignmentForm, setAssignmentForm] = useState({
-    worker_id: '', task: '', start_date: '', due_date: '',
-    status: 'assigned' as 'assigned' | 'in_progress' | 'completed' | 'on_hold',
-    notes: '', milestone_id: '',
-  });
   const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
-  const [assignmentFilter, setAssignmentFilter] = useState({ worker_id: '', status: '', date: '', milestone_id: '' });
 
-  // Quality Score modal
+  // ── Extended Assignment Form State ────────────────────────────────────────
+  const defaultAssignmentForm: AssignmentFormState = {
+    worker_id: '',
+    milestone_id: '',
+    task_id: '',
+    task_title: '',
+    preset_description: '',
+    additional_info: '',
+    start_date: '',
+    due_date: '',
+    status: 'assigned',
+    notes: '',
+    is_custom: false,
+  };
+  const [assignmentForm, setAssignmentForm] = useState<AssignmentFormState>(defaultAssignmentForm);
+
+  // Tasks fetched for the selected milestone OR standalone tasks (milestone_id IS NULL)
+  const [milestoneTasks, setMilestoneTasks] = useState<MilestoneTask[]>([]);
+  const [standaloneTasks, setStandaloneTasks] = useState<MilestoneTask[]>([]);
+  const [loadingMilestoneTasks, setLoadingMilestoneTasks] = useState(false);
+  const [loadingStandaloneTasks, setLoadingStandaloneTasks] = useState(false);
+
+  const [assignmentFilter, setAssignmentFilter] = useState({ worker_id: '', status: '', milestone_id: '' });
+
+  // Quality Score modal — only for completed assignments
   const [qualityModalAssignment, setQualityModalAssignment] = useState<Assignment | null>(null);
 
-  const [stats, setStats] = useState<DashboardStats>({ total_workers: 0, present_today: 0, absent_today: 0, avg_performance: 0 });
+  const [stats, setStats] = useState<DashboardStats>({ total_workers: 0, present_today: 0, absent_today: 0 });
   const [milestones, setMilestones] = useState<{ id: string; title: string }[]>([]);
   const [viewingWorker, setViewingWorker] = useState<Worker | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Worker | null>(null);
@@ -693,13 +710,48 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
 
   const fetchMilestones = async () => {
     try {
-      const { data } = await supabase.from('project_milestones').select('id, title').eq('project_id', projectId).order('sort_order', { ascending: true });
+      const { data } = await supabase
+        .from('project_milestones')
+        .select('id, title')
+        .eq('project_id', projectId)
+        .order('sort_order', { ascending: true });
       setMilestones(data || []);
     } catch { setMilestones([]); }
   };
 
+  // Fetch tasks for a specific milestone
+  const fetchTasksForMilestone = async (milestoneId: string) => {
+    if (!milestoneId) { setMilestoneTasks([]); return; }
+    setLoadingMilestoneTasks(true);
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('id, title, description, status, milestone_id, start_date, due_date')
+        .eq('milestone_id', milestoneId)
+        .order('created_at', { ascending: true });
+      if (error) { setMilestoneTasks([]); return; }
+      setMilestoneTasks(data || []);
+    } catch { setMilestoneTasks([]); }
+    finally { setLoadingMilestoneTasks(false); }
+  };
+
+  // Fetch standalone tasks (milestone_id IS NULL) for the project
+  const fetchStandaloneTasks = async () => {
+    setLoadingStandaloneTasks(true);
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('id, title, description, status, milestone_id, start_date, due_date')
+        .eq('project_id', projectId)
+        .is('milestone_id', null)
+        .order('created_at', { ascending: true });
+      if (error) { setStandaloneTasks([]); return; }
+      setStandaloneTasks(data || []);
+    } catch { setStandaloneTasks([]); }
+    finally { setLoadingStandaloneTasks(false); }
+  };
+
   const fetchStats = async () => {
-    // Compute stats from live project workers instead of calling the global function
     try {
       const today = new Date().toISOString().split('T')[0];
       const { data: projectWorkers } = await supabase.from('workers').select('id').eq('project_id', projectId);
@@ -716,13 +768,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         presentToday = (attData || []).filter((a: any) => a.status === 'present').length;
         absentToday = (attData || []).filter((a: any) => a.status === 'absent').length;
       }
-
-      setStats({
-        total_workers: workerIds.length,
-        present_today: presentToday,
-        absent_today: absentToday,
-        avg_performance: 0,
-      });
+      setStats({ total_workers: workerIds.length, present_today: presentToday, absent_today: absentToday });
     } catch (err) {
       console.error('[WorkersTab] fetchStats error:', err);
     }
@@ -738,9 +784,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         .order('created_at', { ascending: false });
       if (error) { setWorkers([]); setError('Failed to fetch workers: ' + error.message); return; }
       setWorkers(data || []);
-    } catch (err: any) {
-      setWorkers([]); setError('Failed to fetch workers.');
-    }
+    } catch { setWorkers([]); setError('Failed to fetch workers.'); }
   };
 
   const fetchAttendance = async (date: string) => {
@@ -748,7 +792,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       const { data: projectWorkers } = await supabase.from('workers').select('id').eq('project_id', projectId);
       const workerIds = (projectWorkers || []).map((w: any) => w.id);
       if (workerIds.length === 0) { setAttendance([]); return; }
-
       const { data, error } = await supabase
         .from('worker_attendance')
         .select('*')
@@ -763,7 +806,12 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     try {
       const { data, error } = await supabase
         .from('worker_assignments')
-        .select('*, worker:workers(full_name, role), milestone:project_milestones(id, name)')
+        .select(`
+          *,
+          worker:workers(full_name, role),
+          milestone:project_milestones(id, title),
+          task:tasks(id, title)
+        `)
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
       if (error) { setAssignments([]); return; }
@@ -786,15 +834,89 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     if (activeTab === 'attendance') fetchAttendance(selectedDate);
   }, [selectedDate, activeTab]);
 
+  // When milestone changes in assignment form, fetch tasks for that milestone
+  // or standalone tasks if no milestone
+  useEffect(() => {
+    if (!editingAssignment) {
+      if (assignmentForm.milestone_id) {
+        fetchTasksForMilestone(assignmentForm.milestone_id);
+        setStandaloneTasks([]);
+      } else {
+        setMilestoneTasks([]);
+        fetchStandaloneTasks();
+      }
+      // Clear task selection when milestone changes
+      setAssignmentForm(prev => ({
+        ...prev,
+        task_id: '',
+        task_title: '',
+        preset_description: '',
+        additional_info: '',
+        start_date: '',
+        due_date: '',
+        is_custom: false,
+      }));
+    }
+  }, [assignmentForm.milestone_id]);
+
+  // Apply auto-population when task is selected
+  const handleTaskSelect = async (taskId: string) => {
+    if (!taskId || taskId === '__custom__') {
+      // Custom / no task selected — all fields become editable
+      setAssignmentForm(prev => ({
+        ...prev,
+        task_id: '',
+        task_title: '',
+        preset_description: '',
+        additional_info: '',
+        start_date: '',
+        due_date: '',
+        is_custom: true,
+      }));
+      return;
+    }
+
+    // Fetch full task record for auto-population
+    try {
+      const { data: task } = await supabase
+        .from('tasks')
+        .select('id, title, description, start_date, due_date')
+        .eq('id', taskId)
+        .single();
+
+      if (task) {
+        setAssignmentForm(prev => ({
+          ...prev,
+          task_id: task.id,
+          task_title: task.title || '',
+          preset_description: task.description || '',
+          additional_info: '',
+          start_date: task.start_date ? task.start_date.split('T')[0] : '',
+          due_date: task.due_date ? task.due_date.split('T')[0] : '',
+          is_custom: false,
+        }));
+      }
+    } catch {
+      showToast('Failed to load task details', 'error');
+    }
+  };
+
   const resetWorkerForm = () => {
     setWorkerForm({
       name: '', role: '', phone: '', id_number: '', address: '', milestone_id: '',
       payment_method: 'cash', bank_name: '', bank_account_number: '', bank_account_name: '',
       mobile_money_provider: '', mobile_money_number: '', card_type: '',
       card_number_last4: '', card_holder_name: '', cheque_payable_to: '',
-      payment_notes: '', quality_score: '', notes: '',
+      payment_notes: '', notes: '',
     });
     setEditingWorker(null);
+  };
+
+  const resetAssignmentForm = () => {
+    setAssignmentForm(defaultAssignmentForm);
+    setMilestoneTasks([]);
+    setStandaloneTasks([]);
+    setEditingAssignment(null);
   };
 
   const handleEditWorker = (worker: Worker) => {
@@ -812,7 +934,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       card_holder_name: worker.card_holder_name || '',
       cheque_payable_to: worker.cheque_payable_to || '',
       payment_notes: worker.payment_notes || '',
-      quality_score: worker.quality_score != null ? String(worker.quality_score) : '',
       notes: worker.notes || '',
     });
     setShowAddWorker(true);
@@ -823,10 +944,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     if (!workerForm.id_number?.trim()) { showToast('ID Number is required', 'warning'); return; }
     if (!projectId) { showToast('No project selected', 'error'); return; }
 
-    if (workerForm.quality_score !== '') {
-      const qs = Number(workerForm.quality_score);
-      if (isNaN(qs) || qs < 0 || qs > 100) { showToast('Quality score must be 0–100', 'warning'); return; }
-    }
     if (workerForm.payment_method === 'bank_transfer' && (!workerForm.bank_name || !workerForm.bank_account_number || !workerForm.bank_account_name)) {
       showToast('Bank details are required', 'warning'); return;
     }
@@ -861,8 +978,9 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         card_holder_name: workerForm.payment_method === 'card' ? workerForm.card_holder_name : null,
         cheque_payable_to: workerForm.payment_method === 'cheque' ? workerForm.cheque_payable_to : null,
         payment_notes: workerForm.payment_notes || null,
-        quality_score: workerForm.quality_score !== '' ? Number(workerForm.quality_score) : null,
-        notes: workerForm.notes || null, status: 'active', project_id: projectId,
+        notes: workerForm.notes || null,
+        status: 'active',
+        project_id: projectId,
       };
 
       if (editingWorker) {
@@ -922,53 +1040,105 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     }
   };
 
+  // ── Save Assignment ────────────────────────────────────────────────────────
   const handleSaveAssignment = async () => {
-    if (!assignmentForm.worker_id || !assignmentForm.task.trim()) {
-      showToast('Worker and task are required', 'warning'); return;
+    if (!assignmentForm.worker_id) { showToast('Please select a worker', 'warning'); return; }
+
+    // Validation: need task OR custom description
+    const hasTask = !!assignmentForm.task_id;
+    const effectiveDescription = assignmentForm.is_custom
+      ? assignmentForm.additional_info.trim()
+      : assignmentForm.preset_description.trim();
+
+    if (!hasTask && !effectiveDescription) {
+      showToast('Please select a task or enter a custom task description', 'warning');
+      return;
     }
+
+    // Build the stored task_description
+    let storedDescription = '';
+    if (assignmentForm.is_custom) {
+      storedDescription = assignmentForm.additional_info.trim();
+    } else if (assignmentForm.preset_description && assignmentForm.additional_info.trim()) {
+      storedDescription = `${assignmentForm.preset_description}\n\n[Note]: ${assignmentForm.additional_info.trim()}`;
+    } else {
+      storedDescription = assignmentForm.preset_description;
+    }
+
     try {
       const payload: any = {
-        worker_id: assignmentForm.worker_id, project_id: projectId,
+        worker_id: assignmentForm.worker_id,
+        project_id: projectId,
         milestone_id: assignmentForm.milestone_id || null,
-        task_description: assignmentForm.task,
+        task_id: assignmentForm.task_id || null,
+        task_description: storedDescription,
         start_date: assignmentForm.start_date || null,
         end_date: assignmentForm.due_date || null,
         status: assignmentForm.status,
+        notes: assignmentForm.notes || null,
         updated_at: new Date().toISOString(),
       };
+
       if (editingAssignment) {
-        const { error } = await supabase.from('worker_assignments').update(payload).eq('id', editingAssignment.id);
-        if (error) { showToast(error.message || 'Failed to update task', 'error'); return; }
-        showToast('Task updated successfully!', 'success');
+        // In edit mode, only status and notes (+ additional_info) are updated
+        const editPayload: any = {
+          status: assignmentForm.status,
+          notes: assignmentForm.notes || null,
+          updated_at: new Date().toISOString(),
+        };
+        // Also update task_description if additional_info changed
+        if (!assignmentForm.is_custom && assignmentForm.preset_description) {
+          editPayload.task_description = storedDescription;
+        }
+
+        const { error } = await supabase.from('worker_assignments').update(editPayload).eq('id', editingAssignment.id);
+        if (error) { showToast('Failed to update assignment: ' + error.message, 'error'); return; }
+
+        // If status changed to completed, mark linked task as done
+        if (assignmentForm.status === 'completed' && assignmentForm.task_id) {
+          await supabase
+            .from('tasks')
+            .update({ status: 'done', completed_at: new Date().toISOString() })
+            .eq('id', assignmentForm.task_id);
+        }
+
+        showToast('Assignment updated successfully!', 'success');
       } else {
         payload.created_at = new Date().toISOString();
         const { error } = await supabase.from('worker_assignments').insert([payload]);
-        if (error) { showToast(error.message || 'Failed to assign task', 'error'); return; }
+        if (error) { showToast('Failed to create assignment: ' + error.message, 'error'); return; }
+
+        // If created with completed status, mark linked task as done immediately
+        if (assignmentForm.status === 'completed' && assignmentForm.task_id) {
+          await supabase
+            .from('tasks')
+            .update({ status: 'done', completed_at: new Date().toISOString() })
+            .eq('id', assignmentForm.task_id);
+        }
+
         showToast('Task assigned successfully!', 'success');
       }
+
       setShowAssignTask(false);
-      setEditingAssignment(null);
-      setAssignmentForm({ worker_id: '', task: '', start_date: '', due_date: '', status: 'assigned', notes: '', milestone_id: '' });
+      resetAssignmentForm();
       await fetchAssignments();
       if (onUpdate) onUpdate();
     } catch (err: any) {
-      showToast('Failed to save task: ' + (err.message || 'Unknown error'), 'error');
+      showToast('Failed to save assignment: ' + (err.message || 'Unknown error'), 'error');
     }
   };
 
   const handleDeleteAssignment = async (id: string) => {
     try {
       const { error } = await supabase.from('worker_assignments').delete().eq('id', id);
-      if (error) { showToast(error.message || 'Failed to delete task', 'error'); return; }
-      showToast('Task deleted!', 'success');
+      if (error) { showToast(error.message || 'Failed to delete assignment', 'error'); return; }
+      showToast('Assignment deleted!', 'success');
       await fetchAssignments();
       if (onUpdate) onUpdate();
-    } catch (err: any) {
-      showToast('Failed to delete task', 'error');
-    }
+    } catch { showToast('Failed to delete assignment', 'error'); }
   };
 
-  // Save quality assessment
+  // Save quality assessment (only called from completed assignments)
   const handleSaveQualityScore = async (assignmentId: string, score: number, scoreData: QualityScoreData) => {
     try {
       const { error } = await supabase
@@ -986,9 +1156,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       showToast(`Quality score saved: ${score}/100`, 'success');
       setQualityModalAssignment(null);
       await fetchAssignments();
-    } catch {
-      showToast('Failed to save quality score', 'error');
-    }
+    } catch { showToast('Failed to save quality score', 'error'); }
   };
 
   const filteredWorkers = useMemo(() => workers.filter(w =>
@@ -1009,13 +1177,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     if (assignmentFilter.worker_id) result = result.filter(a => a.worker_id === assignmentFilter.worker_id);
     if (assignmentFilter.status) result = result.filter(a => a.status === assignmentFilter.status);
     if (assignmentFilter.milestone_id) result = result.filter(a => a.milestone_id === assignmentFilter.milestone_id);
-    if (assignmentFilter.date) {
-      result = result.filter(a => {
-        const start = a.start_date ? new Date(a.start_date).toISOString().split('T')[0] : null;
-        const end = a.end_date ? new Date(a.end_date).toISOString().split('T')[0] : null;
-        return start === assignmentFilter.date || end === assignmentFilter.date;
-      });
-    }
     return result;
   }, [assignments, assignmentFilter]);
 
@@ -1076,6 +1237,10 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     { value: 'amex', label: 'American Express' }, { value: 'discover', label: 'Discover' }, { value: 'other', label: 'Other' },
   ];
 
+  // Shared input className
+  const inputCls = "w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl";
+  const readOnlyCls = "w-full px-4 py-3 rounded-xl text-sm font-normal bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none";
+
   if (loading) {
     return (
       <GlassCard className="text-center py-16">
@@ -1102,11 +1267,10 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
     <>
       <div className="space-y-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard icon={Users} title="Total Workers" value={stats.total_workers} color="text-primary" subtitle="Linked to this project" />
           <StatCard icon={UserCheck} title="Present Today" value={stats.present_today} color="text-green-600" />
           <StatCard icon={UserX} title="Absent Today" value={stats.absent_today} color="text-red-600" />
-          <StatCard icon={Award} title="Payroll Ready" value={workers.filter(w => (w.quality_score || 0) >= 65).length} color="text-blue-600" subtitle="Workers with ≥65% score" />
         </div>
 
         {/* Tab Navigation */}
@@ -1171,8 +1335,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Phone</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Milestone</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Payment</th>
-                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Quality</th>
-                          <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Payroll</th>
                           <th className="py-4 px-6 text-left font-semibold text-muted-foreground">Status</th>
                           {canEdit && <th className="py-4 px-6 text-center font-semibold text-muted-foreground">Actions</th>}
                         </tr>
@@ -1180,7 +1342,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                       <tbody>
                         {filteredWorkers.map(worker => {
                           const PaymentIcon = getPaymentIcon(worker.payment_method);
-                          const payrollBadge = getPayrollBadge(worker.quality_score);
                           return (
                             <tr key={worker.id} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
                               <td className="py-4 px-6 text-foreground font-medium">{worker.full_name}</td>
@@ -1193,18 +1354,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                                   <PaymentIcon className="w-4 h-4 text-primary" />
                                   <span className="text-sm capitalize">{worker.payment_method.replace(/_/g, ' ')}</span>
                                 </div>
-                              </td>
-                              <td className="py-4 px-6">
-                                <span className={`font-bold text-sm ${getQualityColor(worker.quality_score)}`}>
-                                  {worker.quality_score != null ? `${worker.quality_score}/100` : '-'}
-                                </span>
-                              </td>
-                              <td className="py-4 px-6">
-                                {payrollBadge ? (
-                                  <span className={`px-2 py-1 rounded-lg text-xs font-semibold border ${payrollBadge.color}`}>
-                                    {payrollBadge.label}
-                                  </span>
-                                ) : <span className="text-muted-foreground text-xs">Not assessed</span>}
                               </td>
                               <td className="py-4 px-6">
                                 <span className={`px-3 py-1 rounded-xl text-xs font-semibold border ${getStatusColor(worker.status || 'active')}`}>
@@ -1242,10 +1391,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                   </div>
                   <div className="flex gap-2 items-center">
                     <label className="text-sm">Status:</label>
-                    <Select
-                      value={attendanceFilter.status || 'all'}
-                      onValueChange={value => setAttendanceFilter(f => ({ ...f, status: value === 'all' ? '' : value }))}
-                    >
+                    <Select value={attendanceFilter.status || 'all'} onValueChange={value => setAttendanceFilter(f => ({ ...f, status: value === 'all' ? '' : value }))}>
                       <SelectTrigger className="w-36 px-3 py-2 border-2 border-white/10 rounded-xl bg-white/5 text-sm">
                         <SelectValue placeholder="All" />
                       </SelectTrigger>
@@ -1304,13 +1450,16 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           {activeTab === 'assignments' && (
             <motion.div key="assignments" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
               <GlassCard className="space-y-6">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
                   <div>
                     <h2 className="text-xl sm:text-2xl font-bold text-primary tracking-tight">Task Assignments</h2>
-                    <p className="text-muted-foreground text-sm">Manage and review worker task assignments for this project.</p>
+                    <p className="text-muted-foreground text-sm">Assign milestone tasks to workers and track quality on completion.</p>
                   </div>
                   {canEdit && (
-                    <button onClick={() => setShowAssignTask(true)} className="px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group">
+                    <button
+                      onClick={() => { resetAssignmentForm(); setShowAssignTask(true); }}
+                      className="px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
+                    >
                       <span className="flex items-center gap-2">
                         <CheckCircle className="w-5 h-5" />
                         Assign Task
@@ -1318,88 +1467,143 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                  <select value={assignmentFilter.worker_id || 'all'} onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value === 'all' ? '' : e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
+
+                {/* Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                  <select
+                    value={assignmentFilter.worker_id || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, worker_id: e.target.value === 'all' ? '' : e.target.value }))}
+                    className={inputCls}
+                  >
                     <option value="all" className="bg-background">All Workers</option>
                     {workers.map(w => <option key={w.id} value={w.id} className="bg-background">{w.full_name}</option>)}
                   </select>
-                  <select value={assignmentFilter.status || 'all'} onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value === 'all' ? '' : e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
+                  <select
+                    value={assignmentFilter.status || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value === 'all' ? '' : e.target.value }))}
+                    className={inputCls}
+                  >
                     <option value="all" className="bg-background">All Statuses</option>
                     <option value="assigned" className="bg-background">Assigned</option>
                     <option value="in_progress" className="bg-background">In Progress</option>
                     <option value="completed" className="bg-background">Completed</option>
                     <option value="on_hold" className="bg-background">On Hold</option>
                   </select>
-                  <select value={assignmentFilter.milestone_id || 'all'} onChange={e => setAssignmentFilter(f => ({ ...f, milestone_id: e.target.value === 'all' ? '' : e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
+                  <select
+                    value={assignmentFilter.milestone_id || 'all'}
+                    onChange={e => setAssignmentFilter(f => ({ ...f, milestone_id: e.target.value === 'all' ? '' : e.target.value }))}
+                    className={inputCls}
+                  >
                     <option value="all" className="bg-background">All Milestones</option>
                     {milestones.map(m => <option key={m.id} value={m.id} className="bg-background">{m.title}</option>)}
                   </select>
-                  <input type="date" className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl" value={assignmentFilter.date} onChange={e => setAssignmentFilter(f => ({ ...f, date: e.target.value }))} />
                 </div>
+
                 {filteredAssignments.length === 0 ? (
-                  <EmptyState icon={CheckCircle} title="No Task Assignments" description="Assign tasks to workers to start tracking project progress." action={canEdit ? 'Assign Task' : null} onAction={() => setShowAssignTask(true)} />
+                  <EmptyState icon={CheckCircle} title="No Task Assignments" description="Assign tasks to workers to start tracking project progress." action={canEdit ? 'Assign Task' : null} onAction={() => { resetAssignmentForm(); setShowAssignTask(true); }} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
                     <table className="min-w-full text-sm">
                       <thead className="bg-gradient-to-r from-primary/10 to-accent/10">
                         <tr>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Worker</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Task</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Milestone</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Task</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Description</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Start</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Due</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Status</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Quality</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Quality / Payroll</th>
                           {canEdit && <th className="px-4 py-3 text-center font-semibold text-primary">Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAssignments.map(a => (
-                          <tr key={a.id} className="border-b border-white/10 hover:bg-primary/5 transition-all">
-                            <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{a.worker?.full_name || workers.find(w => w.id === a.worker_id)?.full_name || '—'}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{a.task_description}</td>
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{milestones.find(m => m.id === a.milestone_id)?.title || '—'}</td>
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.start_date ? new Date(a.start_date).toLocaleDateString() : '—'}</td>
-                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.end_date ? new Date(a.end_date).toLocaleDateString() : '—'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>
-                                {a.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              {a.quality_score != null ? (
-                                <span className={`font-bold text-sm ${getQualityColor(a.quality_score)}`}>{a.quality_score}/100</span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Not assessed</span>
-                              )}
-                            </td>
-                            {canEdit && (
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                <div className="flex gap-2 justify-center">
-                                  <button
-                                    onClick={() => setQualityModalAssignment(a)}
-                                    className="px-3 py-1 bg-accent/80 text-background rounded-lg font-semibold hover:bg-accent transition-all text-xs"
-                                    title="Quality Assessment"
-                                  >
-                                    <Award className="w-3 h-3 inline mr-1" />
-                                    Score
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setEditingAssignment(a);
-                                      setAssignmentForm({ worker_id: a.worker_id, task: a.task_description || '', start_date: a.start_date || '', due_date: a.end_date || '', status: a.status, notes: a.notes || '', milestone_id: a.milestone_id || '' });
-                                      setShowAssignTask(true);
-                                    }}
-                                    className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all text-xs"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button onClick={() => handleDeleteAssignment(a.id)} className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all text-xs">Delete</button>
-                                </div>
+                        {filteredAssignments.map(a => {
+                          const payrollBadge = getPayrollBadge(a.quality_score ?? null);
+                          return (
+                            <tr key={a.id} className="border-b border-white/10 hover:bg-primary/5 transition-all">
+                              <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">
+                                {a.worker?.full_name || workers.find(w => w.id === a.worker_id)?.full_name || '—'}
                               </td>
-                            )}
-                          </tr>
-                        ))}
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                {a.milestone?.title || milestones.find(m => m.id === a.milestone_id)?.title || '—'}
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                {a.task?.title || '—'}
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">{a.task_description || '—'}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.start_date ? new Date(a.start_date).toLocaleDateString() : '—'}</td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{a.end_date ? new Date(a.end_date).toLocaleDateString() : '—'}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className={`px-3 py-1 rounded-xl font-semibold text-xs border ${getStatusColor(a.status)}`}>
+                                  {a.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {a.status === 'completed' ? (
+                                  a.quality_score != null ? (
+                                    <div className="space-y-1">
+                                      <span className={`font-bold text-sm ${getQualityColor(a.quality_score)}`}>{a.quality_score}/100</span>
+                                      {payrollBadge && (
+                                        <div>
+                                          <span className={`px-2 py-0.5 rounded-lg text-xs font-semibold border ${payrollBadge.color}`}>{payrollBadge.label}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-amber-400 font-semibold">⏳ Pending assessment</span>
+                                  )
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Assess on completion</span>
+                                )}
+                              </td>
+                              {canEdit && (
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <div className="flex gap-2 justify-center">
+                                    {a.status === 'completed' && (
+                                      <button
+                                        onClick={() => setQualityModalAssignment(a)}
+                                        className="px-3 py-1 bg-accent/80 text-background rounded-lg font-semibold hover:bg-accent transition-all text-xs"
+                                        title="Quality Assessment"
+                                      >
+                                        <Award className="w-3 h-3 inline mr-1" />
+                                        {a.quality_score != null ? 'Re-assess' : 'Assess'}
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => {
+                                        setEditingAssignment(a);
+                                        setAssignmentForm({
+                                          worker_id: a.worker_id,
+                                          milestone_id: a.milestone_id || '',
+                                          task_id: a.task_id || '',
+                                          task_title: a.task?.title || '',
+                                          preset_description: a.task_description || '',
+                                          additional_info: '',
+                                          start_date: a.start_date ? a.start_date.split('T')[0] : '',
+                                          due_date: a.end_date ? a.end_date.split('T')[0] : '',
+                                          status: a.status,
+                                          notes: a.notes || '',
+                                          is_custom: !a.task_id,
+                                        });
+                                        setShowAssignTask(true);
+                                      }}
+                                      className="px-3 py-1 bg-primary text-background rounded-lg font-semibold hover:bg-primary/90 transition-all text-xs"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteAssignment(a.id)}
+                                      className="px-3 py-1 bg-red-600 text-background rounded-lg font-semibold hover:bg-red-700 transition-all text-xs"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1414,8 +1618,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
               <GlassCard className="space-y-6">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
                   <div>
-                    <h2 className="text-xl sm:text-2xl font-bold text-primary tracking-tight">Performance & Payroll</h2>
-                    <p className="text-muted-foreground text-sm">Structured quality scoring linked to payroll eligibility.</p>
+                    <h2 className="text-xl sm:text-2xl font-bold text-primary tracking-tight">Performance & Payroll Summary</h2>
+                    <p className="text-muted-foreground text-sm">Quality scores are recorded per completed task assignment.</p>
                   </div>
                 </div>
 
@@ -1455,7 +1659,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                   </div>
                 </div>
 
-                {/* Worker Performance Table */}
                 {workers.length === 0 ? (
                   <EmptyState icon={TrendingUp} title="No Workers" description="Add workers to view performance data." action={null} onAction={null} />
                 ) : (
@@ -1465,60 +1668,54 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                         <tr>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Worker</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Role</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Assignments</th>
-                          <th className="px-4 py-3 text-left font-semibold text-primary">Latest Score</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Completed Tasks</th>
+                          <th className="px-4 py-3 text-left font-semibold text-primary">Avg Quality Score</th>
                           <th className="px-4 py-3 text-left font-semibold text-primary">Payroll Status</th>
-                          {canEdit && <th className="px-4 py-3 text-center font-semibold text-primary">Assess</th>}
                         </tr>
                       </thead>
                       <tbody>
                         {workers.map(worker => {
                           const workerAssignments = assignments.filter(a => a.worker_id === worker.id);
-                          const latestScored = workerAssignments.filter(a => a.quality_score != null).sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
-                          const score = latestScored?.quality_score ?? null;
-                          const payrollBadge = getPayrollBadge(score);
-                          const pendingAssignment = workerAssignments.find(a => a.status !== 'completed' && a.quality_score == null);
+                          const completedAssignments = workerAssignments.filter(a => a.status === 'completed');
+                          const scoredAssignments = completedAssignments.filter(a => a.quality_score != null);
+                          const avgScore = scoredAssignments.length > 0
+                            ? Math.round(scoredAssignments.reduce((sum, a) => sum + (a.quality_score || 0), 0) / scoredAssignments.length)
+                            : null;
+                          const payrollBadge = getPayrollBadge(avgScore);
 
                           return (
                             <tr key={worker.id} className="border-b border-white/10 hover:bg-primary/5 transition-all">
                               <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{worker.full_name}</td>
                               <td className="px-4 py-3 text-muted-foreground capitalize whitespace-nowrap">{worker.role.replace(/_/g, ' ')}</td>
-                              <td className="px-4 py-3 text-foreground whitespace-nowrap">
-                                <span className="text-primary font-bold">{workerAssignments.length}</span>
-                                <span className="text-muted-foreground"> ({workerAssignments.filter(a => a.status === 'completed').length} done)</span>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className="text-primary font-bold">{completedAssignments.length}</span>
+                                <span className="text-muted-foreground"> / {workerAssignments.length} total</span>
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap">
-                                {score != null ? (
+                                {avgScore != null ? (
                                   <div className="flex items-center gap-2">
                                     <div className="w-16 bg-white/10 rounded-full h-2">
-                                      <div className={`h-2 rounded-full transition-all duration-500 ${score >= 93 ? 'bg-green-500' : score >= 65 ? 'bg-blue-500' : 'bg-red-500'}`} style={{ width: `${score}%` }} />
+                                      <div
+                                        className={`h-2 rounded-full transition-all duration-500 ${avgScore >= 93 ? 'bg-green-500' : avgScore >= 65 ? 'bg-blue-500' : 'bg-red-500'}`}
+                                        style={{ width: `${avgScore}%` }}
+                                      />
                                     </div>
-                                    <span className={`font-bold text-sm ${getQualityColor(score)}`}>{score}/100</span>
+                                    <span className={`font-bold text-sm ${getQualityColor(avgScore)}`}>{avgScore}/100</span>
+                                    <span className="text-xs text-muted-foreground">({scoredAssignments.length} assessed)</span>
                                   </div>
-                                ) : <span className="text-xs text-muted-foreground">Not assessed</span>}
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">
+                                    {completedAssignments.length > 0 ? '⏳ Pending assessment' : 'No completed tasks'}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-4 py-3 whitespace-nowrap">
                                 {payrollBadge ? (
                                   <span className={`px-2 py-1 rounded-lg text-xs font-semibold border ${payrollBadge.color}`}>{payrollBadge.label}</span>
-                                ) : <span className="text-xs text-muted-foreground">Pending</span>}
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Pending</span>
+                                )}
                               </td>
-                              {canEdit && (
-                                <td className="px-4 py-3 whitespace-nowrap text-center">
-                                  {pendingAssignment ? (
-                                    <button
-                                      onClick={() => setQualityModalAssignment(pendingAssignment)}
-                                      className="px-3 py-1.5 bg-accent/80 text-background rounded-lg font-semibold hover:bg-accent transition-all text-xs flex items-center gap-1 mx-auto"
-                                    >
-                                      <Award className="w-3 h-3" />
-                                      Assess
-                                    </button>
-                                  ) : workerAssignments.length === 0 ? (
-                                    <span className="text-xs text-muted-foreground">No tasks</span>
-                                  ) : (
-                                    <span className="text-xs text-green-400">All assessed</span>
-                                  )}
-                                </td>
-                              )}
                             </tr>
                           );
                         })}
@@ -1581,11 +1778,12 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                       </div>
                       <div className="sm:col-span-2">
                         <Label className="mb-2">Milestone Assignment</Label>
-                        <Select value={workerForm.milestone_id} onValueChange={value => setWorkerForm(prev => ({ ...prev, milestone_id: value }))}>
+                        <Select value={workerForm.milestone_id || 'none'} onValueChange={value => setWorkerForm(prev => ({ ...prev, milestone_id: value === 'none' ? '' : value }))}>
                           <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
                             <SelectValue placeholder="Select milestone (optional)" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="none">No milestone</SelectItem>
                             {milestones.map(m => <SelectItem key={m.id} value={m.id}>{m.title}</SelectItem>)}
                           </SelectContent>
                         </Select>
@@ -1593,28 +1791,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                       <div className="sm:col-span-2">
                         <Label className="mb-2">Address</Label>
                         <textarea rows={2} value={workerForm.address} onChange={e => setWorkerForm(prev => ({ ...prev, address: e.target.value }))} placeholder="Residential address" className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 resize-none" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Rating */}
-                  <div className="border-t border-white/10 pt-6">
-                    <h4 className="text-lg font-semibold mb-4 flex items-center gap-2 text-primary"><TrendingUp className="w-5 h-5" />Worker Rating</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="mb-2">Quality Score (0–100)</Label>
-                        <input type="number" min={0} max={100} value={workerForm.quality_score} onChange={e => setWorkerForm(prev => ({ ...prev, quality_score: e.target.value }))} placeholder="e.g. 85" className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5 font-mono" />
-                        <p className="text-xs text-muted-foreground mt-1">Overall quality rating (use Performance tab for structured assessment)</p>
-                      </div>
-                      <div>
-                        {workerForm.quality_score !== '' && (
-                          <div className="mt-6 flex items-center gap-3">
-                            <div className="flex-1 bg-white/10 rounded-full h-3">
-                              <div className={`h-3 rounded-full transition-all duration-500 ${Number(workerForm.quality_score) >= 93 ? 'bg-green-500' : Number(workerForm.quality_score) >= 65 ? 'bg-blue-500' : Number(workerForm.quality_score) >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${Math.min(100, Math.max(0, Number(workerForm.quality_score)))}%` }} />
-                            </div>
-                            <span className={`font-bold text-sm ${getQualityColor(Number(workerForm.quality_score))}`}>{workerForm.quality_score}/100</span>
-                          </div>
-                        )}
                       </div>
                       <div className="sm:col-span-2">
                         <Label className="mb-2">Worker Notes</Label>
@@ -1629,7 +1805,15 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     <div className="space-y-4">
                       <div>
                         <Label className="mb-2">Payment Method *</Label>
-                        <Select value={workerForm.payment_method} onValueChange={(value: any) => setWorkerForm(prev => ({ ...prev, payment_method: value, bank_name: '', bank_account_number: '', bank_account_name: '', mobile_money_provider: '', mobile_money_number: '', card_type: '', card_number_last4: '', card_holder_name: '', cheque_payable_to: '' }))}>
+                        <Select
+                          value={workerForm.payment_method}
+                          onValueChange={(value: any) => setWorkerForm(prev => ({
+                            ...prev, payment_method: value,
+                            bank_name: '', bank_account_number: '', bank_account_name: '',
+                            mobile_money_provider: '', mobile_money_number: '',
+                            card_type: '', card_number_last4: '', card_holder_name: '', cheque_payable_to: ''
+                          }))}
+                        >
                           <SelectTrigger className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
                             <SelectValue placeholder="Select payment method..." />
                           </SelectTrigger>
@@ -1749,23 +1933,26 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
                     </div>
                   </div>
                   <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-                    <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary"><Award className="w-5 h-5" />Quality & Payroll</h4>
-                    <div className="text-sm">
-                      {viewingWorker.quality_score != null ? (
-                        <div>
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="flex-1 bg-white/10 rounded-full h-3">
-                              <div className={`h-3 rounded-full ${viewingWorker.quality_score >= 93 ? 'bg-green-500' : viewingWorker.quality_score >= 65 ? 'bg-blue-500' : viewingWorker.quality_score >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${viewingWorker.quality_score}%` }} />
-                            </div>
-                            <span className={`font-bold ${getQualityColor(viewingWorker.quality_score)}`}>{viewingWorker.quality_score}/100</span>
+                    <h4 className="font-semibold mb-3 flex items-center gap-2 text-primary"><CheckCircle className="w-5 h-5" />Assignment Summary</h4>
+                    {(() => {
+                      const wa = assignments.filter(a => a.worker_id === viewingWorker.id);
+                      const completed = wa.filter(a => a.status === 'completed');
+                      const scored = completed.filter(a => a.quality_score != null);
+                      const avg = scored.length > 0 ? Math.round(scored.reduce((s, a) => s + (a.quality_score || 0), 0) / scored.length) : null;
+                      return (
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div><p className="text-muted-foreground">Total Assignments</p><p className="font-bold text-primary">{wa.length}</p></div>
+                          <div><p className="text-muted-foreground">Completed</p><p className="font-bold text-green-400">{completed.length}</p></div>
+                          <div><p className="text-muted-foreground">Avg Quality Score</p><p className={`font-bold ${getQualityColor(avg)}`}>{avg != null ? `${avg}/100` : 'Not assessed'}</p></div>
+                          <div>
+                            <p className="text-muted-foreground">Payroll Status</p>
+                            {getPayrollBadge(avg) ? (
+                              <span className={`px-2 py-1 rounded-lg text-xs font-semibold border ${getPayrollBadge(avg)!.color}`}>{getPayrollBadge(avg)!.label}</span>
+                            ) : <p className="text-muted-foreground text-xs">Pending</p>}
                           </div>
-                          {(() => {
-                            const badge = getPayrollBadge(viewingWorker.quality_score);
-                            return badge ? <span className={`px-3 py-1 rounded-lg text-xs font-semibold border ${badge.color}`}>{badge.label}</span> : null;
-                          })()}
                         </div>
-                      ) : <p className="text-muted-foreground">Not yet assessed</p>}
-                    </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
@@ -1860,63 +2047,329 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           )}
         </AnimatePresence>
 
-        {/* ── Assign Task Modal ── */}
+        {/* ── Assign Task / Edit Assignment Modal ── */}
         <AnimatePresence>
           {showAssignTask && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold">{editingAssignment ? 'Edit Task' : 'Assign Task'}</h3>
-                  <button onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="p-2 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => { setShowAssignTask(false); resetAssignmentForm(); }}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h3 className="text-2xl font-bold">
+                      {editingAssignment ? 'Edit Assignment' : 'Assign Task to Worker'}
+                    </h3>
+                    {editingAssignment && (
+                      <p className="text-xs text-amber-400/80 mt-1 flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        Edit mode — only status and notes are editable
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => { setShowAssignTask(false); resetAssignmentForm(); }}
+                    className="p-2 hover:bg-white/10 rounded-lg"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <div className="space-y-4">
+
+                <div className="space-y-5 mt-5">
+
+                  {/* ── FIELD 1: Worker ── */}
                   <div>
-                    <Label className="mb-2 text-primary font-semibold">Worker</Label>
-                    <select value={assignmentForm.worker_id} onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
-                      <option value="" className="bg-background text-muted-foreground">Select worker</option>
-                      {workers.map(w => <option key={w.id} value={w.id} className="bg-background">{w.full_name}</option>)}
-                    </select>
+                    <Label className="mb-2 text-primary font-semibold flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      Worker *
+                    </Label>
+                    {editingAssignment ? (
+                      <div className={readOnlyCls}>
+                        {workers.find(w => w.id === assignmentForm.worker_id)?.full_name || assignmentForm.worker_id}
+                      </div>
+                    ) : (
+                      <select
+                        value={assignmentForm.worker_id}
+                        onChange={e => setAssignmentForm(f => ({ ...f, worker_id: e.target.value }))}
+                        className={inputCls}
+                      >
+                        <option value="" className="bg-background text-muted-foreground">Select worker…</option>
+                        {workers.map(w => (
+                          <option key={w.id} value={w.id} className="bg-background">
+                            {w.full_name} — {w.role.replace(/_/g, ' ')}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
-                  <div>
-                    <Label className="mb-2 text-primary font-semibold">Task Description</Label>
-                    <input type="text" value={assignmentForm.task} onChange={e => setAssignmentForm(f => ({ ...f, task: e.target.value }))} placeholder="Task description" className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl" />
-                  </div>
+
+                  {/* ── FIELD 2: Milestone ── */}
                   <div>
                     <Label className="mb-2 text-primary font-semibold">Milestone</Label>
-                    <select value={assignmentForm.milestone_id || 'none'} onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value === 'none' ? '' : e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
-                      <option value="none" className="bg-background text-muted-foreground">No milestone</option>
-                      {milestones.map(m => <option key={m.id} value={m.id} className="bg-background">{m.title}</option>)}
-                    </select>
+                    {editingAssignment ? (
+                      <div className={readOnlyCls}>
+                        {milestones.find(m => m.id === assignmentForm.milestone_id)?.title || 'No Milestone / Standalone Task'}
+                      </div>
+                    ) : (
+                      <select
+                        value={assignmentForm.milestone_id}
+                        onChange={e => setAssignmentForm(f => ({ ...f, milestone_id: e.target.value }))}
+                        className={inputCls}
+                      >
+                        <option value="" className="bg-background text-muted-foreground">No Milestone / Standalone Task</option>
+                        {milestones.map(m => (
+                          <option key={m.id} value={m.id} className="bg-background">{m.title}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
+
+                  {/* ── FIELD 3a: Task from milestone / FIELD 3b: Standalone task ── */}
+                  {!editingAssignment && (
+                    <div>
+                      <Label className="mb-2 text-primary font-semibold">
+                        {assignmentForm.milestone_id ? 'Task (from milestone)' : 'Standalone Task'}
+                      </Label>
+
+                      {assignmentForm.milestone_id ? (
+                        // FIELD 3a
+                        loadingMilestoneTasks ? (
+                          <p className="text-xs text-muted-foreground px-4 py-3 rounded-xl border border-white/10 bg-white/5">
+                            Loading tasks…
+                          </p>
+                        ) : (
+                          <select
+                            value={assignmentForm.task_id || ''}
+                            onChange={e => handleTaskSelect(e.target.value)}
+                            className={inputCls}
+                          >
+                            <option value="" className="bg-background text-muted-foreground">Select task (optional)…</option>
+                            <option value="__custom__" className="bg-background text-muted-foreground">— None / Custom —</option>
+                            {milestoneTasks.map(t => (
+                              <option key={t.id} value={t.id} className="bg-background">
+                                {t.title}{t.status === 'done' ? ' ✅' : ''}
+                              </option>
+                            ))}
+                            {milestoneTasks.length === 0 && (
+                              <option disabled className="bg-background text-muted-foreground">No tasks in this milestone yet</option>
+                            )}
+                          </select>
+                        )
+                      ) : (
+                        // FIELD 3b — standalone tasks
+                        loadingStandaloneTasks ? (
+                          <p className="text-xs text-muted-foreground px-4 py-3 rounded-xl border border-white/10 bg-white/5">
+                            Loading standalone tasks…
+                          </p>
+                        ) : (
+                          <select
+                            value={assignmentForm.task_id || ''}
+                            onChange={e => handleTaskSelect(e.target.value)}
+                            className={inputCls}
+                          >
+                            <option value="" className="bg-background text-muted-foreground">Select standalone task…</option>
+                            <option value="__custom__" className="bg-background text-muted-foreground">— None / Custom —</option>
+                            {standaloneTasks.map(t => (
+                              <option key={t.id} value={t.id} className="bg-background">
+                                {t.title}{t.status === 'done' ? ' ✅' : ''}
+                              </option>
+                            ))}
+                            {standaloneTasks.length === 0 && (
+                              <option disabled className="bg-background text-muted-foreground">No standalone tasks available</option>
+                            )}
+                          </select>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                  {/* Show locked task title in edit mode */}
+                  {editingAssignment && assignmentForm.task_id && (
+                    <ReadOnlyField label="Task" value={assignmentForm.task_title || assignmentForm.task_id} />
+                  )}
+
+                  {/* ── FIELD 4: Task Title (auto-populated, read-only) ── */}
+                  {/* Only shown in create mode when a task is selected (not custom) */}
+                  {!editingAssignment && assignmentForm.task_id && !assignmentForm.is_custom && assignmentForm.task_title && (
+                    <ReadOnlyField label="Task Title" value={assignmentForm.task_title} />
+                  )}
+
+                  {/* ── FIELD 5: Task Description ── */}
+                  <div>
+                    <Label className="mb-2 text-primary font-semibold">
+                      {assignmentForm.is_custom || (!assignmentForm.task_id && !editingAssignment) ? 'Task Description *' : 'Task Description'}
+                    </Label>
+
+                    {/* When a task is selected (not custom, not edit mode) — show locked preset + additional info */}
+                    {!editingAssignment && assignmentForm.task_id && !assignmentForm.is_custom ? (
+                      <div className="space-y-3">
+                        {assignmentForm.preset_description && (
+                          <div>
+                            <div className="w-full px-4 py-3 rounded-xl text-sm bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none whitespace-pre-wrap min-h-[60px]">
+                              {assignmentForm.preset_description}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground/60 mt-1 block flex items-center gap-1">
+                              <Lock className="w-3 h-3 inline" /> Auto-filled from task — not editable
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <Label className="mb-1 text-xs text-muted-foreground">Additional Info (optional)</Label>
+                          <textarea
+                            rows={2}
+                            maxLength={200}
+                            value={assignmentForm.additional_info}
+                            onChange={e => setAssignmentForm(f => ({ ...f, additional_info: e.target.value }))}
+                            placeholder="Add any extra context for this specific assignment..."
+                            className={`${inputCls} resize-none`}
+                          />
+                          <span className="text-[10px] text-muted-foreground/60 mt-1 block text-right">
+                            {assignmentForm.additional_info.length}/200
+                          </span>
+                        </div>
+                      </div>
+                    ) : editingAssignment ? (
+                      // Edit mode: show locked preset description + editable additional_info
+                      <div className="space-y-3">
+                        {assignmentForm.preset_description && (
+                          <div>
+                            <div className="w-full px-4 py-3 rounded-xl text-sm bg-white/[0.03] border border-white/[0.06] text-muted-foreground cursor-not-allowed select-none whitespace-pre-wrap min-h-[60px]">
+                              {assignmentForm.preset_description}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground/60 mt-1 block flex items-center gap-1">
+                              <Lock className="w-3 h-3 inline" /> Original task description — not editable
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <Label className="mb-1 text-xs text-muted-foreground">Additional Info (optional)</Label>
+                          <textarea
+                            rows={2}
+                            maxLength={200}
+                            value={assignmentForm.additional_info}
+                            onChange={e => setAssignmentForm(f => ({ ...f, additional_info: e.target.value }))}
+                            placeholder="Add any extra context for this assignment..."
+                            className={`${inputCls} resize-none`}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      // Custom / no task selected — fully editable
+                      <textarea
+                        rows={3}
+                        value={assignmentForm.additional_info}
+                        onChange={e => setAssignmentForm(f => ({ ...f, additional_info: e.target.value }))}
+                        placeholder="Describe what the worker needs to do…"
+                        className={`${inputCls} resize-none`}
+                      />
+                    )}
+                  </div>
+
+                  {/* ── FIELDS 6 & 7: Start Date & Due Date ── */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label className="mb-2 text-primary font-semibold">Start Date</Label>
-                      <input type="date" value={assignmentForm.start_date} onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl" />
+                      <Label className="mb-2 text-primary font-semibold flex items-center gap-1.5">
+                        {(!assignmentForm.is_custom && assignmentForm.task_id && !editingAssignment) && <Lock className="w-3 h-3 opacity-60" />}
+                        Start Date
+                      </Label>
+                      {(!assignmentForm.is_custom && assignmentForm.task_id && !editingAssignment) ? (
+                        <>
+                          <div className={readOnlyCls}>{assignmentForm.start_date || '—'}</div>
+                          <span className="text-[10px] text-muted-foreground/60 mt-1 block">Auto-filled from task — not editable</span>
+                        </>
+                      ) : (
+                        <input
+                          type="date"
+                          value={assignmentForm.start_date}
+                          onChange={e => setAssignmentForm(f => ({ ...f, start_date: e.target.value }))}
+                          disabled={editingAssignment !== null}
+                          className={editingAssignment ? readOnlyCls : inputCls}
+                        />
+                      )}
                     </div>
                     <div>
-                      <Label className="mb-2 text-primary font-semibold">Due Date</Label>
-                      <input type="date" value={assignmentForm.due_date} onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl" />
+                      <Label className="mb-2 text-primary font-semibold flex items-center gap-1.5">
+                        {(!assignmentForm.is_custom && assignmentForm.task_id && !editingAssignment) && <Lock className="w-3 h-3 opacity-60" />}
+                        Due Date
+                      </Label>
+                      {(!assignmentForm.is_custom && assignmentForm.task_id && !editingAssignment) ? (
+                        <>
+                          <div className={readOnlyCls}>{assignmentForm.due_date || '—'}</div>
+                          <span className="text-[10px] text-muted-foreground/60 mt-1 block">Auto-filled from task — not editable</span>
+                        </>
+                      ) : (
+                        <input
+                          type="date"
+                          value={assignmentForm.due_date}
+                          min={assignmentForm.start_date || undefined}
+                          onChange={e => setAssignmentForm(f => ({ ...f, due_date: e.target.value }))}
+                          disabled={editingAssignment !== null}
+                          className={editingAssignment ? readOnlyCls : inputCls}
+                        />
+                      )}
                     </div>
                   </div>
+
+                  {/* ── FIELD 8: Assignment Status ── */}
                   <div>
-                    <Label className="mb-2 text-primary font-semibold">Status</Label>
-                    <select value={assignmentForm.status} onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl">
+                    <Label className="mb-2 text-primary font-semibold">Assignment Status</Label>
+                    <select
+                      value={assignmentForm.status}
+                      onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value as any }))}
+                      className={inputCls}
+                    >
                       <option value="assigned" className="bg-background">Assigned</option>
                       <option value="in_progress" className="bg-background">In Progress</option>
                       <option value="completed" className="bg-background">Completed</option>
                       <option value="on_hold" className="bg-background">On Hold</option>
                     </select>
+                    {assignmentForm.status === 'completed' && assignmentForm.task_id && (
+                      <p className="text-xs text-green-400 mt-2 flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" />
+                        Marking as completed will also mark the linked task as done, contributing to milestone progress.
+                      </p>
+                    )}
                   </div>
+
+                  {/* ── FIELD 9: Notes ── */}
                   <div>
                     <Label className="mb-2 text-primary font-semibold">Notes</Label>
-                    <textarea rows={2} value={assignmentForm.notes} onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))} placeholder="Additional notes" className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-foreground font-medium focus:ring-2 focus:ring-primary focus:outline-none backdrop-blur-xl resize-none" />
+                    <textarea
+                      rows={2}
+                      value={assignmentForm.notes}
+                      onChange={e => setAssignmentForm(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="Additional notes or instructions…"
+                      className={`${inputCls} resize-none`}
+                    />
                   </div>
+
                 </div>
-                <div className="flex gap-3 mt-6">
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleSaveAssignment} className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl">
-                    {editingAssignment ? 'Update Task' : 'Assign Task'}
+
+                {/* Footer */}
+                <div className="flex gap-3 mt-6 pt-6 border-t border-white/10">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSaveAssignment}
+                    className="flex-1 px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
+                  >
+                    {editingAssignment ? 'Update Assignment' : 'Assign Task'}
                   </motion.button>
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setShowAssignTask(false); setEditingAssignment(null); }} className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl">Cancel</motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => { setShowAssignTask(false); resetAssignmentForm(); }}
+                    className="px-6 py-3 backdrop-blur-xl bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all"
+                  >
+                    Cancel
+                  </motion.button>
                 </div>
               </motion.div>
             </div>

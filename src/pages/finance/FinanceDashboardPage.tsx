@@ -182,9 +182,9 @@ const financeGroups = [
     description: "Workforce compensation and job management",
     items: [
       {
-        label: "Job Posting",
-        short: "JP",
-        path: "/finance/job-posting",
+        label: "Job Costing",
+        short: "JC",
+        path: "/finance/job-costing",
         icon: Briefcase,
         accent: "from-accent/20 to-primary/30",
         iconColor: "text-accent",

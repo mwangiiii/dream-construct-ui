@@ -482,7 +482,7 @@ const App = () => {
             <Route path="/finance/chart-of-accounts"
               element={<FinanceGuard><ChartOfAccountsPage /></FinanceGuard>} />
 
-            <Route path="/finance/job-posting"
+            <Route path="/finance/job-costing"
               element={<FinanceGuard><JobPostingPage /></FinanceGuard>} />
 
             <Route path="/finance/payroll-checklist"

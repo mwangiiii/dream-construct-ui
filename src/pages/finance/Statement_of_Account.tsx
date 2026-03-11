@@ -66,7 +66,7 @@ interface Props {
   projectId?: string;
   canEdit?: boolean;
 }
-  
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCY = "KES";
 
@@ -187,6 +187,17 @@ const fmtDate = (d: string | null) =>
       })
     : "—";
 
+const fmtDateTime = (d: string | null | undefined) =>
+  d
+    ? new Date(d).toLocaleString("en-KE", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+
 const isOverdue = (due: string | null, status: EntryStatus) => {
   if (!due || status === "Paid" || status === "Void") return false;
   return new Date(due + "T00:00:00") < new Date();
@@ -211,9 +222,10 @@ function recomputeBalances(entries: StatementEntry[]): StatementEntry[] {
   });
 }
 
+// entry_date and updated_at are always auto-set — never editable by user
 const makeEmptyForm = (projectId: string | null = null): EntryFormData => ({
   project_id: projectId,
-  entry_date: todayISO(),
+  entry_date: todayISO(),         // auto: today, read-only
   due_date: null,
   description: "",
   entry_type: "Invoice",
@@ -223,6 +235,7 @@ const makeEmptyForm = (projectId: string | null = null): EntryFormData => ({
   credits: 0,
   status: "Outstanding",
   notes: null,
+  updated_at: new Date().toISOString(), // auto: now, read-only
 });
 
 // ─── AUDIT LOGGING ────────────────────────────────────────────────────────────
@@ -265,6 +278,7 @@ function toWritable(form: EntryFormData): EntryFormData {
     credits,
     status,
     notes,
+    updated_at,
   } = form;
   return {
     project_id,
@@ -278,6 +292,7 @@ function toWritable(form: EntryFormData): EntryFormData {
     credits,
     status,
     notes,
+    updated_at,
   };
 }
 
@@ -326,7 +341,12 @@ const api = {
   },
 
   async create(form: EntryFormData): Promise<StatementEntry> {
-    const payload = toWritable(form);
+    // Always stamp entry_date and updated_at fresh on create
+    const payload = toWritable({
+      ...form,
+      entry_date: todayISO(),
+      updated_at: new Date().toISOString(),
+    });
 
     // Strip project_id for firm-wide entries
     if (!payload.project_id) {
@@ -370,9 +390,15 @@ const api = {
       .eq("id", id)
       .single();
 
+    // Always stamp updated_at fresh on update; entry_date stays unchanged from DB
+    const payload = toWritable({
+      ...form,
+      updated_at: new Date().toISOString(),
+    });
+
     const { data, error } = await supabase
       .from("statement_of_account")
-      .update(toWritable(form))
+      .update(payload)
       .eq("id", id)
       .select()
       .single();
@@ -753,7 +779,6 @@ function BalanceBar({
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
-
 function EntryModal({
   initial,
   onSave,
@@ -762,21 +787,36 @@ function EntryModal({
   projects = [],
   showProjectSelector = false,
 }: {
-  initial: EntryFormData & { id?: number; updated_at?: string };
+  initial: EntryFormData & { id?: number };
   onSave: (d: EntryFormData) => void;
   onClose: () => void;
   loading: boolean;
   projects?: Project[];
   showProjectSelector?: boolean;
 }) {
-  // Always keep updated_at in state for display, but not editable
-  const [form, setForm] = useState<EntryFormData & { updated_at?: string }>({ ...initial });
   const isEdit = Boolean(initial.id);
+
+  // entry_date is locked to today on create; locked to DB value on edit.
+  // updated_at is always "now" at the moment of save — we display a live clock.
+  const [form, setForm] = useState<EntryFormData>({
+    ...initial,
+    // On create, always today. On edit, keep the existing entry_date from DB.
+    entry_date: initial.entry_date ?? todayISO(),
+  });
+
+  // Live "last updated" display — ticks every minute so the user sees it's auto
+  const [nowDisplay, setNowDisplay] = useState(fmtDateTime(new Date().toISOString()));
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowDisplay(fmtDateTime(new Date().toISOString()));
+    }, 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const set = <K extends keyof EntryFormData>(k: K, v: EntryFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  // Auto-set status
+  // Auto-set status based on credit amounts
   useEffect(() => {
     if (
       form.credits > 0 &&
@@ -801,6 +841,15 @@ function EntryModal({
   const isValid =
     form.description.trim() !== "" &&
     (n0(form.charges) > 0 || n0(form.credits) > 0);
+
+  const handleSave = () => {
+    // Stamp updated_at at the exact moment the user clicks save
+    onSave({
+      ...form,
+      // entry_date: never changed by user — kept as-is from form state
+      updated_at: new Date().toISOString(),
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
@@ -1009,15 +1058,25 @@ function EntryModal({
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Entry Date *">
-              <input
-                type="date"
-                value={form.entry_date}
-                readOnly
-                className={readonlyCls}
-                tabIndex={-1}
-              />
+            {/* Entry Date — always auto, always read-only */}
+            <Field
+              label="Entry Date"
+              hint="Auto-set to today. Cannot be changed."
+            >
+              <div className="relative">
+                <input
+                  type="text"
+                  value={fmtDate(form.entry_date)}
+                  readOnly
+                  tabIndex={-1}
+                  className={readonlyCls}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+                  Auto
+                </span>
+              </div>
             </Field>
+
             <Field label="Due Date">
               <input
                 type="date"
@@ -1026,6 +1085,7 @@ function EntryModal({
                 className={inputCls}
               />
             </Field>
+
             <Field label="Account Code">
               <input
                 value={form.account_code ?? ""}
@@ -1036,6 +1096,7 @@ function EntryModal({
                 className={inputCls}
               />
             </Field>
+
             <Field label="Reference No.">
               <input
                 value={form.reference_no ?? ""}
@@ -1046,17 +1107,26 @@ function EntryModal({
                 className={inputCls}
               />
             </Field>
-            {form.updated_at && (
-              <Field label="Last Updated">
+
+            {/* Last Updated — always auto, always read-only */}
+            <Field
+              label="Last Updated"
+              hint="Auto-stamped on save. Cannot be changed."
+              className="sm:col-span-2"
+            >
+              <div className="relative">
                 <input
                   type="text"
-                  value={new Date(form.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  value={isEdit ? nowDisplay : nowDisplay}
                   readOnly
-                  className={readonlyCls}
                   tabIndex={-1}
+                  className={readonlyCls}
                 />
-              </Field>
-            )}
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+                  Auto
+                </span>
+              </div>
+            </Field>
           </div>
 
           <Field label="Notes">
@@ -1079,11 +1149,7 @@ function EntryModal({
             Cancel
           </button>
           <button
-            onClick={() => {
-              // Always set updated_at to now (ISO string) on save
-              const now = new Date().toISOString();
-              onSave({ ...form, updated_at: now });
-            }}
+            onClick={handleSave}
             disabled={loading || !isValid}
             className="px-6 py-2.5 text-sm font-bold rounded-2xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center gap-2"
             style={{
@@ -1478,7 +1544,9 @@ function StatementRow({
                       ]
                     : []),
                   ...(entry.notes ? [{ label: "Notes", value: entry.notes }] : []),
-                  ...(entry.updated_at ? [{ label: "Last Updated", value: new Date(entry.updated_at).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) }] : []),
+                  ...(entry.updated_at
+                    ? [{ label: "Last Updated", value: fmtDateTime(entry.updated_at) }]
+                    : []),
                 ].map((item) => (
                   <div
                     key={item.label}
@@ -1859,12 +1927,6 @@ function GlobalStatementView({
   const firmWideCount = allEntries.filter((e) => e.project_id === null).length;
   const consolidatedCount = allEntries.length;
 
-  const totalCharges = displayEntries.reduce((a, e) => a + n0(e.charges), 0);
-  const totalCredits = displayEntries.reduce((a, e) => a + n0(e.credits), 0);
-  const closingBalance =
-    displayEntries.length > 0
-      ? n0(displayEntries[displayEntries.length - 1].running_balance)
-      : 0;
   const overdueCount = displayEntries.filter((e) =>
     isOverdue(e.due_date, e.status)
   ).length;
@@ -2567,6 +2629,9 @@ function StatementView({
   const paidPct = entries.length
     ? Math.round((paidCount / entries.length) * 100)
     : 0;
+
+  // suppress unused variable warning
+  void outstandingCount;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
