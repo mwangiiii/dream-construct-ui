@@ -77,7 +77,7 @@ const financeRoutes = [
   {
     group: "Payroll",
     items: [
-      { label: "Job Costing",          short: "JP",   path: "/finance/job-posting",                      icon: Briefcase           },
+      { label: "Job Costing",          short: "JC",   path: "/finance/job-posting",                      icon: Briefcase           },
       { label: "Payroll Checklist",    short: "PC",   path: "/finance/payroll-checklist",                icon: ClipboardList       },
     ],
   },
