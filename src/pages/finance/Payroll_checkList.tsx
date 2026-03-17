@@ -434,7 +434,7 @@ function PayslipBreakdown({ gross, computed, pension }: {
     { label: "PAYE (Net)",         sublabel: "After personal + insurance relief",       value: computed.paye_net,     color: "bg-rose-500",   textColor: "text-rose-300"   },
   ];
   return (
-    <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
+    <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden w-full max-w-full">
       <div className="px-5 pt-5 pb-4 border-b border-white/8">
         <div className="flex items-end justify-between">
           <div>
@@ -526,7 +526,7 @@ function PayrollFormFields({
     <>
       {/* Pay Rate */}
       <SectionLabel label="Pay Rate" dotColor="bg-violet-400" textColor="text-violet-400" sub="Gross auto-calculated from rate × time" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <Field label="Rate (KES) *" hint="Amount per unit of time">
           <input type="number" step="0.01" min="0" value={form.rate || ""}
             onChange={(e) => set("rate", parseFloat(e.target.value) || 0)}
@@ -590,7 +590,7 @@ function PayrollFormFields({
 
       {/* Payment & References */}
       <SectionLabel label="Payment & References" dotColor="bg-rose-400" textColor="text-rose-400" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <Field label="Due Date">
           <input type="date" value={form.due_date ?? ""}
             onChange={(e) => set("due_date", e.target.value || null)}
@@ -612,7 +612,7 @@ function PayrollFormFields({
           </div>
         </Field>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <Field label="Bank Code">
           <input value={form.bank_code ?? ""} onChange={(e) => set("bank_code", e.target.value || null)}
             placeholder="e.g. 1002" className={inputCls} />
@@ -729,11 +729,11 @@ function ProjectEntryModal({
     : fmtDateTime(new Date().toISOString());
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4">
       <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95"
+        className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95 mx-2"
         initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 10 }} transition={{ duration: 0.22, ease: "easeOut" }}
       >
@@ -767,8 +767,8 @@ function ProjectEntryModal({
         </div>
 
         {/* Body */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
-          <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
+        <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto w-full">
+          <div className="lg:col-span-3 px-2 sm:px-6 py-5 space-y-4 border-r border-white/8 min-w-0">
 
             {/* Worker select */}
             <SectionLabel label="Employee" dotColor="bg-sky-400" textColor="text-sky-400"
@@ -821,7 +821,7 @@ function ProjectEntryModal({
           </div>
 
           {/* Live Payslip */}
-          <div className="lg:col-span-2 px-5 py-5">
+          <div className="lg:col-span-2 px-2 sm:px-5 py-5 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">Live Payslip Preview</p>
             <PayslipBreakdown gross={form.gross_pay} computed={computed} pension={form.pension} />
           </div>
@@ -891,11 +891,11 @@ function GlobalEntryModal({
     : fmtDateTime(new Date().toISOString());
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4">
       <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95"
+        className="relative w-full max-w-5xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-2xl bg-[#0d0d0d]/95 mx-2"
         initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 10 }} transition={{ duration: 0.22, ease: "easeOut" }}
       >
@@ -928,8 +928,8 @@ function GlobalEntryModal({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
-          <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8">
+        <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto w-full">
+          <div className="lg:col-span-3 px-2 sm:px-6 py-5 space-y-4 border-r border-white/8 min-w-0">
 
             {/* Project link */}
             {projects && (
@@ -1034,7 +1034,7 @@ function GlobalEntryModal({
           </div>
 
           {/* Live Payslip */}
-          <div className="lg:col-span-2 px-5 py-5">
+          <div className="lg:col-span-2 px-2 sm:px-5 py-5 min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground mb-3">Live Payslip Preview</p>
             <PayslipBreakdown gross={form.gross_pay} computed={computed} pension={form.pension} />
           </div>
@@ -1192,9 +1192,10 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
       <motion.tr
         className={`border-b border-white/8 cursor-pointer transition-colors ${s.row}`}
         onClick={() => setExpanded((x) => !x)}
+        style={{ wordBreak: 'break-word' }}
       >
         {showProject && (
-          <td className="px-4 py-3.5 whitespace-nowrap">
+          <td className="px-4 py-3.5 whitespace-nowrap min-w-[90px]">
             {entry.project_id && projectMap?.[entry.project_id] ? (
               <div>
                 <span className="font-mono text-[10px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
@@ -1212,26 +1213,26 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
           </td>
         )}
         {showProject && (
-          <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold">{entry.job_id || "—"}</td>
+          <td className="px-4 py-3.5 font-mono text-xs text-primary font-bold min-w-[100px] whitespace-nowrap">{entry.job_id || "—"}</td>
         )}
-        <td className="px-4 py-3.5 font-semibold text-sm">{entry.employee_name}</td>
-        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold">{fmt(entry.gross_pay)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300">{fmt(entry.nssf_total)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300">{fmt(entry.shif)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300">{fmt(entry.housing_levy)}</td>
-        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300">{fmt(entry.paye_net)}</td>
-        <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm">{fmt(entry.net_pay)}</td>
-        <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell">{fmtDate(entry.due_date)}</td>
-        <td className="px-4 py-3.5 whitespace-nowrap">
+        <td className="px-4 py-3.5 font-semibold text-sm min-w-[120px] whitespace-nowrap">{entry.employee_name}</td>
+        <td className="px-4 py-3.5 tabular-nums text-sm font-semibold min-w-[100px] whitespace-nowrap">{fmt(entry.gross_pay)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-blue-300 min-w-[80px] whitespace-nowrap">{fmt(entry.nssf_total)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-purple-300 min-w-[80px] whitespace-nowrap">{fmt(entry.shif)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-amber-300 min-w-[80px] whitespace-nowrap">{fmt(entry.housing_levy)}</td>
+        <td className="px-4 py-3.5 tabular-nums text-xs text-rose-300 min-w-[80px] whitespace-nowrap">{fmt(entry.paye_net)}</td>
+        <td className="px-4 py-3.5 font-black text-emerald-400 tabular-nums text-sm min-w-[100px] whitespace-nowrap">{fmt(entry.net_pay)}</td>
+        <td className="px-4 py-3.5 text-xs text-muted-foreground hidden sm:table-cell min-w-[100px] whitespace-nowrap">{fmtDate(entry.due_date)}</td>
+        <td className="px-4 py-3.5 whitespace-nowrap min-w-[120px]">
           <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">
             {fmtDateTime(entry.updated_at ?? entry.created_at)}
           </span>
         </td>
-        <td className="px-4 py-3.5">
+        <td className="px-4 py-3.5 min-w-[80px] whitespace-nowrap">
           <Badge className={`text-[9px] font-bold ${s.badge}`}>{entry.payment_status}</Badge>
         </td>
         {canEdit && (
-          <td className="px-4 py-3.5">
+          <td className="px-4 py-3.5 min-w-[90px] whitespace-nowrap">
             <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
               <button onClick={onEdit}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium">
@@ -1245,11 +1246,11 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
           </td>
         )}
       </motion.tr>
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {expanded && (
-          <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="bg-white/2">
-            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 10 : 9)} className="px-6 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px]">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="bg-white/2">
+            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 10 : 9)} className="px-2 sm:px-6 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px] min-w-0">
                 {[
                   { label: "Rate",            value: `${fmt(entry.rate)} / ${entry.rate_type}` },
                   { label: "Time Worked",      value: entry.time_worked || "—" },
@@ -1270,12 +1271,12 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
                 ].map((item) => (
                   <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
                     <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">{item.label}</p>
-                    <p className="font-mono font-semibold text-foreground text-[11px]">{item.value}</p>
+                    <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{item.value}</p>
                   </div>
                 ))}
               </div>
             </td>
-          </motion.tr>
+          </motion.div>
         )}
       </AnimatePresence>
     </>
@@ -1313,7 +1314,7 @@ function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: Payroll
           { label: "Net Pay",   value: net,   color: "text-emerald-400" },
         ].map((item) => (
           <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
-            <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1 font-bold">{item.label}</p>
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1 font-bold">{item.label}</p>
             <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{fmt(item.value)}</p>
           </div>
         ))}
@@ -1409,12 +1410,15 @@ function GroupedPayrollBody({
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: "easeInOut" }}
                   className="overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm min-w-[600px]">
+                  <div className="overflow-x-auto w-full">
+                    <table className="w-full text-sm min-w-[600px] max-w-full">
                       <thead>
                         <tr className="border-y border-white/8 bg-white/3">
                           {tableHeaders.map((h) => (
-                            <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                            <th
+                              key={h}
+                              className={`px-4 py-2.5 text-left text-[9px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap min-w-[80px] ${h === 'Employee' ? 'min-w-[120px]' : ''} ${h === 'Job ID' ? 'min-w-[100px]' : ''} ${h === 'Actions' ? 'min-w-[90px]' : ''}`}
+                            >
                               {h}
                             </th>
                           ))}
@@ -1609,7 +1613,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
                   Firm Overview · Company Payroll
                 </span>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
+              <h2 className="text-2xl sm:text-3xl lg:text-7xl font-black tracking-tight">
                 Company-Wide Payroll Register
               </h2>
               <p className="text-sm text-muted-foreground mt-1 max-w-lg">

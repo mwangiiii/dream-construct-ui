@@ -623,7 +623,9 @@ export default function ChartOfAccountsPage() {
                     : "bg-white/5  border-white/10 hover:bg-white/8 hover:border-white/15 hover:scale-[1.01]"
                 }`}
               >
-                <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>{cat}</div>
+                <div className={`text-[10px] uppercase tracking-widest font-semibold mb-2 ${s.accent}`}>
+                  {cat}
+                </div>
                 <div className="text-3xl font-bold text-foreground tabular-nums">{totals[cat] ?? 0}</div>
                 <div className="text-xs text-muted-foreground mt-0.5">accounts</div>
               </button>
@@ -752,7 +754,7 @@ export default function ChartOfAccountsPage() {
                                 <thead>
                                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                                     {["Code", "Account Name", "Type", "Subcategory", "Description", "Bank", "Status", "Actions"].map((h) => (
-                                      <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                                      <th key={h} className={`px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap min-w-[80px] ${h === 'Account Name' ? 'min-w-[140px]' : ''} ${h === 'Account Code' ? 'min-w-[100px]' : ''} ${h === 'Type' ? 'min-w-[90px]' : ''} ${h === 'Actions' ? 'min-w-[90px]' : ''}`}>
                                         {h}
                                       </th>
                                     ))}
@@ -767,32 +769,32 @@ export default function ChartOfAccountsPage() {
                                       transition={{ delay: ri * 0.02, duration: 0.16 }}
                                       className={`border-b border-white/5 transition-colors ${s.row} ${!acc.active ? "opacity-40" : ""}`}
                                     >
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                      <td className="px-5 py-3.5 whitespace-nowrap min-w-[100px]">
                                         <span className="font-mono text-xs font-semibold text-primary">
                                           {acc.account_code}
                                         </span>
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
+                                      <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground min-w-[140px]">
                                         {acc.account_name}
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                      <td className="px-5 py-3.5 whitespace-nowrap min-w-[90px]">
                                         <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-mono ${TYPE_STYLE[acc.account_type]}`}>
                                           {acc.account_type}
                                         </span>
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground">
+                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs text-muted-foreground min-w-[120px]">
                                         {acc.subcategory}
                                       </td>
-                                      <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs">
+                                      <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-xs min-w-[120px]">
                                         <span className="line-clamp-1">{acc.description || "—"}</span>
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs font-mono text-muted-foreground">
+                                      <td className="px-5 py-3.5 whitespace-nowrap text-xs font-mono text-muted-foreground min-w-[100px]">
                                         {acc.bank_name !== "N/A"
                                           ? <span className="text-foreground/70">{acc.bank_name}</span>
                                           : <span className="text-white/20">—</span>
                                         }
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                      <td className="px-5 py-3.5 whitespace-nowrap min-w-[90px]">
                                         {acc.active ? (
                                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
                                             <span className="w-1 h-1 rounded-full bg-emerald-400" />Active
@@ -803,7 +805,7 @@ export default function ChartOfAccountsPage() {
                                           </span>
                                         )}
                                       </td>
-                                      <td className="px-5 py-3.5 whitespace-nowrap">
+                                      <td className="px-5 py-3.5 whitespace-nowrap min-w-[90px]">
                                         <div className="flex items-center gap-1.5">
                                           <button
                                             onClick={() => { setEditing(acc); setModal("edit"); }}
