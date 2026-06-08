@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface Project {
@@ -52,6 +53,19 @@ interface WIPSummary {
   onBudgetCount: number;
   overbilledAmount: number;
   underbilledAmount: number;
+}
+
+// Auto-fill snapshot pulled from the expense modules + AR + budget view
+interface ProjectFinancials {
+  ap_cost: number;
+  job_cost: number;
+  tax_cost: number;
+  loan_cost: number;
+  cost_incurred: number;     // total of the above
+  billed_to_date: number;    // from AR
+  original_budget: number;   // projects.budget_numeric
+  approved_changes: number;  // SUM approved change orders
+  revised_budget: number;    // original + approved (= contract value)
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -218,6 +232,43 @@ const api = {
     });
     if (error) return null;
     return data as WIPSummary;
+  },
+
+  // Auto-fill source: cost from all expense modules + billed-to-date from AR.
+  async projectFinancials(projectId: string): Promise<ProjectFinancials> {
+    const [costRes, arRes, budgetRes] = await Promise.all([
+      supabase
+        .from("vw_project_cost_incurred")
+        .select("ap_cost,job_cost,tax_cost,loan_cost,total_cost")
+        .eq("project_id", projectId)
+        .maybeSingle(),
+      supabase
+        .from("vw_project_ar_summary")
+        .select("total_billed")
+        .eq("project_id", projectId)
+        .maybeSingle(),
+      supabase
+        .from("vw_project_budget")
+        .select("original_budget,approved_changes,revised_budget")
+        .eq("project_id", projectId)
+        .maybeSingle(),
+    ]);
+    if (costRes.error)   throw new Error(`Cost view: ${costRes.error.message}`);
+    if (arRes.error)     throw new Error(`AR view: ${arRes.error.message}`);
+    if (budgetRes.error) throw new Error(`Budget view: ${budgetRes.error.message}`);
+    const c = costRes.data;
+    const b = budgetRes.data;
+    return {
+      ap_cost:          n0(Number(c?.ap_cost)),
+      job_cost:         n0(Number(c?.job_cost)),
+      tax_cost:         n0(Number(c?.tax_cost)),
+      loan_cost:        n0(Number(c?.loan_cost)),
+      cost_incurred:    n0(Number(c?.total_cost)),
+      billed_to_date:   n0(Number(arRes.data?.total_billed)),
+      original_budget:  n0(Number(b?.original_budget)),
+      approved_changes: n0(Number(b?.approved_changes)),
+      revised_budget:   n0(Number(b?.revised_budget)),
+    };
   },
 };
 
@@ -530,17 +581,62 @@ function WIPModal({
   onSave,
   onClose,
   loading,
+  project,
 }: {
   initial: WIPFormData & { id?: number };
   onSave: (d: WIPFormData) => void;
   onClose: () => void;
   loading: boolean;
+  project?: Project;
 }) {
   const [form, setForm] = useState<WIPFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
+  const [autofilling, setAutofilling] = useState(false);
+  const [breakdown, setBreakdown] = useState<ProjectFinancials | null>(null);
+  const [autofillError, setAutofillError] = useState<string | null>(null);
 
   const set = <K extends keyof WIPFormData>(k: K, v: WIPFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
+
+  // Pull contract + % from the project, and cost/billed from the expense
+  // modules + AR. Contract/percent only applied when `withContract` is true
+  // (initial load) so a manual edit isn't clobbered on a later recalc.
+  const applyAutofill = useCallback(
+    async (withContract: boolean) => {
+      const pid = initial.project_id;
+      if (!pid) return;
+      setAutofilling(true);
+      setAutofillError(null);
+      try {
+        const fin = await api.projectFinancials(pid);
+        setBreakdown(fin);
+        setForm((p) => ({
+          ...p,
+          cost_incurred: fin.cost_incurred,
+          billed_to_date: fin.billed_to_date,
+          ...(withContract
+            ? {
+                // Contract value = revised budget (original + approved change orders)
+                total_contract: fin.revised_budget,
+                percent_complete: project?.progress_percent ?? p.percent_complete,
+              }
+            : {}),
+        }));
+      } catch (err: unknown) {
+        setAutofillError(err instanceof Error ? err.message : "Failed to pull module data");
+      } finally {
+        setAutofilling(false);
+      }
+    },
+    [initial.project_id, project]
+  );
+
+  // On create, auto-populate everything from the project + modules.
+  useEffect(() => {
+    if (!isEdit) applyAutofill(true);
+    else applyAutofill(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-derive billed_status and amount
   useEffect(() => {
@@ -609,6 +705,84 @@ function WIPModal({
         <div className="px-6 py-5 max-h-[72vh] overflow-y-auto space-y-4">
           {/* Contract */}
           <SectionLabel label="Contract & Progress" dotColor="bg-violet-400" textColor="text-violet-400" />
+
+          {/* Auto-fill banner — pulls contract/%, cost and billing from modules */}
+          <div className="rounded-2xl border border-white/15 bg-white/[0.05] backdrop-blur-xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path d="M3 3v18h18" />
+                    <path d="m7 14 4-4 3 3 5-5" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold tracking-tight text-foreground leading-tight">Auto-Fill from Modules</p>
+                  <p className="text-[10px] text-muted-foreground truncate">Budget · AP · Job Costs · Taxes · Loans · AR</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => applyAutofill(true)}
+                disabled={autofilling}
+                className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-primary bg-primary/10 border border-primary/25 hover:bg-primary/15 hover:border-primary/40 active:scale-95 transition-all disabled:opacity-50"
+              >
+                {autofilling ? (
+                  <span className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path d="M23 4v6h-6M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                )}
+                Recalculate
+              </button>
+            </div>
+
+            {/* Cost breakdown — hairline-divided metric cells */}
+            {breakdown && (
+              <div className="grid grid-cols-3 sm:grid-cols-5">
+                {[
+                  { label: "AP", value: fmt(breakdown.ap_cost), emphasis: false },
+                  { label: "Job Costs", value: fmt(breakdown.job_cost), emphasis: false },
+                  { label: "Taxes", value: fmt(breakdown.tax_cost), emphasis: false },
+                  { label: "Loans", value: fmt(breakdown.loan_cost), emphasis: false },
+                  { label: "Total Cost", value: fmt(breakdown.cost_incurred), emphasis: true },
+                ].map((c, i) => (
+                  <div
+                    key={c.label}
+                    className={`px-4 py-2.5 border-white/8 transition-colors hover:bg-white/[0.03] ${i % 3 !== 0 ? "border-l" : ""} ${i >= 3 ? "border-t sm:border-t-0" : ""} ${i % 5 !== 0 ? "sm:border-l" : ""} ${c.emphasis ? "bg-rose-500/[0.06]" : ""}`}
+                  >
+                    <p className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1">{c.label}</p>
+                    <p className={`text-xs font-mono tabular-nums tracking-tight ${c.emphasis ? "text-rose-300 font-bold" : "text-foreground/80"}`}>
+                      {c.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Footnotes */}
+            {(breakdown?.approved_changes || autofillError || breakdown?.revised_budget === 0) && (
+              <div className="px-4 py-2.5 border-t border-white/8 space-y-1">
+                {breakdown && breakdown.approved_changes > 0 && (
+                  <p className="text-[10px] text-emerald-400/80 font-mono tabular-nums">
+                    Contract = original {fmt(breakdown.original_budget)} + approved COs {fmt(breakdown.approved_changes)} = {fmt(breakdown.revised_budget)}
+                  </p>
+                )}
+                {autofillError && (
+                  <p className="text-[10px] text-rose-400">⚠️ {autofillError}</p>
+                )}
+                {breakdown && breakdown.revised_budget === 0 && (
+                  <p className="text-[10px] text-amber-400/80">
+                    ⚠️ This project has no budget set — Total Contract will be 0. Set the project budget to populate it.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Total Contract Value (KES) *">
               <input
@@ -636,7 +810,7 @@ function WIPModal({
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">%</span>
               </div>
             </Field>
-            <Field label="Cost Incurred (KES)">
+            <Field label="Cost Incurred (KES)" hint="Auto-summed from AP, Job Costs, Taxes & Loans — editable">
               <input
                 type="number"
                 step="0.01"
@@ -663,7 +837,7 @@ function WIPModal({
           {/* Billing */}
           <SectionLabel label="Billing" dotColor="bg-emerald-400" textColor="text-emerald-400" sub="billed to date vs earned determines status" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Billed to Date (KES)">
+            <Field label="Billed to Date (KES)" hint="Auto-pulled from Accounts Receivable — editable">
               <input
                 type="number"
                 step="0.01"
@@ -714,22 +888,22 @@ function WIPModal({
           {/* References */}
           <SectionLabel label="References & Dates" dotColor="bg-sky-400" textColor="text-sky-400" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Account Code">
-              <input
-                value={form.account ?? ""}
-                onChange={(e) => set("account", e.target.value || null)}
-                placeholder="e.g. 1002"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Code Receivable">
-              <input
-                value={form.code_receivable ?? ""}
-                onChange={(e) => set("code_receivable", e.target.value || null)}
-                placeholder="e.g. CR-001"
-                className={inputCls}
-              />
-            </Field>
+            <COAAccountSelect
+              value={form.account ?? null}
+              onChange={(v) => set("account", v || null)}
+              filter="all"
+              valueField="code"
+              label="Account Code"
+              hint="Select an account from the Chart of Accounts"
+            />
+            <COAAccountSelect
+              value={form.code_receivable ?? null}
+              onChange={(v) => set("code_receivable", v || null)}
+              filter="receivable"
+              valueField="code"
+              label="Code Receivable"
+              hint="Select a receivable account for billing"
+            />
             <Field label="Last Update Date *">
               <input
                 type="date"
@@ -957,7 +1131,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
             .in("project_id", ids);
           if (rows) {
             const counts: Record<string, number> = {};
-            rows.forEach((r: any) => {
+            rows.forEach((r: { project_id: string }) => {
               counts[r.project_id] = (counts[r.project_id] ?? 0) + 1;
             });
             setWipCounts(counts);
@@ -1255,6 +1429,7 @@ function WIPView({
   onBack: () => void;
 }) {
   const [entries, setEntries] = useState<WIPEntry[]>([]);
+  const [financials, setFinancials] = useState<ProjectFinancials | null>(null);
   const [fetching, setFetching] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<BilledStatus | "All">("All");
@@ -1267,10 +1442,14 @@ function WIPView({
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     try {
-      const data = await api.list(project.id);
+      const [data, fin] = await Promise.all([
+        api.list(project.id),
+        api.projectFinancials(project.id).catch(() => null),
+      ]);
       setEntries(data);
-    } catch (err: any) {
-      push(err.message || "Failed to load WIP entries", "error");
+      setFinancials(fin);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load WIP entries", "error");
     } finally {
       setFetching(false);
     }
@@ -1287,8 +1466,8 @@ function WIPView({
       setEntries((p) => [row, ...p]);
       push("WIP entry added ✓");
       setModal(null);
-    } catch (err: any) {
-      push(err.message || "Failed to add entry", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to add entry", "error");
     } finally {
       setSaving(false);
     }
@@ -1303,8 +1482,8 @@ function WIPView({
       push("WIP entry updated ✓");
       setModal(null);
       setEditing(null);
-    } catch (err: any) {
-      push(err.message || "Failed to update", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to update", "error");
     } finally {
       setSaving(false);
     }
@@ -1318,8 +1497,8 @@ function WIPView({
       setEntries((p) => p.filter((e) => e.id !== deleting.id));
       push("WIP entry deleted");
       setDeleting(null);
-    } catch (err: any) {
-      push(err.message || "Failed to delete", "error");
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to delete", "error");
     } finally {
       setSaving(false);
     }
@@ -1396,6 +1575,7 @@ function WIPView({
             onSave={handleCreate}
             onClose={() => setModal(null)}
             loading={saving}
+            project={project}
           />
         )}
         {modal === "edit" && editing && (
@@ -1404,6 +1584,7 @@ function WIPView({
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
+            project={project}
           />
         )}
         {deleting && (
@@ -1453,6 +1634,87 @@ function WIPView({
             </p>
           )}
         </div>
+
+        {/* Live Project Financials — auto-pulled from project + modules + AR */}
+        {(() => {
+          const liveContract = financials ? n0(financials.revised_budget) : n0(project.budget_numeric);
+          const livePercent = n0(project.progress_percent);
+          const liveEarned = +(liveContract * (livePercent / 100)).toFixed(2);
+          const liveCost = n0(financials?.cost_incurred);
+          const liveBilled = n0(financials?.billed_to_date);
+          const grossProfit = liveContract - liveCost;
+          const contractNote = financials && financials.approved_changes > 0
+            ? `incl. ${fmt(financials.approved_changes)} approved COs`
+            : (liveContract === 0 ? "no budget set" : "original + approved COs");
+          const marginPct = liveContract > 0 ? (grossProfit / liveContract) * 100 : 0;
+          const cells = [
+            { label: "Contract Value", value: fmt(liveContract), color: "text-foreground",   note: contractNote },
+            { label: "Completion",     value: pct(livePercent),  color: "text-primary",       note: "project progress" },
+            { label: "Earned Revenue", value: fmt(liveEarned),   color: "text-foreground/90", note: "contract × completion" },
+            { label: "Cost Incurred",  value: fmt(liveCost),     color: "text-rose-300",      note: "AP · Job · Tax · Loans" },
+            { label: "Billed to Date", value: fmt(liveBilled),   color: "text-emerald-300",   note: "from receivables" },
+            { label: "Gross Profit",   value: fmt(grossProfit),  color: grossProfit >= 0 ? "text-emerald-400" : "text-rose-400", note: `${marginPct >= 0 ? "+" : ""}${marginPct.toFixed(1)}% margin` },
+          ];
+          return (
+            <div className="mb-8 rounded-2xl border border-white/15 bg-white/[0.07] backdrop-blur-xl shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)] overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-4 px-5 sm:px-6 py-4 border-b border-white/10">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M3 3v18h18" />
+                      <path d="m7 14 4-4 3 3 5-5" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold tracking-tight text-foreground leading-tight">
+                      Project Financials
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      Auto-consolidated from Budget, AP, Job Costs, Taxes, Loans &amp; AR
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-400">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400/70" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+                    </span>
+                    Live
+                  </span>
+                  <button
+                    onClick={fetchEntries}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-muted-foreground hover:text-foreground border border-white/10 hover:bg-white/5 hover:border-white/20 transition-all"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M23 4v6h-6M1 20v-6h6" />
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              {/* Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+                {cells.map((c, i) => (
+                  <div
+                    key={c.label}
+                    className={`px-5 py-4 border-white/8 transition-colors hover:bg-white/[0.03] ${i % 2 !== 0 ? "border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${i % 3 !== 0 ? "md:border-l" : ""} ${i >= 3 ? "md:border-t lg:border-t-0" : ""} ${i % 6 !== 0 ? "lg:border-l" : ""}`}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-1.5">
+                      {c.label}
+                    </p>
+                    <p className={`text-base lg:text-lg font-bold font-mono tabular-nums tracking-tight leading-none ${c.color}`}>
+                      {c.value}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/50 mt-1.5 truncate">{c.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Summary Strip + WIP Bars */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">

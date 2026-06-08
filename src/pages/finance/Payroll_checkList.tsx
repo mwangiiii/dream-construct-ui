@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface Project {
@@ -613,10 +614,14 @@ function PayrollFormFields({
         </Field>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-        <Field label="Bank Code">
-          <input value={form.bank_code ?? ""} onChange={(e) => set("bank_code", e.target.value || null)}
-            placeholder="e.g. 1002" className={inputCls} />
-        </Field>
+        <COAAccountSelect
+          value={form.bank_code ?? null}
+          onChange={(v) => set("bank_code", v || null)}
+          filter="bank"
+          valueField="code"
+          label="Bank Code"
+          hint=""
+        />
         <Field label="Serial No.">
           <input value={form.serial_no ?? ""} onChange={(e) => set("serial_no", e.target.value || null)}
             placeholder="S-1001" className={inputCls} />

@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    allowedHosts: [".ngrok-free.app"],
     proxy: {
       // Proxy API requests to local Supabase Edge Functions
       "/api/chart-of-accounts": {

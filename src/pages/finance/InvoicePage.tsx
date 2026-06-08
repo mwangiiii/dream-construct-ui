@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface Project {
@@ -22,6 +23,15 @@ interface Project {
 }
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled" | "partial";
+
+// Consolidated per-project financial snapshot (from WIP / AR / budget views)
+interface ProjectFinancials {
+  contract_value: number;     // revised budget (original + approved COs)
+  approved_changes: number;   // approved change orders
+  cost_incurred: number;      // WIP — AP + Job + Tax + Loans
+  amount_billed: number;      // AR — total billed to date
+  outstanding: number;        // AR — billed not yet received
+}
 
 interface LineItem {
   id: string;
@@ -62,6 +72,7 @@ interface Invoice {
   total_tax: number;
   total: number;
   payment_terms: string | null;
+  bank_account_code: string | null;
   bank_name: string | null;
   account_number: string | null;
   notes: string | null;
@@ -136,6 +147,7 @@ const makeEmpty = (projectId: string | null): InvoiceFormData => ({
   discount_amount:        0,
   tax_rate:               5,
   payment_terms:          null,
+  bank_account_code:      null,
   bank_name:              null,
   account_number:         null,
   notes:                  null,
@@ -221,6 +233,26 @@ const api = {
       .from("invoices").select("*").order("invoice_date", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as Invoice[];
+  },
+
+  // Consolidated project financials from the WIP / AR / budget views
+  async projectFinancials(projectId: string): Promise<ProjectFinancials> {
+    const [budgetRes, costRes, arRes] = await Promise.all([
+      supabase.from("vw_project_budget").select("revised_budget,approved_changes").eq("project_id", projectId).maybeSingle(),
+      supabase.from("vw_project_cost_incurred").select("total_cost").eq("project_id", projectId).maybeSingle(),
+      supabase.from("vw_project_ar_summary").select("total_billed,total_outstanding").eq("project_id", projectId).maybeSingle(),
+    ]);
+    if (budgetRes.error) throw new Error(`Budget view: ${budgetRes.error.message}`);
+    if (costRes.error)   throw new Error(`Cost view: ${costRes.error.message}`);
+    if (arRes.error)     throw new Error(`AR view: ${arRes.error.message}`);
+    const num = (v: unknown) => Number(v) || 0;
+    return {
+      contract_value:   num(budgetRes.data?.revised_budget),
+      approved_changes: num(budgetRes.data?.approved_changes),
+      cost_incurred:    num(costRes.data?.total_cost),
+      amount_billed:    num(arRes.data?.total_billed),
+      outstanding:      num(arRes.data?.total_outstanding),
+    };
   },
 
   async create(form: InvoiceFormData): Promise<Invoice> {
@@ -929,7 +961,15 @@ function InvoiceModal({
           {tab === "payment" && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Payment Terms" span2><input value={form.payment_terms ?? ""} onChange={e => set("payment_terms", e.target.value || null)} placeholder="e.g. Net 30, On receipt" className={inputCls} /></Field>
-              <Field label="Bank Name"><input value={form.bank_name ?? ""} onChange={e => set("bank_name", e.target.value || null)} placeholder="e.g. KCB Bank" className={inputCls} /></Field>
+              <COAAccountSelect
+                value={form.bank_account_code ?? null}
+                onChange={v => set("bank_account_code", v || null)}
+                onSelect={acc => set("bank_name", acc?.bank_name && acc.bank_name !== "N/A" ? acc.bank_name : null)}
+                filter="bank"
+                valueField="code"
+                label="Account code (Chart of Accounts)"
+                hint="Select the payment receiving bank"
+              />
               <Field label="Account Number"><input value={form.account_number ?? ""} onChange={e => set("account_number", e.target.value || null)} placeholder="e.g. 1234567890" className={inputCls} /></Field>
               <Field label="Notes" span2><textarea value={form.notes ?? ""} rows={4} onChange={e => set("notes", e.target.value || null)} placeholder="Thank you for your business!" className={inputCls + " resize-none"} /></Field>
             </div>
@@ -1455,6 +1495,7 @@ function useInvoiceCrud(push: (msg: string, type?: "success" | "error") => void)
 // ─── PER-PROJECT INVOICE VIEW ─────────────────────────────────────────────────
 function ProjectInvoiceView({ project, canEdit, onBack }: { project: Project; canEdit: boolean; onBack: () => void }) {
   const [invoices, setInvoices]         = useState<Invoice[]>([]);
+  const [financials, setFinancials]     = useState<ProjectFinancials | null>(null);
   const [fetching, setFetching]         = useState(false);
   const [modal, setModal]               = useState<null | "create" | "edit">(null);
   const [editing, setEditing]           = useState<Invoice | null>(null);
@@ -1466,7 +1507,14 @@ function ProjectInvoiceView({ project, canEdit, onBack }: { project: Project; ca
 
   const fetchInvoices = useCallback(async () => {
     setFetching(true); setInvoices([]);
-    try { setInvoices(await api.list(project.id)); }
+    try {
+      const [inv, fin] = await Promise.all([
+        api.list(project.id),
+        api.projectFinancials(project.id).catch(() => null),
+      ]);
+      setInvoices(inv);
+      setFinancials(fin);
+    }
     catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load.", "error"); }
     finally { setFetching(false); }
   }, [project.id, push]);
@@ -1530,6 +1578,62 @@ function ProjectInvoiceView({ project, canEdit, onBack }: { project: Project; ca
             </div>
           </div>
         </motion.div>
+
+        {/* Consolidated Project Financials — from WIP / AR / Change Orders */}
+        {(() => {
+          const f = financials;
+          const contract       = f?.contract_value ?? 0;
+          const costIncurred   = f?.cost_incurred ?? 0;
+          const billed         = f?.amount_billed ?? 0;
+          const approvedCOs    = f?.approved_changes ?? 0;
+          const remainingBillable = Math.max(0, contract - billed);
+          const outstanding    = f?.outstanding ?? 0;
+          const cells = [
+            { label: "Contract Value",     value: fmtKES(contract),          color: "text-foreground",   note: "incl. approved COs" },
+            { label: "Costs Incurred",     value: fmtKES(costIncurred),      color: "text-rose-300",     note: "from WIP" },
+            { label: "Amount Billed",      value: fmtKES(billed),            color: "text-emerald-300",  note: "from receivables" },
+            { label: "Remaining Billable", value: fmtKES(remainingBillable), color: "text-foreground/90",note: "contract − billed" },
+            { label: "Outstanding",        value: fmtKES(outstanding),       color: "text-amber-300",    note: "billed, not received" },
+            { label: "Approved COs",       value: fmtKES(approvedCOs),       color: "text-primary",      note: "change orders" },
+          ];
+          return (
+            <div className="mb-8 rounded-2xl border border-white/15 bg-white/[0.07] backdrop-blur-xl shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)] overflow-hidden">
+              <div className="flex items-center justify-between gap-4 px-5 sm:px-6 py-4 border-b border-white/10">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <path d="M14 2v6h6M9 13h6M9 17h6" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold tracking-tight text-foreground leading-tight">Consolidated Project Invoice Position</h3>
+                    <p className="text-[11px] text-muted-foreground truncate">Auto-consolidated from WIP, Receivables &amp; Change Orders</p>
+                  </div>
+                </div>
+                <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-400">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400/70" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+                  </span>
+                  Live
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+                {cells.map((c, i) => (
+                  <div
+                    key={c.label}
+                    className={`px-5 py-4 border-white/8 transition-colors hover:bg-white/[0.03] ${i % 2 !== 0 ? "border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${i % 3 !== 0 ? "md:border-l" : ""} ${i >= 3 ? "md:border-t lg:border-t-0" : ""} ${i % 6 !== 0 ? "lg:border-l" : ""}`}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-1.5">{c.label}</p>
+                    <p className={`text-base lg:text-lg font-bold font-mono tabular-nums tracking-tight leading-none ${c.color}`}>{c.value}</p>
+                    <p className="text-[10px] text-muted-foreground/50 mt-1.5 truncate">{c.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         <StatCards invoices={invoices} />
         <StatusPills invoices={invoices} filterStatus={filterStatus} setFilterStatus={setFilterStatus} />

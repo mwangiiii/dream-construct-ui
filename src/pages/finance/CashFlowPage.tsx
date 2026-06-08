@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -395,10 +396,14 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
             </div>
           </div>
 
-          <Field label="Account Codes">
-            <input value={form.account_codes ?? ""} onChange={(e) => setField("account_codes", e.target.value || null)}
-              placeholder="e.g. 1001, 1002" className={inputCls} />
-          </Field>
+          <COAAccountSelect
+            value={form.account_codes ?? null}
+            onChange={(v) => setField("account_codes", v || null)}
+            filter="all"
+            valueField="code"
+            label="Account Code"
+            hint="Select an account from the Chart of Accounts"
+          />
           <Field label="eTIMS Codes">
             <input value={form.etims_codes ?? ""} onChange={(e) => setField("etims_codes", e.target.value || null)}
               placeholder="e.g. ETIMS-11111" className={inputCls} />

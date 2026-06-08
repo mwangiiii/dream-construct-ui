@@ -34,8 +34,16 @@ interface Material {
   date_used: string | null;
   date_wasted: string | null;
   wastage_reason: string | null;
+  inventory_id: number | null;
   created_at?: string;
   updated_at?: string;
+}
+
+interface InventoryOption {
+  id: number;
+  factorial_code: string;
+  description: string;
+  quantity_of_item: number;
 }
 
 interface Milestone {
@@ -140,9 +148,11 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
     date_wasted: "",
     wastage_reason: "",
     milestone_id: "",
+    inventory_id: "",
   });
 
   const [editForm, setEditForm] = useState<Partial<Material>>({});
+  const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([]);
 
   const todayISO = useMemo(() => new Date().toISOString().split("T")[0], []);
 
@@ -169,8 +179,8 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       if (err) throw err;
       setMaterials(data || []);
       setError(null);
-    } catch (err: any) {
-      setError(err.message || "Failed to load materials");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load materials");
       setMaterials([]);
     } finally {
       setLoading(false);
@@ -180,6 +190,14 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
   useEffect(() => {
     if (projectId) fetchMaterials();
   }, [projectId]);
+
+  useEffect(() => {
+    supabase
+      .from("inventory")
+      .select("id,factorial_code,description,quantity_of_item")
+      .order("factorial_code", { ascending: true })
+      .then(({ data }) => setInventoryOptions((data ?? []) as InventoryOption[]));
+  }, []);
 
   const materialsByMilestone = useMemo(() => {
     const grouped: Record<string, Material[]> = {};
@@ -219,6 +237,7 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       date_wasted: "",
       wastage_reason: "",
       milestone_id: "",
+      inventory_id: "",
     });
     setEditForm({});
     setShowFormForMilestone(null);
@@ -247,6 +266,7 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       date_wasted: "",
       wastage_reason: "",
       milestone_id: milestoneId,
+      inventory_id: "",
     });
     setShowFormForMilestone(milestoneId);
     setExpandedMilestones((prev) => new Set([...prev, milestoneId]));
@@ -272,6 +292,7 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
         date_used: createForm.date_used || null,
         date_wasted: wastageNum > 0 ? (createForm.date_wasted || null) : null,
         wastage_reason: wastageNum > 0 ? (createForm.wastage_reason.trim() || null) : null,
+        inventory_id: createForm.inventory_id ? Number(createForm.inventory_id) : null,
       };
 
       const { error } = await supabase.from("material_tracking").insert([payload]);
@@ -281,8 +302,8 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       resetForm();
       fetchMaterials();
       onUpdate?.();
-    } catch (err: any) {
-      showToast(err.message || "Failed to create material", "error");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Failed to create material", "error");
     } finally {
       setLoading(false);
     }
@@ -306,6 +327,7 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
         date_wasted: wastageNum > 0 ? (editForm.date_wasted || null) : null,
         wastage_reason: wastageNum > 0 ? (editForm.wastage_reason?.trim() || null) : null,
         milestone_id: editForm.milestone_id === "unassigned" ? null : editForm.milestone_id,
+        inventory_id: editForm.inventory_id ?? null,
       };
 
       const { error } = await supabase
@@ -319,8 +341,8 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       resetForm();
       fetchMaterials();
       onUpdate?.();
-    } catch (err: any) {
-      showToast(err.message || "Failed to update material", "error");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Failed to update material", "error");
     } finally {
       setLoading(false);
     }
@@ -339,8 +361,8 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
       showToast("Material deleted successfully!", "success");
       fetchMaterials();
       onUpdate?.();
-    } catch (err: any) {
-      showToast(err.message || "Failed to delete material", "error");
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "Failed to delete material", "error");
     } finally {
       setLoading(false);
       setConfirmDelete(null);
@@ -515,6 +537,32 @@ const MaterialTrackingTab: React.FC<MaterialTrackingTabProps> = ({
                                         required
                                         disabled={loading}
                                       />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-semibold text-muted-foreground mb-2">
+                                        Inventory Stock Item
+                                        <span className="ml-2 text-xs font-normal text-muted-foreground/60">
+                                          link to auto-update stock usage
+                                        </span>
+                                      </label>
+                                      <select
+                                        value={editForm.id ? (editForm.inventory_id ?? "") : createForm.inventory_id}
+                                        onChange={(e) =>
+                                          editForm.id
+                                            ? setEditForm({ ...editForm, inventory_id: e.target.value ? Number(e.target.value) : null })
+                                            : setCreateForm({ ...createForm, inventory_id: e.target.value })
+                                        }
+                                        className="w-full px-4 py-3 backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-base font-medium text-foreground"
+                                        disabled={loading}
+                                      >
+                                        <option value="" className="bg-background">— Not linked (no stock deduction) —</option>
+                                        {inventoryOptions.map((opt) => (
+                                          <option key={opt.id} value={opt.id} className="bg-background">
+                                            {opt.factorial_code} — {opt.description}
+                                          </option>
+                                        ))}
+                                      </select>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

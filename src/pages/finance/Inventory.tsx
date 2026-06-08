@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { VendorSelect } from "@/components/finance/VendorSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ interface InventoryItem {
   description:            string;
   serial_number:          string;
   vendor:                 string;
+  vendor_id:              string | null;
   quantity_of_item:       number;
   cost_per_quantity:      number;
   total_value:            number;           // GENERATED ALWAYS
@@ -69,6 +71,7 @@ const makeEmptyForm = (): FormData => ({
   description:       "",
   serial_number:     "",
   vendor:            "",
+  vendor_id:         null,
   quantity_of_item:  0,
   cost_per_quantity: 0,
   quantity_used:     0,
@@ -161,16 +164,19 @@ function ItemModal({
   onSave,
   onClose,
   loading,
+  linkedConsumption,
 }: {
   initial: FormData & { id?: number };
   onSave: (d: Partial<FormData>) => void;
   onClose: () => void;
   loading: boolean;
+  linkedConsumption?: { total_used: number; project_count: number } | null;
 }) {
   const [form, setForm] = useState<FormData>({ ...initial });
   const isEdit = Boolean(initial.id);
   const set = <K extends keyof FormData>(k: K, v: FormData[K]) => setForm(p => ({ ...p, [k]: v }));
 
+  const isAutoUsed = Boolean(linkedConsumption && linkedConsumption.project_count > 0);
   const qtyUsed = form.quantity_used ?? 0;
   const liveTotal          = form.quantity_of_item * form.cost_per_quantity;
   const liveUsedValue      = qtyUsed * form.cost_per_quantity;
@@ -239,14 +245,13 @@ function ItemModal({
             </Field>
           </div>
 
-          <Field label="Vendor">
-            <input
-              value={form.vendor ?? ""}
-              onChange={e => set("vendor", e.target.value)}
-              placeholder="e.g. Bamburi / Eastmatt"
-              className={inputCls}
-            />
-          </Field>
+          <VendorSelect
+            value={form.vendor_id ?? null}
+            onChange={(v) => set("vendor_id", v || null)}
+            onSelect={(c) => set("vendor", c?.name ?? "")}
+            label="Vendor"
+            hint="Select from the companies master list"
+          />
 
           <Field label="Usage / Category *">
             <div className="relative">
@@ -305,16 +310,25 @@ function ItemModal({
             />
           </Field>
 
-          <Field label="Quantity Used">
-            <input
-              type="number"
-              step="0.0001"
-              min="0"
-              max={form.quantity_of_item}
-              value={qtyUsed === 0 ? (qtyUsed === "" ? "" : "0") : qtyUsed || ""}
-              onChange={e => set("quantity_used", e.target.value === "" ? "" : Math.min(parseFloat(e.target.value), form.quantity_of_item))}
-              className={inputCls}
-            />
+          <Field label={isAutoUsed ? "Quantity Used (auto)" : "Quantity Used"}>
+            {isAutoUsed ? (
+              <div className={inputCls + " flex items-center justify-between bg-white/3 cursor-not-allowed"}>
+                <span className="font-mono tabular-nums text-foreground">{fmtQty(qtyUsed)}</span>
+                <span className="text-[9px] uppercase tracking-wider text-emerald-400/70">
+                  {linkedConsumption!.project_count} project{linkedConsumption!.project_count !== 1 ? "s" : ""}
+                </span>
+              </div>
+            ) : (
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                max={form.quantity_of_item}
+                value={qtyUsed === 0 ? (qtyUsed === "" ? "" : "0") : qtyUsed || ""}
+                onChange={e => set("quantity_used", e.target.value === "" ? "" : Math.min(parseFloat(e.target.value), form.quantity_of_item))}
+                className={inputCls}
+              />
+            )}
           </Field>
 
           <div className="col-span-2 sm:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
@@ -363,7 +377,17 @@ function ItemModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(form)}
+            onClick={() => {
+              // When usage is auto-synced from project consumption, never write
+              // quantity_used back — the DB trigger is its source of truth.
+              if (isAutoUsed) {
+                const payload = { ...form };
+                delete payload.quantity_used;
+                onSave(payload);
+              } else {
+                onSave(form);
+              }
+            }}
             disabled={loading}
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
@@ -379,8 +403,11 @@ function ItemModal({
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
+interface Consumption { total_used: number; project_count: number }
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [consumption, setConsumption] = useState<Record<number, Consumption>>({});
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
   const [filterUsage, setFilterUsage] = useState<string>("All");
@@ -401,6 +428,15 @@ export default function InventoryPage() {
       setItems(data);
       const usages = [...new Set(data.map(i => i.usage || "Other"))];
       setExpanded(Object.fromEntries(usages.map(u => [u, true])));
+      // Pull per-item consumption rolled up from project material tracking
+      const { data: cons } = await supabase
+        .from("vw_inventory_consumption")
+        .select("inventory_id,total_used,project_count");
+      const map: Record<number, Consumption> = {};
+      (cons ?? []).forEach((c: { inventory_id: number; total_used: number; project_count: number }) => {
+        map[c.inventory_id] = { total_used: Number(c.total_used) || 0, project_count: Number(c.project_count) || 0 };
+      });
+      setConsumption(map);
     } catch (e: unknown) {
       push(e instanceof Error ? e.message : "Failed to load inventory.", "error");
     } finally {
@@ -558,6 +594,7 @@ export default function InventoryPage() {
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
+            linkedConsumption={consumption[editing.id] ?? null}
           />
         )}
         {deleting && (
@@ -772,7 +809,15 @@ export default function InventoryPage() {
                                           {fmtQty(item.quantity_of_item ?? 0)}
                                         </td>
                                         <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-amber-300">
-                                          {fmtQty(qtyUsed)}
+                                          <span className="inline-flex items-center gap-1.5">
+                                            {fmtQty(qtyUsed)}
+                                            {consumption[item.id]?.project_count > 0 && (
+                                              <span title={`Auto-synced from ${consumption[item.id].project_count} project(s)`}
+                                                className="text-[8px] uppercase tracking-wider px-1 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80">
+                                                auto
+                                              </span>
+                                            )}
+                                          </span>
                                         </td>
                                         <td className="px-4 py-3.5 whitespace-nowrap tabular-nums font-mono text-sky-300">
                                           {fmtQty(qtyRem)}

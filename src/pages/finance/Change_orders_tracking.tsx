@@ -157,17 +157,31 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
 
-function EntryModal({ initial, onSave, onClose, loading }: {
+function EntryModal({ initial, onSave, onClose, loading, baseBudget, currency }: {
   initial: COFormData & { id?: number };
   onSave:  (d: COFormData) => void;
   onClose: () => void;
   loading: boolean;
+  baseBudget: number;   // project revised budget BEFORE this change order
+  currency:   string;
 }) {
   const [form, setForm] = useState<COFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
 
   const setField = (k: keyof COFormData, v: unknown) =>
     setForm((prev) => ({ ...prev, [k]: v } as COFormData));
+
+  // Budgets are derived, not typed:
+  //   initial_budget = project budget before this CO (original + already-approved COs)
+  //   new_budget     = initial_budget + this CO's added cost
+  const addedCostNum = Number(form.added_cost) || 0;
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      initial_budget: baseBudget,
+      new_budget: baseBudget + (Number(prev.added_cost) || 0),
+    }));
+  }, [baseBudget, addedCostNum]);
 
   const budgetDelta = form.new_budget - form.initial_budget;
 
@@ -246,13 +260,19 @@ function EntryModal({ initial, onSave, onClose, loading }: {
             <input type="date" value={form.new_timeline ?? ""}
               onChange={(e) => setField("new_timeline", e.target.value || null)} className={inputCls} />
           </Field>
-          <Field label="Initial Budget (KES) *">
-            <input type="number" step="0.01" min="0" value={form.initial_budget === 0 ? (form.initial_budget === "" ? "" : "0") : form.initial_budget || ""}
-              onChange={e => setField("initial_budget", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
+          <Field label="Initial Budget (auto — from project)">
+            <div className={inputCls + " flex items-center justify-between bg-white/3 cursor-not-allowed"}>
+              <span className="font-mono tabular-nums text-foreground">{fmt(form.initial_budget, currency)}</span>
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60">original + approved COs</span>
+            </div>
           </Field>
-          <Field label="New Budget (KES) *">
-            <input type="number" step="0.01" min="0" value={form.new_budget === 0 ? (form.new_budget === "" ? "" : "0") : form.new_budget || ""}
-              onChange={e => setField("new_budget", e.target.value === "" ? "" : parseFloat(e.target.value))} className={inputCls} />
+          <Field label="New Budget (auto = initial + added cost)">
+            <div className={inputCls + " flex items-center justify-between bg-white/3 cursor-not-allowed"}>
+              <span className="font-mono tabular-nums font-semibold text-foreground">{fmt(form.new_budget, currency)}</span>
+              <span className={`text-[9px] uppercase tracking-wider ${form.approval === "Approved" ? "text-emerald-400/70" : "text-yellow-400/70"}`}>
+                {form.approval === "Approved" ? "applied" : "on approval"}
+              </span>
+            </div>
           </Field>
 
           {/* Live budget impact preview */}
@@ -713,6 +733,18 @@ function EntriesView({ project, canEdit, onBack }: {
   const approvedCount   = entries.filter((e) => e.approval === "Approved").length;
   const approvedPct     = entries.length > 0 ? Math.round((approvedCount / entries.length) * 100) : 0;
 
+  // ── Project budget (original never mutated; revised = original + approved COs) ──
+  const originalBudget   = Number(project.budget_numeric) || 0;
+  const approvedExcl     = (excludeId?: number) =>
+    entries
+      .filter((e) => e.approval === "Approved" && e.id !== excludeId)
+      .reduce((s, e) => s + Number(e.added_cost), 0);
+  const approvedChanges  = approvedExcl();
+  const pendingChanges   = entries
+    .filter((e) => e.approval !== "Approved")
+    .reduce((s, e) => s + Number(e.added_cost), 0);
+  const revisedBudget    = originalBudget + approvedChanges;
+
   const status = project.status ?? "planning";
 
   return (
@@ -738,11 +770,13 @@ function EntriesView({ project, canEdit, onBack }: {
       <AnimatePresence>
         {modal === "create" && (
           <EntryModal initial={makeEmptyForm(project.id)} onSave={handleCreate}
-            onClose={() => setModal(null)} loading={saving} />
+            onClose={() => setModal(null)} loading={saving}
+            baseBudget={originalBudget + approvedExcl()} currency={currency} />
         )}
         {modal === "edit" && editing && (
           <EntryModal initial={{ ...editing }} onSave={handleUpdate}
-            onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
+            onClose={() => { setModal(null); setEditing(null); }} loading={saving}
+            baseBudget={originalBudget + approvedExcl(editing.id)} currency={currency} />
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete}
@@ -783,6 +817,32 @@ function EntriesView({ project, canEdit, onBack }: {
                 </p>
               )}
             </div>
+          </div>
+        </motion.div>
+
+        {/* Project budget summary — original → approved changes → revised */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.05 }}
+          className="mb-8 rounded-2xl border border-primary/20 bg-primary/5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-primary/15 flex items-center gap-2 flex-wrap">
+            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span className="text-[10px] font-black uppercase tracking-widest text-primary">Project Budget</span>
+            <span className="text-[9px] text-muted-foreground">revised automatically from approved change orders only</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/5">
+            {[
+              { label: "Original Budget",  value: fmt(originalBudget, currency),   color: "text-foreground",  note: "contract baseline" },
+              { label: "Approved Changes", value: `+${fmt(approvedChanges, currency)}`, color: "text-emerald-400", note: `${approvedCount} approved` },
+              { label: "Revised Budget",   value: fmt(revisedBudget, currency),    color: "text-primary",     note: "original + approved" },
+              { label: "Pending Changes",  value: `+${fmt(pendingChanges, currency)}`,  color: "text-yellow-400",  note: "awaiting approval" },
+            ].map((c) => (
+              <div key={c.label} className="bg-[#0d0d0d]/40 px-4 py-3">
+                <p className="text-[9px] uppercase tracking-wider text-muted-foreground font-bold mb-1">{c.label}</p>
+                <p className={`text-base font-black tabular-nums tracking-tight ${c.color}`}>{c.value}</p>
+                <p className="text-[8px] text-muted-foreground/50 mt-0.5">{c.note}</p>
+              </div>
+            ))}
           </div>
         </motion.div>
 

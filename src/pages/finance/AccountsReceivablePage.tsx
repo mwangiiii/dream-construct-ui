@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── MIGRATION (run once in Supabase SQL Editor) ──────────────────────────────
 //
@@ -88,6 +89,21 @@ interface Project {
   site_country: string | null;
   expected_completion_date: string | null;
   created_at: string;
+  client_name: string | null;
+}
+
+// Raw shape returned by the projects query (client is an embedded profile)
+interface ProjectRow extends Omit<Project, "client_name"> {
+  client?: { full_name: string | null; company_name: string | null } | null;
+}
+
+// Project invoice (for auto-associating AR billings)
+interface ProjectInvoice {
+  id: string;
+  invoice_number: string;
+  client_company_name: string | null;
+  total: number;
+  invoice_date: string | null;
 }
 
 type ARStatus =
@@ -249,10 +265,23 @@ const api = {
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
-      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at,client:profiles!client_id(full_name,company_name)")
       .order("created_at", { ascending: false });
     if (error) throwSb(error, "projects");
-    return (data ?? []) as Project[];
+    return ((data ?? []) as ProjectRow[]).map(p => ({
+      ...p,
+      client_name: p.client?.company_name || p.client?.full_name || null,
+    }));
+  },
+
+  async invoicesByProject(projectId: string): Promise<ProjectInvoice[]> {
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("id,invoice_number,client_company_name,total,invoice_date")
+      .eq("project_id", projectId)
+      .order("invoice_date", { ascending: false });
+    if (error) throwSb(error, "invoicesByProject");
+    return (data ?? []) as ProjectInvoice[];
   },
 
   async list(projectId: string): Promise<AccountsReceivable[]> {
@@ -449,9 +478,50 @@ function ARModal({
   const [form, setForm] = useState<ARFormData>(deriveAR({ ...initial }));
   const isEdit = Boolean(initial.id);
   const [tab, setTab] = useState<"billing" | "receipt" | "notes">("billing");
+  const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
 
   const set = <K extends keyof ARFormData>(k: K, v: ARFormData[K]) =>
     setForm(p => deriveAR({ ...p, [k]: v }));
+
+  const clientForProject = (projectId: string | null): string | null =>
+    projects.find(p => p.id === projectId)?.client_name ?? null;
+
+  // Selecting a project auto-fills the client (only when client field is blank
+  // or still matches the previously-linked project's client — never clobbers
+  // a manually typed client).
+  const handleProjectChange = (projectId: string | null) => {
+    setForm(p => {
+      const prevClient = clientForProject(p.project_id);
+      const nextClient = clientForProject(projectId);
+      const keepClient = p.client && p.client !== prevClient ? p.client : (nextClient ?? p.client);
+      return deriveAR({ ...p, project_id: projectId, client: keepClient });
+    });
+  };
+
+  // Load this project's invoices so a billing can be associated to one
+  useEffect(() => {
+    if (!form.project_id) { setInvoices([]); return; }
+    let cancelled = false;
+    setInvoicesLoading(true);
+    api.invoicesByProject(form.project_id)
+      .then(rows => { if (!cancelled) setInvoices(rows); })
+      .catch(() => { if (!cancelled) setInvoices([]); })
+      .finally(() => { if (!cancelled) setInvoicesLoading(false); });
+    return () => { cancelled = true; };
+  }, [form.project_id]);
+
+  // Picking an invoice auto-fills billing number, amount billed and client
+  const handleInvoiceSelect = (invoiceId: string) => {
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+    setForm(p => deriveAR({
+      ...p,
+      billing_number: inv.invoice_number,
+      amount_billed:  Number(inv.total) || p.amount_billed,
+      client:         inv.client_company_name || p.client,
+    }));
+  };
 
   const balance      = (Number(form.amount_billed) || 0) - (Number(form.amount_received) || 0);
   const retainingAmt = ((Number(form.amount_billed) || 0) * (Number(form.retaining_percent) || 0)) / 100;
@@ -524,7 +594,7 @@ function ARModal({
                     <div className="relative">
                       <select
                         value={form.project_id ?? ""}
-                        onChange={e => set("project_id", e.target.value || null)}
+                        onChange={e => handleProjectChange(e.target.value || null)}
                         className={selectCls}
                       >
                         <option value="">— No project (firm-wide / standalone) —</option>
@@ -541,6 +611,40 @@ function ARModal({
                         Entry will appear only in the consolidated firm-wide AR register.
                       </p>
                     )}
+                  </Field>
+                </div>
+              )}
+
+              {/* Project invoice picker — auto-associates an existing invoice */}
+              {form.project_id && (
+                <div className="col-span-2">
+                  <Field
+                    label="Associate Project Invoice"
+                    hint="Auto-fills client, invoice number and amount billed from a project invoice"
+                  >
+                    <div className="relative">
+                      <select
+                        value=""
+                        onChange={e => e.target.value && handleInvoiceSelect(e.target.value)}
+                        disabled={invoicesLoading || invoices.length === 0}
+                        className={selectCls + ((invoicesLoading || invoices.length === 0) ? " opacity-50 cursor-not-allowed" : "")}
+                      >
+                        <option value="">
+                          {invoicesLoading
+                            ? "Loading invoices…"
+                            : invoices.length === 0
+                              ? "— No invoices for this project —"
+                              : "— Select an invoice to auto-fill —"}
+                        </option>
+                        {invoices.map(inv => (
+                          <option key={inv.id} value={inv.id}>
+                            {inv.invoice_number} — {fmtKES(Number(inv.total))}
+                            {inv.client_company_name ? ` · ${inv.client_company_name}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <SelectChevron />
+                    </div>
                   </Field>
                 </div>
               )}
@@ -631,11 +735,14 @@ function ARModal({
                   className={inputCls}
                 />
               </Field>
-              <Field label="Account Received" hint="Chart of accounts code for this receipt">
-                <input value={form.account_received ?? ""}
-                  onChange={e => set("account_received", e.target.value || null)}
-                  placeholder="e.g. 1002" className={inputCls} />
-              </Field>
+              <COAAccountSelect
+                value={form.account_received ?? null}
+                onChange={v => set("account_received", v || null)}
+                filter="bank"
+                valueField="code"
+                label="Account Received"
+                hint=""
+              />
 
               {/* Receipt summary */}
               <div className="col-span-2 grid grid-cols-3 gap-3 mt-2">
@@ -947,7 +1054,7 @@ function ARTable({
                 <tbody>
                   {filtered.map((row, ri) => {
                     const ss  = STATUS_STYLE[row.status];
-                    const bal = Number(row.balance) ?? (Number(row.amount_billed) - Number(row.amount_received));
+                    const bal = Number(row.balance ?? (Number(row.amount_billed) - Number(row.amount_received)));
                     return (
                       <motion.tr key={row.id}
                         initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
@@ -1052,7 +1159,7 @@ function ARTable({
                       {fmtKES(filtered.reduce((a, r) => a + Number(r.amount_received), 0))}
                     </td>
                     <td className="px-4 py-2.5 font-mono text-xs font-bold text-rose-400">
-                      {fmtKES(filtered.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0))}
+                      {fmtKES(filtered.reduce((a, r) => a + (Number(r.balance ?? (Number(r.amount_billed) - Number(r.amount_received)))), 0))}
                     </td>
                     <td /><td />
                     <td className="px-4 py-2.5 font-mono text-xs font-bold text-amber-400">
@@ -1164,7 +1271,7 @@ function StatusPills({
 function OverdueAlert({ rows }: { rows: AccountsReceivable[] }) {
   const overdueRows = rows.filter(r => r.status === "overdue");
   if (!overdueRows.length) return null;
-  const overdueBalance = overdueRows.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0);
+  const overdueBalance = overdueRows.reduce((a, r) => a + (Number(r.balance ?? (Number(r.amount_billed) - Number(r.amount_received)))), 0);
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: 0.14 }}
@@ -1282,7 +1389,7 @@ function ProjectARView({ project, canEdit, onBack }: {
   const totals = useMemo(() => ({
     billed:   rows.reduce((a, r) => a + Number(r.amount_billed), 0),
     received: rows.reduce((a, r) => a + Number(r.amount_received), 0),
-    balance:  rows.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0),
+    balance:  rows.reduce((a, r) => a + (Number(r.balance ?? (Number(r.amount_billed) - Number(r.amount_received)))), 0),
     retaining:rows.reduce((a, r) => a + (Number(r.retaining_amount) || 0), 0),
     overdue:  rows.filter(r => r.status === "overdue").length,
   }), [rows]);
@@ -1297,7 +1404,7 @@ function ProjectARView({ project, canEdit, onBack }: {
       <AnimatePresence>
         {modal === "create" && (
           <ARModal
-            initial={makeEmpty(project.id)}
+            initial={{ ...makeEmpty(project.id), client: project.client_name ?? "" }}
             onSave={form =>
               handleCreate(
                 { ...form, project_id: project.id },
@@ -1307,6 +1414,7 @@ function ProjectARView({ project, canEdit, onBack }: {
             }
             onClose={() => setModal(null)}
             loading={saving}
+            projects={[project]}
             showProjectSelector={false}
           />
         )}
@@ -1323,6 +1431,7 @@ function ProjectARView({ project, canEdit, onBack }: {
             }
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
+            projects={[project]}
             showProjectSelector={false}
           />
         )}
@@ -1495,7 +1604,7 @@ function GlobalARView({ canEdit, projects }: {
   const totals = useMemo(() => ({
     billed:   displayRows.reduce((a, r) => a + Number(r.amount_billed), 0),
     received: displayRows.reduce((a, r) => a + Number(r.amount_received), 0),
-    balance:  displayRows.reduce((a, r) => a + (Number(r.balance) ?? (Number(r.amount_billed) - Number(r.amount_received))), 0),
+    balance:  displayRows.reduce((a, r) => a + (Number(r.balance ?? (Number(r.amount_billed) - Number(r.amount_received)))), 0),
     retaining:displayRows.reduce((a, r) => a + (Number(r.retaining_amount) || 0), 0),
     overdue:  displayRows.filter(r => r.status === "overdue").length,
   }), [displayRows]);
@@ -1875,10 +1984,18 @@ export default function AccountsReceivablePage({ projectId, canEdit = true }: Pr
     if (!projectId) return;
     supabase
       .from("projects")
-      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at,client:profiles!client_id(full_name,company_name)")
       .eq("id", projectId)
       .single()
-      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
+      .then(({ data }) => {
+        if (data) {
+          const row = data as ProjectRow;
+          setSelectedProject({
+            ...row,
+            client_name: row.client?.company_name || row.client?.full_name || null,
+          });
+        }
+      });
   }, [projectId]);
 
   return (

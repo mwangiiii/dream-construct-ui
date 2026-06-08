@@ -32,3 +32,12 @@ sign-up.mp4
 videos/
 
 .env
+
+supabase/.temp/gotrue-version
+supabase/.temp/linked-project.json
+supabase/.temp/pooler-url
+supabase/.temp/postgres-version
+supabase/.temp/project-ref
+supabase/.temp/rest-version
+supabase/.temp/storage-migration
+ .supabase/.temp/storage-version

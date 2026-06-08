@@ -1,7 +1,7 @@
 -- Junction table: which user has which role
 create table user_roles (
   user_id     uuid references auth.users not null,
-  role_id   app_role not null references roles(role_id) on delete cascade,
+  role_id     smallint not null references roles(role_id) on delete cascade,
   assigned_at timestamptz default now() not null,
   assigned_by uuid references auth.users, -- who granted the role (nullable)
   primary key (user_id, role_id)

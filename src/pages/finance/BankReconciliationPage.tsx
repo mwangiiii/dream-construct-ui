@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -568,14 +569,15 @@ function EntryModal({
           )}
 
           {/* Bank Code */}
-          <Field label="Bank Code *">
-            <input
-              value={form.bank_code}
-              onChange={(e) => set("bank_code", e.target.value)}
-              placeholder="e.g. BANK-001"
-              className={inputCls}
-            />
-          </Field>
+          <COAAccountSelect
+            value={form.bank_code}
+            onChange={(v) => set("bank_code", v)}
+            filter="bank"
+            valueField="code"
+            label="Bank Code *"
+            hint="Select a bank account from the Chart of Accounts"
+            required
+          />
 
           {/* Transaction Type */}
           <Field label="Transaction Type *">

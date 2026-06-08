@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── DATABASE MIGRATION NOTE ──────────────────────────────────────────────────
 // To support global (unlinked) entries, run this once in your Supabase SQL editor:
@@ -1086,16 +1087,14 @@ function EntryModal({
               />
             </Field>
 
-            <Field label="Account Code">
-              <input
-                value={form.account_code ?? ""}
-                onChange={(e) =>
-                  set("account_code", e.target.value || null)
-                }
-                placeholder="e.g. 1002"
-                className={inputCls}
-              />
-            </Field>
+            <COAAccountSelect
+              value={form.account_code ?? null}
+              onChange={(v) => set("account_code", v || null)}
+              filter="all"
+              valueField="code"
+              label="Account Code"
+              hint="Select an account from the Chart of Accounts"
+            />
 
             <Field label="Reference No.">
               <input

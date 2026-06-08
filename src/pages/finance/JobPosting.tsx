@@ -4,14 +4,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { createClient } from "@supabase/supabase-js";
-
-// ─── SUPABASE ─────────────────────────────────────────────────────────────────
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string
-);
+import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -343,10 +337,15 @@ function CostingModal({
           </div>
 
           {/* Account Code */}
-          <Field label="Account Code *">
-            <input value={form.account_code} onChange={e => set("account_code", e.target.value)}
-              placeholder="e.g. 2001" className={inputCls} />
-          </Field>
+          <COAAccountSelect
+            value={form.account_code || null}
+            onChange={(v) => set("account_code", v)}
+            filter="all"
+            valueField="code"
+            label="Account Code *"
+            hint="Select an account from the Chart of Accounts"
+            required
+          />
 
           {/* eTIMS Code */}
           <Field label="eTIMS Code">

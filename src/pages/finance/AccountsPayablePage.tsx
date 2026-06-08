@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
+import { VendorSelect, type Vendor } from "@/components/finance/VendorSelect";
 
 // ─── ACTUAL SCHEMA (already migrated) ────────────────────────────────────────
 //
@@ -39,6 +41,7 @@ type APStatus = "open" | "partial" | "paid" | "overdue";
 interface AccountsPayable {
   id: string;                      // UUID
   project_id: string;              // NOT NULL — always required
+  vendor_id: string | null;        // FK → vendors.id
   vendor_name: string;
   invoice_number: string;
   etims_code: string;              // NOT NULL
@@ -76,6 +79,7 @@ const AP_STATUSES: APStatus[] = ["open", "partial", "paid", "overdue"];
 function buildDBPayload(form: APFormData): Record<string, unknown> {
   return {
     project_id:             form.project_id,
+    vendor_id:              form.vendor_id   || null,
     vendor_name:            form.vendor_name,
     invoice_number:         form.invoice_number,
     etims_code:             form.etims_code,
@@ -135,6 +139,7 @@ function deriveAP(f: APFormData): APFormData {
 
 const makeEmpty = (projectId: string): APFormData => ({
   project_id:             projectId,
+  vendor_id:              null,
   vendor_name:            "",
   invoice_number:         "",
   etims_code:             "",
@@ -382,6 +387,12 @@ function ToastStack({ toasts }: { toasts: { id: number; msg: string; type: "succ
 }
 
 // ─── AP MODAL ─────────────────────────────────────────────────────────────────
+interface ProjectBudget {
+  budget: number;
+  committed: number;
+  remaining: number;
+}
+
 function APModal({
   initial, onSave, onClose, loading, projects = [],
 }: {
@@ -394,9 +405,50 @@ function APModal({
   const [form, setForm] = useState<APFormData>(deriveAP({ ...initial }));
   const isEdit = Boolean(initial.id);
   const [tab, setTab] = useState<"invoice" | "payment" | "notes">("invoice");
+  const [projectBudget, setProjectBudget] = useState<ProjectBudget | null>(null);
+  const [budgetLoading, setBudgetLoading] = useState(false);
 
   const set = <K extends keyof APFormData>(k: K, v: APFormData[K]) =>
     setForm(p => deriveAP({ ...p, [k]: v }));
+
+  // Fetch budget context whenever project changes
+  useEffect(() => {
+    if (!form.project_id) { setProjectBudget(null); return; }
+    const proj = projects.find(p => p.id === form.project_id);
+    if (!proj) return;
+    setBudgetLoading(true);
+    supabase
+      .from("accounts_payable")
+      .select("total_amount")
+      .eq("project_id", form.project_id)
+      .then(({ data }) => {
+        const committed = (data ?? []).reduce((s, r) => s + Number(r.total_amount), 0);
+        const budget    = Number(proj.budget_numeric) || 0;
+        setProjectBudget({ budget, committed, remaining: budget - committed });
+        setBudgetLoading(false);
+      });
+  }, [form.project_id, projects]);
+
+  const handleProjectChange = (projectId: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    setForm(p => deriveAP({
+      ...p,
+      project_id: projectId,
+      // Auto-fill due_date from expected_completion_date only when not already set
+      due_date: (!p.due_date && proj?.expected_completion_date)
+        ? proj.expected_completion_date
+        : p.due_date,
+    }));
+  };
+
+  const handleVendorSelect = (vendor: Vendor | null) => {
+    if (!vendor) return;
+    setForm(p => deriveAP({
+      ...p,
+      vendor_id:   vendor.id,
+      vendor_name: vendor.name,
+    }));
+  };
 
   const balance      = (Number(form.total_amount) || 0) - (Number(form.paid_amount) || 0);
   const retainingAmt = ((Number(form.total_amount) || 0) * (Number(form.retaining_percent) || 0)) / 100;
@@ -454,13 +506,13 @@ function APModal({
           {tab === "invoice" && (
             <div className="grid grid-cols-2 gap-4">
 
-              {/* Project selector — always shown (AP always requires project) */}
+              {/* Project selector */}
               <div className="col-span-2">
                 <Field label="Project *" hint="All AP records must be linked to a project">
                   <div className="relative">
                     <select
                       value={form.project_id ?? ""}
-                      onChange={e => set("project_id", e.target.value)}
+                      onChange={e => handleProjectChange(e.target.value)}
                       className={selectCls}
                     >
                       <option value="">— Select a project —</option>
@@ -475,7 +527,45 @@ function APModal({
                 </Field>
               </div>
 
-              <Field label="Vendor Name *">
+              {/* Project budget context — appears after project is selected */}
+              {form.project_id && (
+                <div className="col-span-2">
+                  {budgetLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground/60 py-1">
+                      <span className="w-3 h-3 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                      Loading budget…
+                    </div>
+                  ) : projectBudget && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Project Budget",  value: fmtKES(projectBudget.budget),    color: "text-foreground"   },
+                        { label: "AP Committed",    value: fmtKES(projectBudget.committed), color: "text-amber-400"    },
+                        { label: "Budget Remaining",value: fmtKES(projectBudget.remaining), color: projectBudget.remaining < 0 ? "text-rose-400" : "text-emerald-400" },
+                      ].map(c => (
+                        <div key={c.label} className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+                          <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 mb-0.5">{c.label}</div>
+                          <div className={`text-xs font-bold font-mono tabular-nums ${c.color}`}>{c.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Vendor selector */}
+              <div className="col-span-2">
+                <VendorSelect
+                  value={form.vendor_id ?? null}
+                  onChange={v => set("vendor_id", v || null)}
+                  onSelect={handleVendorSelect}
+                  label="Vendor *"
+                  hint="Select from the companies master list"
+                  required
+                />
+              </div>
+
+              {/* Vendor name — auto-filled, still editable */}
+              <Field label="Vendor Name *" hint="Auto-filled from vendor selection, editable if needed">
                 <input value={form.vendor_name}
                   onChange={e => set("vendor_name", e.target.value)}
                   placeholder="e.g. ABC Supplies Ltd." className={inputCls} />
@@ -545,11 +635,15 @@ function APModal({
                   className={inputCls + " [color-scheme:dark]"} />
               </Field>
               <div className="col-span-2">
-                <Field label="Receiving Account Code *" hint="Chart of accounts code for this payment">
-                  <input value={form.receiving_account_code}
-                    onChange={e => set("receiving_account_code", e.target.value)}
-                    placeholder="e.g. 1001" className={inputCls} />
-                </Field>
+                <COAAccountSelect
+                  value={form.receiving_account_code}
+                  onChange={v => set("receiving_account_code", v)}
+                  filter="bank"
+                  valueField="code"
+                  label="Receiving Account Code *"
+                  hint="Select a bank account for this payment"
+                  required
+                />
               </div>
 
               {/* Payment summary */}
@@ -1227,6 +1321,7 @@ function ProjectAPView({ project, canEdit, onBack }: {
             initial={{
               id:                     editing.id,
               project_id:             editing.project_id,
+              vendor_id:              editing.vendor_id ?? null,
               vendor_name:            editing.vendor_name,
               invoice_number:         editing.invoice_number,
               etims_code:             editing.etims_code,
@@ -1468,6 +1563,7 @@ function GlobalAPView({ canEdit, projects }: {
             initial={{
               id:                     editing.id,
               project_id:             editing.project_id,
+              vendor_id:              editing.vendor_id ?? null,
               vendor_name:            editing.vendor_name,
               invoice_number:         editing.invoice_number,
               etims_code:             editing.etims_code,
