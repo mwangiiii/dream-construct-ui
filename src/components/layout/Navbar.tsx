@@ -29,102 +29,39 @@ const Navbar = () => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [location.pathname]);
 
-  // FIXED: Properly detect auth state on mount + all events
+  // Single source of truth: onAuthStateChange handles INITIAL_SESSION + all subsequent events
   useEffect(() => {
     let mounted = true;
-    let isAuthenticating = false; // Prevent concurrent auth calls
+    let resolving = false;
 
-    // Initial load: check for existing session immediately
-    const initAuth = async () => {
-      console.log("[Navbar] Starting auth initialization...");
-      isAuthenticating = true;
-      
+    const resolveUser = async (session: { user: { id: string } } | null) => {
+      if (resolving) return;
+      resolving = true;
       try {
-        // First check if there's a session at all
-        const { data: { session } } = await supabase.auth.getSession();
-        console.log("[Navbar] Session check:", !!session);
-        
-        if (!mounted) return;
-
         if (session?.user) {
-          // User is logged in, fetch full profile
-          console.log("[Navbar] Fetching user profile...");
           const user = await getCurrentUser();
-          console.log("[Navbar] User fetched:", !!user);
-          if (mounted) {
-            setCurrentUser(user);
-          }
+          if (mounted) setCurrentUser(user);
         } else {
-          // No session, user is logged out
-          console.log("[Navbar] No session found");
-          if (mounted) {
-            setCurrentUser(null);
-          }
+          if (mounted) setCurrentUser(null);
         }
-      } catch (error) {
-        console.error("[Navbar] Auth init error:", error);
-        if (mounted) {
-          setCurrentUser(null);
-        }
+      } catch {
+        if (mounted) setCurrentUser(null);
       } finally {
-        if (mounted) {
-          console.log("[Navbar] Setting isLoading to false");
-          setIsLoading(false);
-          isAuthenticating = false;
-        }
+        if (mounted) setIsLoading(false);
+        resolving = false;
       }
     };
 
-    // Start initialization
-    initAuth();
-
-    // Listen to auth state changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("[Navbar] Auth event:", event, "Has session:", !!session);
-
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-
-      // Ignore INITIAL_SESSION - we handle it in initAuth
-      if (event === "INITIAL_SESSION") {
-        console.log("[Navbar] Ignoring INITIAL_SESSION - already handled");
-        return;
-      }
-
-      // Prevent concurrent authentication calls
-      if (isAuthenticating) {
-        console.log("[Navbar] Already authenticating, skipping this event");
-        return;
-      }
-
-      // Handle sign in / token refresh
-      if (session?.user && (
+      if (
+        event === "INITIAL_SESSION" ||
         event === "SIGNED_IN" ||
         event === "TOKEN_REFRESHED" ||
         event === "USER_UPDATED"
-      )) {
-        isAuthenticating = true;
-        try {
-          console.log("[Navbar] Fetching user on auth event:", event);
-          const user = await getCurrentUser();
-          console.log("[Navbar] User fetched on auth event:", !!user);
-          
-          if (mounted && user) {
-            setCurrentUser(user);
-            setIsLoading(false);
-          }
-        } catch (error) {
-          console.error("[Navbar] Error fetching user on auth change:", error);
-          if (mounted) {
-            setCurrentUser(null);
-            setIsLoading(false);
-          }
-        } finally {
-          isAuthenticating = false;
-        }
-      } 
-      // Handle sign out
-      else if (event === "SIGNED_OUT") {
-        console.log("[Navbar] Signing out");
+      ) {
+        resolveUser(session);
+      } else if (event === "SIGNED_OUT") {
         if (mounted) {
           setCurrentUser(null);
           setIsLoading(false);
@@ -132,7 +69,6 @@ const Navbar = () => {
       }
     });
 
-    // Cleanup
     return () => {
       mounted = false;
       authListener.subscription.unsubscribe();

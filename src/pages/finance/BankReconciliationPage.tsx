@@ -537,7 +537,7 @@ function EntryModal({
         </div>
 
         {/* ── Body ── */}
-        <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
 
           {/* ── Linked Project — only in global modal, optional ── */}
           {showProjectSelector && (

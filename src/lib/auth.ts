@@ -105,27 +105,18 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 export async function getUserFullProfile(userId: string): Promise<AuthUser | null> {
   try {
     console.log('[auth.ts] getUserFullProfile called for:', userId);
-    
-    // Get email from auth (safe fallback)
+
     const { data: { user } } = await supabase.auth.getUser();
     const email = user?.email || '';
     console.log('[auth.ts] User email:', email);
 
-    // Fetch profile + status
+    // Fetch profile + joined status using maybeSingle to avoid 406 on missing row
     console.log('[auth.ts] Fetching profile from database...');
-    const { data: profile, error: profileError } = await supabase
+    let { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select(`
-        *,
-        user_statuses (
-          status_id,
-          status_name,
-          is_active,
-          description
-        )
-      `)
+      .select(`*, user_statuses(status_id, status_name, is_active, description)`)
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (profileError) {
       console.error('[auth.ts] Profile fetch error:', profileError);
@@ -133,32 +124,43 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
     }
 
     if (!profile) {
-      console.error('[auth.ts] No profile data returned');
-      return null;
+      // Profile row missing — auto-create from auth metadata so the user can proceed
+      console.warn('[auth.ts] No profile found, auto-creating from auth metadata...');
+      const fullName = user?.user_metadata?.full_name || email.split('@')[0] || 'Unknown';
+      const { error: insertError } = await supabase.from('profiles').insert({
+        id: userId,
+        full_name: fullName,
+        status_id: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      if (insertError) {
+        console.error('[auth.ts] Failed to auto-create profile:', insertError);
+        return null;
+      }
+      const { data: created, error: refetchError } = await supabase
+        .from('profiles')
+        .select(`*, user_statuses(status_id, status_name, is_active, description)`)
+        .eq('id', userId)
+        .maybeSingle();
+      if (refetchError || !created) {
+        console.error('[auth.ts] Profile re-fetch failed after creation');
+        return null;
+      }
+      profile = created;
     }
 
     console.log('[auth.ts] Profile fetched:', profile.full_name);
 
     // Fetch roles
-    console.log('[auth.ts] Fetching user roles...');
     const { data: userRoles, error: rolesError } = await supabase
       .from('user_roles')
-      .select(`
-        role_name,
-        assigned_at,
-        roles (
-          role_name,
-          description
-        )
-      `)
+      .select(`role_name, assigned_at, roles(role_name, description)`)
       .eq('user_id', userId);
 
     if (rolesError) {
       console.error('[auth.ts] Roles fetch error:', rolesError);
-      // Don't return null, continue with empty roles array
     }
-
-    console.log('[auth.ts] Roles fetched:', userRoles?.length || 0);
 
     const roles: UserRole[] = (userRoles || []).map((ur: any) => ({
       role_name: ur.role_name,

@@ -306,7 +306,7 @@ export const projectApi = {
           .from('profiles')
           .select('full_name')
           .eq('id', data.assigned_to)
-          .single();
+          .maybeSingle();
 
         return {
           ...data,

@@ -757,7 +757,7 @@ export default function FixedAssetEquipmentDepreciationPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-br from-background via-background to-primary/5">
 
       {/* ── Toasts ── */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
@@ -815,7 +815,7 @@ export default function FixedAssetEquipmentDepreciationPage() {
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-3 font-medium">
             Finance Module
           </p>
-          <h1 className="text-5xl md:text-7xl font-bold mb-4 leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold mb-4 leading-tight">
             Fixed Asset{" "}
             <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
               Depreciation
@@ -829,7 +829,7 @@ export default function FixedAssetEquipmentDepreciationPage() {
         {/* ── Grand summary cards ── */}
         <motion.div
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08 }}
-          className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
         >
           {[
             { label: "Total Asset Cost",    value: fmtC(grandTotals.totalCost),   full: fmt(grandTotals.totalCost),   color: "text-foreground"  },
@@ -1043,7 +1043,74 @@ export default function FixedAssetEquipmentDepreciationPage() {
                                   </div>
 
                                   {/* Table */}
-                                  <div className="overflow-x-auto">
+                                  {/* Mobile card list — no horizontal scroll */}
+                                  <div className="md:hidden divide-y divide-white/8 px-3 pb-3">
+                                    {rows.map((asset) => {
+                                      const pct = asset.cost > 0
+                                        ? Math.min(100, Math.round((Number(asset.accumulated_depreciation) / Number(asset.cost)) * 100))
+                                        : 0;
+                                      const meta = [
+                                        { label: "Location",     node: asset.location || "—" },
+                                        { label: "Salvage",      node: fmt(Number(asset.salvage_value)) },
+                                        { label: "Useful Life",  node: `${asset.useful_life_years}y` },
+                                        { label: "% Depr.",      node: `${pct}%` },
+                                        { label: "Years",        node: String(asset.years) },
+                                        { label: "Annual Depr.", node: fmt(Number(asset.annual_depreciation)) },
+                                        { label: "Tx Code",      node: asset.transaction_code || "—" },
+                                        { label: "Tx Date",      node: fmtDate(asset.transaction_date) },
+                                        { label: "Start Date",   node: fmtDate(asset.start_date) },
+                                        { label: "Last Updated", node: fmtDateTime(asset.updated_at) },
+                                      ];
+                                      return (
+                                        <div key={asset.id} className="py-4">
+                                          <div className="flex items-start justify-between gap-3 mb-3">
+                                            <div className="min-w-0">
+                                              <p className="font-mono text-sm font-semibold text-primary truncate">{asset.assets_number}</p>
+                                              <p className="text-xs text-foreground mt-0.5 truncate">{asset.name}</p>
+                                            </div>
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] shrink-0 ${METHOD_STYLE[asset.depreciation_method]}`}>
+                                              {asset.depreciation_method}
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-3 gap-2 mb-3">
+                                            {[
+                                              { l: "Cost",        v: fmt(Number(asset.cost)),                      c: "text-foreground" },
+                                              { l: "Accumulated", v: fmt(Number(asset.accumulated_depreciation)), c: "text-amber-400" },
+                                              { l: "Net Book Val",v: fmt(Number(asset.net_book_value)),           c: Number(asset.net_book_value) > 0 ? "text-emerald-400" : "text-rose-400" },
+                                            ].map(a => (
+                                              <div key={a.l} className="rounded-lg bg-white/5 border border-white/8 px-2.5 py-2">
+                                                <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">{a.l}</p>
+                                                <p className={`text-xs font-mono font-bold tabular-nums ${a.c}`}>{a.v}</p>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                                            {meta.map((m, mi) => (
+                                              <div key={mi} className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">{m.label}</span>
+                                                <span className="font-mono text-xs text-muted-foreground/90 truncate text-right">{m.node}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/8">
+                                            <button onClick={() => { setEditing(asset); setModal("edit"); }}
+                                              className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground border border-white/10 hover:bg-white/5 transition-all">
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                              Edit
+                                            </button>
+                                            <button onClick={() => setDeleting(asset)}
+                                              className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/10 transition-all">
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+
+                                  {/* Desktop table */}
+                                  <div className="hidden md:block overflow-x-auto">
                                     <table className="w-full text-sm">
                                       <thead>
                                         <tr className="border-y border-white/6"

@@ -1,20 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  Edit2, 
-  Trash2, 
-  UserCheck, 
-  UserX, 
-  Shield, 
+import {
+  Users,
+  Search,
+  Edit2,
+  Trash2,
+  UserCheck,
+  UserX,
+  Shield,
   Mail,
   Phone,
   Briefcase,
   Building2,
-  MoreVertical,
   X,
   CheckCircle2,
   AlertCircle,
@@ -22,11 +20,12 @@ import {
   UserCog,
   Clock,
   Archive,
-  ArrowRight
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/GlassCard';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface User {
   id: string;
@@ -51,41 +50,294 @@ interface FormData {
   role: string;
 }
 
+// ─── Static lookup tables (defined once, outside component) ───────────────────
+
+const STATUSES: Record<number, { name: string; color: string; icon: React.ElementType }> = {
+  1: { name: 'Active',    color: 'text-green-400 bg-green-400/10 border-green-400/30',                      icon: UserCheck },
+  2: { name: 'Inactive',  color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',                   icon: Clock },
+  3: { name: 'Suspended', color: 'text-red-400 bg-red-400/10 border-red-400/30',                            icon: UserX },
+  4: { name: 'Pending',   color: 'text-blue-400 bg-blue-400/10 border-blue-400/30',                         icon: Clock },
+  5: { name: 'Archived',  color: 'text-muted-foreground bg-muted-foreground/10 border-muted-foreground/30', icon: Archive },
+};
+
+const ROLES: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  admin:           { label: 'Admin',           color: 'text-accent',         icon: Shield },
+  manager:         { label: 'Manager',         color: 'text-primary',        icon: UserCog },
+  client:          { label: 'Client',          color: 'text-green-400',      icon: Users },
+  finance:         { label: 'Finance',         color: 'text-green-400',      icon: Users },
+  surveyor:        { label: 'Surveyor',        color: 'text-blue-400',       icon: Building2 },
+  project_manager: { label: 'Project Manager', color: 'text-yellow-400',     icon: Briefcase },
+};
+
+// ─── EditModal (hoisted — stable identity across renders) ─────────────────────
+
+interface EditModalProps {
+  selectedUser: User;
+  actionLoading: boolean;
+  onClose: () => void;
+  onSave: (userId: string, updates: Partial<FormData>) => void;
+}
+
+const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onClose, onSave }) => {
+  const [formData, setFormData] = useState<FormData>({
+    full_name:    selectedUser.full_name || '',
+    email:        selectedUser.email || '',
+    phone:        selectedUser.phone || '',
+    company_name: selectedUser.company_name || '',
+    job_title:    selectedUser.job_title || '',
+    status_id:    selectedUser.status_id || 1,
+    role:         selectedUser.user_roles?.[0]?.role_name || 'client',
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      >
+        <GlassCard className="p-8 md:p-12">
+          <div className="flex items-center justify-between mb-8">
+            <h2 className="text-3xl md:text-4xl font-bold">Edit User</h2>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Full Name</label>
+              <input
+                type="text"
+                value={formData.full_name}
+                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Email</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Phone</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Job Title</label>
+                <input
+                  type="text"
+                  value={formData.job_title}
+                  onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
+                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-muted-foreground mb-2 block">Company</label>
+              <input
+                type="text"
+                value={formData.company_name}
+                onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Status</label>
+                <select
+                  value={formData.status_id}
+                  onChange={(e) => setFormData({ ...formData, status_id: parseInt(e.target.value) })}
+                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                >
+                  {Object.entries(STATUSES).map(([id, status]) => (
+                    <option key={id} value={id}>{status.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Role</label>
+                <select
+                  value={formData.role}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                >
+                  {Object.entries(ROLES).map(([key, role]) => (
+                    <option key={key} value={key}>{role.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-6">
+              <Button
+                onClick={onClose}
+                variant="outline"
+                className="flex-1 h-14 text-lg rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => onSave(selectedUser.id, formData)}
+                disabled={actionLoading}
+                className="flex-1 h-14 text-lg rounded-xl bg-primary hover:bg-primary/90"
+              >
+                {actionLoading ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+// ─── DeleteModal (hoisted — stable identity across renders) ───────────────────
+
+interface DeleteModalProps {
+  selectedUser: User;
+  actionLoading: boolean;
+  onClose: () => void;
+  onSoftDelete: (statusId?: number) => void;
+  onRestore: () => void;
+  onHardDelete: () => void;
+}
+
+const DeleteModal: React.FC<DeleteModalProps> = ({
+  selectedUser,
+  actionLoading,
+  onClose,
+  onSoftDelete,
+  onRestore,
+  onHardDelete,
+}) => {
+  const isSuspended = selectedUser.status_id === 3;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md"
+      >
+        <GlassCard className="p-8 border-destructive/30">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="w-8 h-8 text-destructive" />
+            </div>
+            <h2 className="text-2xl md:text-3xl font-bold mb-4">
+              {isSuspended ? 'Restore or Delete User' : 'Suspend or Delete User'}
+            </h2>
+            <p className="text-muted-foreground mb-8">
+              {isSuspended ? (
+                <>
+                  This user is currently <strong>suspended</strong>. You can restore them to active,
+                  or permanently delete.
+                  <br />What would you like to do?
+                </>
+              ) : (
+                <>
+                  Are you sure you want to <strong>suspend</strong> (soft delete){' '}
+                  <span className="text-foreground">{selectedUser.full_name}</span>?
+                  <br />You can restore them later, or permanently delete.
+                </>
+              )}
+            </p>
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={onClose}
+                variant="outline"
+                className="h-14 text-lg rounded-xl"
+                disabled={actionLoading}
+              >
+                Cancel
+              </Button>
+
+              {!isSuspended && (
+                <Button
+                  onClick={() => onSoftDelete(3)}
+                  disabled={actionLoading}
+                  className="h-14 text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
+                >
+                  {actionLoading ? 'Suspending...' : 'Suspend (Soft Delete)'}
+                </Button>
+              )}
+
+              {isSuspended && (
+                <Button
+                  onClick={onRestore}
+                  disabled={actionLoading}
+                  className="h-14 text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
+                >
+                  {actionLoading ? 'Restoring...' : 'Restore to Active'}
+                </Button>
+              )}
+
+              <Button
+                onClick={onHardDelete}
+                disabled={actionLoading}
+                className="h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
+              >
+                {actionLoading ? 'Deleting...' : 'Delete Permanently'}
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
 const UserManagement: React.FC = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
 
-  const [users, setUsers] = useState<User[]>([]);
+  const [users,         setUsers]         = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [roleFilter, setRoleFilter] = useState('all');
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [loading,       setLoading]       = useState(true);
+  const [searchTerm,    setSearchTerm]    = useState('');
+  const [statusFilter,  setStatusFilter]  = useState('all');
+  const [roleFilter,    setRoleFilter]    = useState('all');
+  const [selectedUser,  setSelectedUser]  = useState<User | null>(null);
+  const [showEditModal,   setShowEditModal]   = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [notification,  setNotification]  = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [session, setSession] = useState<any>(null);
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  const [hasMounted, setHasMounted] = useState(false); // Track first mount
-
-  const statuses = {
-    1: { name: 'Active', color: 'text-green-400 bg-green-400/10 border-green-400/30', icon: UserCheck },
-    2: { name: 'Inactive', color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30', icon: Clock },
-    3: { name: 'Suspended', color: 'text-red-400 bg-red-400/10 border-red-400/30', icon: UserX },
-    4: { name: 'Pending', color: 'text-blue-400 bg-blue-400/10 border-blue-400/30', icon: Clock },
-    5: { name: 'Archived', color: 'text-muted-foreground bg-muted-foreground/10 border-muted-foreground/30', icon: Archive }
-  };
-
-  const roles = {
-    admin: { label: 'Admin', color: 'text-accent', icon: Shield },
-    manager: { label: 'Manager', color: 'text-primary', icon: UserCog },
-    client: { label: 'Client', color: 'text-green-400', icon: Users },
-    finance: { label: 'Finance', color: 'text-green-400', icon: Users },
-    surveyor: { label: 'Surveyor', color: 'text-blue-400', icon: Building2 },
-    project_manager: { label: 'Project Manager', color: 'text-yellow-400', icon: Briefcase }
-  };
+  const [session,       setSession]       = useState<any>(null);
+  const [checkingAuth,  setCheckingAuth]  = useState(true);
+  const [hasMounted,    setHasMounted]    = useState(false);
 
   // === AUTH GUARD ===
   useEffect(() => {
@@ -93,20 +345,16 @@ const UserManagement: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
       setCheckingAuth(false);
-
       if (!session) {
-        const returnTo = encodeURIComponent(location.pathname);
-        navigate(`/login?redirectTo=${returnTo}`, { replace: true });
+        navigate(`/login?redirectTo=${encodeURIComponent(location.pathname)}`, { replace: true });
       }
     };
-
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (event === 'SIGNED_OUT') {
-        const returnTo = encodeURIComponent('/admin/users');
-        navigate(`/login?redirectTo=${returnTo}`, { replace: true });
+        navigate(`/login?redirectTo=${encodeURIComponent('/admin/users')}`, { replace: true });
       }
     });
 
@@ -116,7 +364,7 @@ const UserManagement: React.FC = () => {
   useEffect(() => {
     if (session) {
       fetchUsers();
-      setHasMounted(true); // Mark as mounted after first load
+      setHasMounted(true);
     }
   }, [session]);
 
@@ -124,8 +372,10 @@ const UserManagement: React.FC = () => {
     filterUsers();
   }, [searchTerm, statusFilter, roleFilter, users]);
 
-  const fetchUsers = async () => {
-    setLoading(true);
+  // silent = true  → background refresh after an action, no loading spinner
+  // silent = false → initial page load, show spinner
+  const fetchUsers = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
@@ -142,7 +392,7 @@ const UserManagement: React.FC = () => {
 
       const usersWithRoles = profilesData?.map(profile => ({
         ...profile,
-        user_roles: rolesData?.filter(role => role.user_id === profile.id) || []
+        user_roles: rolesData?.filter(role => role.user_id === profile.id) || [],
       })) || [];
 
       setUsers(usersWithRoles);
@@ -150,7 +400,7 @@ const UserManagement: React.FC = () => {
       console.error('Fetch users error:', err);
       showNotification('Failed to load users', 'error');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -158,21 +408,20 @@ const UserManagement: React.FC = () => {
     let filtered = [...users];
 
     if (searchTerm) {
-      filtered = filtered.filter(user => 
-        user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+      const lower = searchTerm.toLowerCase();
+      filtered = filtered.filter(u =>
+        u.full_name?.toLowerCase().includes(lower) ||
+        u.email?.toLowerCase().includes(lower) ||
+        u.company_name?.toLowerCase().includes(lower)
       );
     }
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(user => user.status_id === parseInt(statusFilter));
+      filtered = filtered.filter(u => u.status_id === parseInt(statusFilter));
     }
 
     if (roleFilter !== 'all') {
-      filtered = filtered.filter(user => 
-        user.user_roles?.some(r => r.role_name === roleFilter)
-      );
+      filtered = filtered.filter(u => u.user_roles?.some(r => r.role_name === roleFilter));
     }
 
     setFilteredUsers(filtered);
@@ -183,16 +432,17 @@ const UserManagement: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // === ACTION HANDLERS ===
+
   const handleUpdateUser = async (userId: string, updates: Partial<FormData>) => {
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'update', userId, updates }
+        body: { action: 'update', userId, updates },
       });
-
       if (error) throw error;
-      
-      await fetchUsers();
+
+      await fetchUsers(true); // silent — no spinner
       showNotification('User updated successfully');
       setShowEditModal(false);
       setSelectedUser(null);
@@ -203,17 +453,17 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  // Soft delete (suspend) user
   const handleSoftDeleteUser = async (statusId = 3) => {
     if (!selectedUser) return;
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'soft-delete', userId: selectedUser.id, statusId }
+        body: { action: 'soft-delete', userId: selectedUser.id, statusId },
       });
       if (error) throw error;
-      await fetchUsers();
-      showNotification('User suspended (soft deleted)');
+
+      await fetchUsers(true); // silent
+      showNotification('User suspended');
       setShowDeleteModal(false);
       setSelectedUser(null);
     } catch (err: any) {
@@ -223,16 +473,16 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  // Restore user (set status to active)
   const handleRestoreUser = async () => {
     if (!selectedUser) return;
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'restore', userId: selectedUser.id }
+        body: { action: 'restore', userId: selectedUser.id },
       });
       if (error) throw error;
-      await fetchUsers();
+
+      await fetchUsers(true); // silent
       showNotification('User restored to active');
       setShowDeleteModal(false);
       setSelectedUser(null);
@@ -243,19 +493,23 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  // Hard delete user (permanent)
   const handleHardDeleteUser = async () => {
     if (!selectedUser) return;
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'delete', userId: selectedUser.id }
+        body: { action: 'delete', userId: selectedUser.id },
       });
       if (error) throw error;
-      await fetchUsers();
-      showNotification('User permanently deleted');
+
+      // Optimistically remove the deleted user from local state immediately,
+      // then do a silent background refresh to sync.
+      setUsers(prev => prev.filter(u => u.id !== selectedUser.id));
       setShowDeleteModal(false);
       setSelectedUser(null);
+      showNotification('User permanently deleted');
+
+      fetchUsers(true); // silent — fire-and-forget sync
     } catch (err: any) {
       showNotification(err.message || 'Failed to delete user', 'error');
     } finally {
@@ -265,246 +519,40 @@ const UserManagement: React.FC = () => {
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Never';
-    return new Date(dateString).toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
     });
   };
 
-  const EditModal = () => {
-    const [formData, setFormData] = useState<FormData>({
-      full_name: selectedUser?.full_name || '',
-      email: selectedUser?.email || '',
-      phone: selectedUser?.phone || '',
-      company_name: selectedUser?.company_name || '',
-      job_title: selectedUser?.job_title || '',
-      status_id: selectedUser?.status_id || 1,
-      role: selectedUser?.user_roles?.[0]?.role_name || 'client'
-    });
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
+  if (checkingAuth || !session) {
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
-        onClick={() => setShowEditModal(false)}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-        >
-          <GlassCard className="p-8 md:p-12">
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-3xl md:text-4xl font-bold">Edit User</h2>
-              <button 
-                onClick={() => setShowEditModal(false)} 
-                className="p-2 hover:bg-white/10 rounded-xl transition-colors"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-2 block">Full Name</label>
-                <input
-                  type="text"
-                  value={formData.full_name}
-                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-2 block">Email</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Phone</label>
-                  <input
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Job Title</label>
-                  <input
-                    type="text"
-                    value={formData.job_title}
-                    onChange={(e) => setFormData({...formData, job_title: e.target.value})}
-                    className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-2 block">Company</label>
-                <input
-                  type="text"
-                  value={formData.company_name}
-                  onChange={(e) => setFormData({...formData, company_name: e.target.value})}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Status</label>
-                  <select
-                    value={formData.status_id}
-                    onChange={(e) => setFormData({...formData, status_id: parseInt(e.target.value)})}
-                    className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                  >
-                    {Object.entries(statuses).map(([id, status]) => (
-                      <option key={id} value={id}>{status.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Role</label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
-                    className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-                  >
-                    {Object.entries(roles).map(([key, role]) => (
-                      <option key={key} value={key}>{role.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-4 pt-6">
-                <Button
-                  onClick={() => setShowEditModal(false)}
-                  variant="outline"
-                  className="flex-1 h-14 text-lg rounded-xl"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => selectedUser && handleUpdateUser(selectedUser.id, formData)}
-                  disabled={actionLoading}
-                  className="flex-1 h-14 text-lg rounded-xl bg-primary hover:bg-primary/90"
-                >
-                  {actionLoading ? 'Saving...' : 'Save Changes'}
-                </Button>
-              </div>
-            </div>
-          </GlassCard>
-        </motion.div>
-      </motion.div>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <span className="text-lg text-muted-foreground">Loading...</span>
+      </div>
     );
-  };
-
-  const DeleteModal = () => {
-    const isSuspended = selectedUser?.status_id === 3;
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
-        onClick={() => setShowDeleteModal(false)}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-md"
-        >
-          <GlassCard className="p-8 border-destructive/30">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <AlertCircle className="w-8 h-8 text-destructive" />
-              </div>
-              <h2 className="text-2xl md:text-3xl font-bold mb-4">
-                {isSuspended ? 'Restore or Delete User' : 'Suspend or Delete User'}
-              </h2>
-              <p className="text-muted-foreground mb-8">
-                {isSuspended
-                  ? <>This user is currently <strong>suspended</strong>. You can restore them to active, or permanently delete.<br/>What would you like to do?</>
-                  : <>Are you sure you want to <strong>suspend</strong> (soft delete) <span className="text-foreground">{selectedUser?.full_name}</span>?<br/>You can restore them later, or permanently delete.</>
-                }
-              </p>
-              <div className="flex flex-col gap-3">
-                <Button
-                  onClick={() => setShowDeleteModal(false)}
-                  variant="outline"
-                  className="h-14 text-lg rounded-xl"
-                  disabled={actionLoading}
-                >
-                  Cancel
-                </Button>
-                {!isSuspended && (
-                  <Button
-                    onClick={() => handleSoftDeleteUser(3)}
-                    disabled={actionLoading}
-                    className="h-14 text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
-                  >
-                    {actionLoading ? 'Suspending...' : 'Suspend (Soft Delete)'}
-                  </Button>
-                )}
-                {isSuspended && (
-                  <Button
-                    onClick={handleRestoreUser}
-                    disabled={actionLoading}
-                    className="h-14 text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
-                  >
-                    {actionLoading ? 'Restoring...' : 'Restore to Active'}
-                  </Button>
-                )}
-                <Button
-                  onClick={handleHardDeleteUser}
-                  disabled={actionLoading}
-                  className="h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
-                >
-                  {actionLoading ? 'Deleting...' : 'Delete Permanently'}
-                </Button>
-              </div>
-            </div>
-          </GlassCard>
-        </motion.div>
-      </motion.div>
-    );
-  };
-
-  if (checkingAuth || !session) return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <span className="text-lg text-muted-foreground">Loading...</span>
-    </div>
-  );
+  }
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Background */}
       <div className="fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-primary/5" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         <div className="absolute inset-0 opacity-5">
-          <div className="absolute inset-0" style={{
-            backgroundImage: 'url("data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%23ffffff" fill-opacity="1"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-          }} />
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+            }}
+          />
         </div>
       </div>
 
       <div className="container mx-auto px-2 sm:px-4 md:px-6 py-8 md:py-16 max-w-2xl md:max-w-4xl lg:max-w-7xl">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -525,7 +573,7 @@ const UserManagement: React.FC = () => {
               </p>
             </div>
             <Button
-              onClick={fetchUsers}
+              onClick={() => fetchUsers()} // manual refresh = show spinner intentionally
               size="lg"
               variant="outline"
               className="glass rounded-xl h-12 sm:h-14 px-4 sm:px-6"
@@ -534,12 +582,13 @@ const UserManagement: React.FC = () => {
             </Button>
           </div>
 
+          {/* Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
             {[
-              { label: 'Total Users', value: users.length, icon: Users, color: 'primary' },
-              { label: 'Active', value: users.filter(u => u.status_id === 1).length, icon: UserCheck, color: 'green' },
-              { label: 'Pending', value: users.filter(u => u.status_id === 4).length, icon: Clock, color: 'blue' },
-              { label: 'Suspended', value: users.filter(u => u.status_id === 3).length, icon: UserX, color: 'red' }
+              { label: 'Total Users', value: users.length,                                  icon: Users,     color: 'primary' },
+              { label: 'Active',      value: users.filter(u => u.status_id === 1).length,   icon: UserCheck, color: 'green'   },
+              { label: 'Pending',     value: users.filter(u => u.status_id === 4).length,   icon: Clock,     color: 'blue'    },
+              { label: 'Suspended',   value: users.filter(u => u.status_id === 3).length,   icon: UserX,     color: 'red'     },
             ].map((stat, i) => {
               const Icon = stat.icon;
               return (
@@ -560,6 +609,7 @@ const UserManagement: React.FC = () => {
           </div>
         </motion.div>
 
+        {/* Filters */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -577,25 +627,23 @@ const UserManagement: React.FC = () => {
                   className="w-full pl-12 pr-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                 />
               </div>
-
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
               >
                 <option value="all">All Statuses</option>
-                {Object.entries(statuses).map(([id, status]) => (
+                {Object.entries(STATUSES).map(([id, status]) => (
                   <option key={id} value={id}>{status.name}</option>
                 ))}
               </select>
-
               <select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
                 className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
               >
                 <option value="all">All Roles</option>
-                {Object.entries(roles).map(([key, role]) => (
+                {Object.entries(ROLES).map(([key, role]) => (
                   <option key={key} value={key}>{role.label}</option>
                 ))}
               </select>
@@ -603,6 +651,7 @@ const UserManagement: React.FC = () => {
           </GlassCard>
         </motion.div>
 
+        {/* User list */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-12 h-12 text-primary animate-spin" />
@@ -611,9 +660,9 @@ const UserManagement: React.FC = () => {
           <motion.div className="space-y-4">
             <AnimatePresence mode="wait">
               {filteredUsers.map((user, i) => {
-                const StatusIcon = statuses[user.status_id]?.icon || UserCheck;
-                const roleInfo = roles[user.user_roles?.[0]?.role_name as keyof typeof roles] || roles.client;
-                const RoleIcon = roleInfo.icon;
+                const StatusIcon = STATUSES[user.status_id]?.icon || UserCheck;
+                const roleInfo   = ROLES[user.user_roles?.[0]?.role_name as keyof typeof ROLES] || ROLES.client;
+                const RoleIcon   = roleInfo.icon;
 
                 return (
                   <motion.div
@@ -622,16 +671,17 @@ const UserManagement: React.FC = () => {
                     initial={hasMounted ? false : { opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ 
-                      layout: { duration: 0.3 },
-                      opacity: { duration: 0.3 },
-                      y: { duration: 0.4, delay: hasMounted ? 0 : i * 0.05 }
+                    transition={{
+                      layout:   { duration: 0.3 },
+                      opacity:  { duration: 0.3 },
+                      y:        { duration: 0.4, delay: hasMounted ? 0 : i * 0.05 },
                     }}
                     className="relative"
                   >
                     <GlassCard className="p-6 hover:border-primary/30 transition-all group">
                       <div className="flex items-center justify-between gap-6">
                         <div className="flex items-center gap-6 flex-1">
+                          {/* Avatar */}
                           <div className="w-16 h-16 bg-gradient-to-br from-primary via-accent to-primary rounded-2xl flex items-center justify-center text-background text-xl font-bold flex-shrink-0">
                             {user.full_name?.charAt(0) || '?'}
                           </div>
@@ -639,14 +689,14 @@ const UserManagement: React.FC = () => {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <h3 className="text-xl font-semibold truncate">{user.full_name}</h3>
-                              <span className={`px-3 py-1 rounded-lg text-xs font-medium border ${statuses[user.status_id]?.color}`}>
-                                {statuses[user.status_id]?.name}
+                              <span className={`px-3 py-1 rounded-lg text-xs font-medium border ${STATUSES[user.status_id]?.color}`}>
+                                {STATUSES[user.status_id]?.name}
                               </span>
                               <span className={`px-3 py-1 rounded-lg text-xs font-medium ${roleInfo.color} bg-background/50`}>
                                 {roleInfo.label}
                               </span>
                             </div>
-                            
+
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm text-muted-foreground">
                               <div className="flex items-center gap-2">
                                 <Mail className="w-4 h-4 flex-shrink-0" />
@@ -671,7 +721,7 @@ const UserManagement: React.FC = () => {
                                 </div>
                               )}
                             </div>
-                            
+
                             <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                               <span>Joined: {formatDate(user.created_at)}</span>
                               <span>Last login: {formatDate(user.last_sign_in_at)}</span>
@@ -679,12 +729,10 @@ const UserManagement: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* Actions */}
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <Button
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowEditModal(true);
-                            }}
+                            onClick={() => { setSelectedUser(user); setShowEditModal(true); }}
                             variant="outline"
                             size="lg"
                             className="glass rounded-xl"
@@ -692,10 +740,7 @@ const UserManagement: React.FC = () => {
                             <Edit2 className="w-5 h-5" />
                           </Button>
                           <Button
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowDeleteModal(true);
-                            }}
+                            onClick={() => { setSelectedUser(user); setShowDeleteModal(true); }}
                             variant="outline"
                             size="lg"
                             className="glass rounded-xl text-destructive border-destructive/30 hover:bg-destructive/10"
@@ -720,11 +765,31 @@ const UserManagement: React.FC = () => {
         )}
       </div>
 
+      {/* Modals — rendered with stable component references (hoisted above) */}
       <AnimatePresence>
-        {showEditModal && <EditModal />}
-        {showDeleteModal && <DeleteModal />}
+        {showEditModal && selectedUser && (
+          <EditModal
+            key="edit-modal"
+            selectedUser={selectedUser}
+            actionLoading={actionLoading}
+            onClose={() => { setShowEditModal(false); setSelectedUser(null); }}
+            onSave={handleUpdateUser}
+          />
+        )}
+        {showDeleteModal && selectedUser && (
+          <DeleteModal
+            key="delete-modal"
+            selectedUser={selectedUser}
+            actionLoading={actionLoading}
+            onClose={() => { setShowDeleteModal(false); setSelectedUser(null); }}
+            onSoftDelete={handleSoftDeleteUser}
+            onRestore={handleRestoreUser}
+            onHardDelete={handleHardDeleteUser}
+          />
+        )}
       </AnimatePresence>
 
+      {/* Toast notifications */}
       <AnimatePresence>
         {notification && (
           <motion.div
@@ -733,11 +798,13 @@ const UserManagement: React.FC = () => {
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-8 right-8 z-50"
           >
-            <div className={`px-6 py-4 rounded-2xl backdrop-blur-xl border flex items-center gap-3 ${
-              notification.type === 'success' 
-                ? 'bg-green-500/20 border-green-500/30 text-green-400' 
-                : 'bg-destructive/20 border-destructive/30 text-destructive'
-            }`}>
+            <div
+              className={`px-6 py-4 rounded-2xl backdrop-blur-xl border flex items-center gap-3 ${
+                notification.type === 'success'
+                  ? 'bg-green-500/20 border-green-500/30 text-green-400'
+                  : 'bg-destructive/20 border-destructive/30 text-destructive'
+              }`}
+            >
               {notification.type === 'success' ? (
                 <CheckCircle2 className="w-6 h-6" />
               ) : (

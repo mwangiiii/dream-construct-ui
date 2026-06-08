@@ -283,7 +283,7 @@ function CostingModal({
         </div>
 
         {/* Body */}
-        <div className="p-6 grid grid-cols-2 gap-4">
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           {/* Phase */}
           <Field label="Phase *">

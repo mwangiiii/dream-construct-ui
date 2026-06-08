@@ -742,17 +742,17 @@ function WIPModal({
 
             {/* Cost breakdown — hairline-divided metric cells */}
             {breakdown && (
-              <div className="grid grid-cols-3 sm:grid-cols-5">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/[0.06]">
                 {[
                   { label: "AP", value: fmt(breakdown.ap_cost), emphasis: false },
                   { label: "Job Costs", value: fmt(breakdown.job_cost), emphasis: false },
                   { label: "Taxes", value: fmt(breakdown.tax_cost), emphasis: false },
                   { label: "Loans", value: fmt(breakdown.loan_cost), emphasis: false },
                   { label: "Total Cost", value: fmt(breakdown.cost_incurred), emphasis: true },
-                ].map((c, i) => (
+                ].map((c) => (
                   <div
                     key={c.label}
-                    className={`px-4 py-2.5 border-white/8 transition-colors hover:bg-white/[0.03] ${i % 3 !== 0 ? "border-l" : ""} ${i >= 3 ? "border-t sm:border-t-0" : ""} ${i % 5 !== 0 ? "sm:border-l" : ""} ${c.emphasis ? "bg-rose-500/[0.06]" : ""}`}
+                    className={`px-4 py-2.5 transition-colors hover:bg-white/[0.03] ${c.emphasis ? "bg-rose-500/[0.08]" : "bg-[#0e1015]/60"}`}
                   >
                     <p className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1">{c.label}</p>
                     <p className={`text-xs font-mono tabular-nums tracking-tight ${c.emphasis ? "text-rose-300 font-bold" : "text-foreground/80"}`}>
@@ -1159,7 +1159,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
   const totalWIP = Object.values(wipCounts).reduce((a, c) => a + c, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-br from-background via-background to-primary/5">
       {/* Toasts */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
@@ -1545,7 +1545,7 @@ function WIPView({
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-br from-background via-background to-primary/5">
       {/* Toasts */}
       <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
@@ -1696,11 +1696,11 @@ function WIPView({
                 </div>
               </div>
               {/* Metrics */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-                {cells.map((c, i) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-white/[0.06]">
+                {cells.map((c) => (
                   <div
                     key={c.label}
-                    className={`px-5 py-4 border-white/8 transition-colors hover:bg-white/[0.03] ${i % 2 !== 0 ? "border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${i % 3 !== 0 ? "md:border-l" : ""} ${i >= 3 ? "md:border-t lg:border-t-0" : ""} ${i % 6 !== 0 ? "lg:border-l" : ""}`}
+                    className="px-5 py-4 bg-[#0e1015]/60 transition-colors hover:bg-white/[0.03]"
                   >
                     <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-medium mb-1.5">
                       {c.label}
@@ -1827,7 +1827,70 @@ function WIPView({
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* Mobile card list — no horizontal scroll */}
+              <div className="md:hidden divide-y divide-white/8">
+                {filtered.map((entry) => {
+                  const s = BILLED_STYLE[entry.billed_status];
+                  const variance = n0(entry.billed_to_date) - n0(entry.earned_revenue);
+                  const meta = [
+                    { label: "% Complete",     node: pct(entry.percent_complete) },
+                    { label: "Earned Revenue", node: fmt(entry.earned_revenue) },
+                    { label: "Variance",       node: `${variance >= 0 ? "+" : ""}${fmt(variance)}` },
+                    { label: "Amount",         node: fmt(entry.amount) },
+                    { label: "Account",        node: entry.account || "—" },
+                    { label: "Code Recv.",     node: entry.code_receivable || "—" },
+                  ];
+                  return (
+                    <div key={entry.id} className="px-4 py-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground text-sm">{fmtDate(entry.last_update)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{pct(entry.percent_complete)} complete</p>
+                        </div>
+                        <Badge className={`text-[9px] font-bold shrink-0 ${s.badge}`}>{s.label}</Badge>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {[
+                          { l: "Contract", v: fmt(entry.total_contract), c: "text-violet-400" },
+                          { l: "Cost",     v: fmt(entry.cost_incurred),  c: "text-rose-400" },
+                          { l: "Billed",   v: fmt(entry.billed_to_date), c: "text-emerald-400" },
+                        ].map(a => (
+                          <div key={a.l} className="rounded-lg bg-white/5 border border-white/8 px-2.5 py-2">
+                            <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">{a.l}</p>
+                            <p className={`text-xs font-mono font-bold tabular-nums ${a.c}`}>{a.v}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {meta.map((m, mi) => (
+                          <div key={mi} className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">{m.label}</span>
+                            <span className="font-mono text-xs text-muted-foreground/90 truncate text-right">{m.node}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/8">
+                          <button onClick={() => { setEditing(entry); setModal("edit"); }}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground border border-white/10 hover:bg-white/5 transition-all">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Edit
+                          </button>
+                          <button onClick={() => setDeleting(entry)}
+                            className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/10 transition-all">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm min-w-[900px]">
                   <thead>
                     <tr className="border-b border-white/8 bg-white/3">
@@ -1854,6 +1917,7 @@ function WIPView({
                   </tbody>
                 </table>
               </div>
+              </>
             )}
 
             {/* Footer Summary */}

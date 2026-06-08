@@ -213,7 +213,7 @@ function ItemModal({
           </button>
         </div>
 
-        <div className="px-6 py-5 grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-3 gap-4 max-h-[65vh] overflow-y-auto">
           <Field label="Factorial Code *">
             <input
               value={form.factorial_code}

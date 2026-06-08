@@ -316,7 +316,7 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
 
           {/* Project picker — only in global modal */}
           {projects && (

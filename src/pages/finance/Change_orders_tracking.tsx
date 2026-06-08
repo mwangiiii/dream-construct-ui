@@ -212,7 +212,7 @@ function EntryModal({ initial, onSave, onClose, loading, baseBudget, currency }:
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
           <Field label="Change Code *">
             <input value={form.change_code} onChange={(e) => setField("change_code", e.target.value)}
               placeholder="e.g. CO-001" className={inputCls} />
