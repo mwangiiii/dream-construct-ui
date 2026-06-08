@@ -25,8 +25,9 @@ import {
   CalendarCheck,
   LayoutDashboard,
   ScrollText,
+  X,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface FinanceLayoutProps {
   children: ReactNode;
@@ -47,44 +48,44 @@ const financeRoutes = [
   {
     group: "Accounting",
     items: [
-      { label: "Chart of Accounts",    short: "CoA",  path: "/finance/chart-of-accounts",               icon: BookOpen            },
-      { label: "Balance Sheet",        short: "BS",   path: "/finance/balance-sheet",                    icon: LayoutGrid          },
-      { label: "Income Statement",     short: "IS",   path: "/finance/income-statement",                 icon: TrendingUp          },
-      { label: "Cash Flow",            short: "CF",   path: "/finance/cash-flow",                        icon: Droplets            },
-      { label: "Statement of Account", short: "SA",   path: "/finance/statement-of-account",             icon: FileText            },
-      { label: "Bank Reconciliation",  short: "BR",   path: "/finance/bank-reconciliation",              icon: Landmark            },
+      { label: "Chart of Accounts",    short: "CoA",  path: "/finance/chart-of-accounts",                  icon: BookOpen            },
+      { label: "Balance Sheet",        short: "BS",   path: "/finance/balance-sheet",                       icon: LayoutGrid          },
+      { label: "Income Statement",     short: "IS",   path: "/finance/income-statement",                    icon: TrendingUp          },
+      { label: "Cash Flow",            short: "CF",   path: "/finance/cash-flow",                           icon: Droplets            },
+      { label: "Statement of Account", short: "SA",   path: "/finance/statement-of-account",                icon: FileText            },
+      { label: "Bank Reconciliation",  short: "BR",   path: "/finance/bank-reconciliation",                 icon: Landmark            },
     ],
   },
   {
     group: "Operations",
     items: [
-      { label: "Accounts Payable",     short: "AP",   path: "/finance/accounts-payable",                 icon: CreditCard          },
-      { label: "Accounts Receivable",  short: "AR",   path: "/finance/accounts-received",                icon: ReceiptText         },
-      { label: "Work in Progress",     short: "WIP",  path: "/finance/work-in-progress",                 icon: HardHat             },
-      { label: "Change Orders",        short: "CO",   path: "/finance/change-orders-tracking",           icon: GitPullRequestArrow },
-      { label: "Inventory",            short: "INV",  path: "/finance/inventory",                        icon: Package             },
-      {label: "invoices",              short: "INV",  path: "/finance/invoices",                         icon: Receipt             },
+      { label: "Accounts Payable",     short: "AP",   path: "/finance/accounts-payable",                    icon: CreditCard          },
+      { label: "Accounts Receivable",  short: "AR",   path: "/finance/accounts-received",                   icon: ReceiptText         },
+      { label: "Work in Progress",     short: "WIP",  path: "/finance/work-in-progress",                    icon: HardHat             },
+      { label: "Change Orders",        short: "CO",   path: "/finance/change-orders-tracking",              icon: GitPullRequestArrow },
+      { label: "Inventory",            short: "INV",  path: "/finance/inventory",                           icon: Package             },
+      { label: "Invoices",             short: "INV",  path: "/finance/invoices",                            icon: Receipt             },
     ],
   },
   {
     group: "Assets & Tax",
     items: [
-      { label: "Fixed Assets",         short: "FA",   path: "/finance/fixed-asset-equipment-depreciation", icon: Wrench            },
-      { label: "Loans",                short: "LN",   path: "/finance/loans",                            icon: Banknote            },
-      { label: "Taxes",                short: "TAX",  path: "/finance/taxes",                            icon: Receipt             },
+      { label: "Fixed Assets",         short: "FA",   path: "/finance/fixed-asset-equipment-depreciation",  icon: Wrench              },
+      { label: "Loans",                short: "LN",   path: "/finance/loans",                               icon: Banknote            },
+      { label: "Taxes",                short: "TAX",  path: "/finance/taxes",                               icon: Receipt             },
     ],
   },
   {
     group: "Payroll",
     items: [
-      { label: "Job Costing",          short: "JC",   path: "/finance/job-costing",                      icon: Briefcase           },
-      { label: "Payroll Checklist",    short: "PC",   path: "/finance/payroll-checklist",                icon: ClipboardList       },
+      { label: "Job Costing",          short: "JC",   path: "/finance/job-costing",                         icon: Briefcase           },
+      { label: "Payroll Checklist",    short: "PC",   path: "/finance/payroll-checklist",                   icon: ClipboardList       },
     ],
   },
   {
     group: "Closing",
     items: [
-      { label: "Month-End Checklist",  short: "MEC",  path: "/finance/end-month-close-checklist",        icon: CalendarCheck       },
+      { label: "Month-End Checklist",  short: "MEC",  path: "/finance/end-month-close-checklist",           icon: CalendarCheck       },
     ],
   },
 ];
@@ -97,6 +98,32 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Close mobile drawer on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && mobileOpen) setMobileOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
+
+  // Prevent body scroll when mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileOpen]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/login");
@@ -104,35 +131,48 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
 
   const activeItem = allItems.find((item) => location.pathname === item.path);
 
-  const SidebarContent = () => (
+  // ─── Sidebar nav content (shared between desktop + mobile drawer) ───────────
+  const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
     <div className="flex flex-col h-full">
 
       {/* ── Brand ── */}
       <div className="px-4 py-5 border-b border-border flex-shrink-0">
-        <Link
-          to="/finance/dashboard"
-          className="flex items-center gap-3 group"
-          onClick={() => setMobileOpen(false)}
-        >
-          <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
-            <TrendingUp className="w-5 h-5 text-background" />
-          </div>
-          {sidebarOpen && (
-            <motion.div
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2 }}
-              className="flex flex-col overflow-hidden"
+        <div className="flex items-center justify-between">
+          <Link
+            to="/finance/dashboard"
+            className="flex items-center gap-3 group"
+          >
+            <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform duration-200">
+              <TrendingUp className="w-5 h-5 text-background" />
+            </div>
+            {(sidebarOpen || isMobile) && (
+              <motion.div
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.2 }}
+                className="flex flex-col overflow-hidden"
+              >
+                <span className="font-bold text-sm leading-tight text-foreground">
+                  Accounts
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Reve Construct
+                </span>
+              </motion.div>
+            )}
+          </Link>
+
+          {/* Close button — mobile drawer only */}
+          {isMobile && (
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="p-2 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-foreground transition-all"
+              aria-label="Close menu"
             >
-              <span className="font-bold text-sm leading-tight text-foreground">
-                Accounts
-              </span>
-              <span className="text-xs text-muted-foreground">
-                Reve Construct
-              </span>
-            </motion.div>
+              <X className="w-5 h-5" />
+            </button>
           )}
-        </Link>
+        </div>
       </div>
 
       {/* ── Navigation ── */}
@@ -140,15 +180,15 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
         {financeRoutes.map((group) => (
           <div key={group.group}>
 
-            {/* Group label — only when expanded */}
-            {sidebarOpen && (
+            {/* Group label — expanded desktop or any mobile */}
+            {(sidebarOpen || isMobile) && (
               <p className="text-[10px] font-semibold tracking-widest uppercase text-muted-foreground/40 px-3 mb-1 mt-1">
                 {group.group}
               </p>
             )}
 
-            {/* Divider when collapsed, skip Overview group */}
-            {!sidebarOpen && group.group !== "Overview" && (
+            {/* Divider when collapsed desktop (non-Overview) */}
+            {!sidebarOpen && !isMobile && group.group !== "Overview" && (
               <div className="mx-3 my-2 h-px bg-border/50" />
             )}
 
@@ -156,15 +196,15 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
+                const collapsed = !sidebarOpen && !isMobile;
 
                 return (
                   <Link
                     key={item.path}
                     to={item.path}
-                    onClick={() => setMobileOpen(false)}
                     className={`
                       relative flex items-center gap-3 rounded-lg transition-all duration-200 group
-                      ${sidebarOpen ? "px-3 py-2.5" : "px-2 py-2.5 justify-center"}
+                      ${collapsed ? "px-2 py-2.5 justify-center" : "px-3 py-2.5"}
                       ${isActive
                         ? "bg-primary/20 text-primary"
                         : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
@@ -174,13 +214,13 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
                     {/* Active left bar */}
                     {isActive && (
                       <motion.div
-                        layoutId="financeActiveBar"
+                        layoutId={isMobile ? "mobileActiveBar" : "financeActiveBar"}
                         className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-full"
                       />
                     )}
 
-                    {/* Collapsed: icon only with tooltip */}
-                    {!sidebarOpen ? (
+                    {/* Collapsed desktop: icon + tooltip only */}
+                    {collapsed ? (
                       <span
                         title={item.label}
                         className={`
@@ -233,7 +273,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           to="/"
           className={`
             flex items-center gap-3 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all text-sm
-            ${sidebarOpen ? "px-3 py-2.5" : "px-2 py-2.5 justify-center"}
+            ${!sidebarOpen && !isMobile ? "px-2 py-2.5 justify-center" : "px-3 py-2.5"}
           `}
         >
           <span
@@ -242,14 +282,14 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           >
             ↗
           </span>
-          {sidebarOpen && <span className="font-medium">View Site</span>}
+          {(sidebarOpen || isMobile) && <span className="font-medium">View Site</span>}
         </Link>
 
         <Link
           to="/policies"
           className={`
             flex items-center gap-3 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all text-sm
-            ${sidebarOpen ? "px-3 py-2.5" : "px-2 py-2.5 justify-center"}
+            ${!sidebarOpen && !isMobile ? "px-2 py-2.5 justify-center" : "px-3 py-2.5"}
           `}
         >
           <span
@@ -258,14 +298,14 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           >
             <ScrollText className="w-4 h-4" />
           </span>
-          {sidebarOpen && <span className="font-medium">Policies</span>}
+          {(sidebarOpen || isMobile) && <span className="font-medium">Policies</span>}
         </Link>
 
         <button
           onClick={handleLogout}
           className={`
             w-full flex items-center gap-3 rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-all text-sm
-            ${sidebarOpen ? "px-3 py-2.5" : "px-2 py-2.5 justify-center"}
+            ${!sidebarOpen && !isMobile ? "px-2 py-2.5 justify-center" : "px-3 py-2.5"}
           `}
         >
           <span
@@ -274,7 +314,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           >
             <LogOut className="w-4 h-4" />
           </span>
-          {sidebarOpen && <span className="font-medium">Logout</span>}
+          {(sidebarOpen || isMobile) && <span className="font-medium">Logout</span>}
         </button>
       </div>
     </div>
@@ -284,7 +324,7 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
     <div className="flex min-h-screen bg-background">
 
       {/* ════════════════════════════════════════
-          DESKTOP SIDEBAR
+          DESKTOP SIDEBAR  (lg+)
       ════════════════════════════════════════ */}
       <motion.aside
         animate={{ width: sidebarOpen ? 240 : 72 }}
@@ -296,11 +336,12 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
       </motion.aside>
 
       {/* ════════════════════════════════════════
-          MOBILE OVERLAY + DRAWER
+          MOBILE OVERLAY + FULL DRAWER  (< lg)
       ════════════════════════════════════════ */}
       <AnimatePresence>
         {mobileOpen && (
           <>
+            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -308,22 +349,28 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
               transition={{ duration: 0.2 }}
               className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
               onClick={() => setMobileOpen(false)}
+              aria-hidden="true"
             />
+
+            {/* Drawer — full expanded with labels, never collapsed */}
             <motion.aside
-              initial={{ x: -260 }}
+              initial={{ x: -280 }}
               animate={{ x: 0 }}
-              exit={{ x: -260 }}
+              exit={{ x: -280 }}
               transition={{ type: "spring", damping: 28, stiffness: 280 }}
-              className="fixed left-0 top-0 h-screen w-64 z-50 glass-strong border-r border-border lg:hidden"
+              className="fixed left-0 top-0 h-screen w-72 max-w-[85vw] z-50 glass-strong border-r border-border lg:hidden flex flex-col"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Navigation menu"
             >
-              <SidebarContent />
+              <SidebarContent isMobile />
             </motion.aside>
           </>
         )}
       </AnimatePresence>
 
       {/* ════════════════════════════════════════
-          DESKTOP MAIN CONTENT
+          DESKTOP MAIN CONTENT  (lg+)
       ════════════════════════════════════════ */}
       <motion.div
         animate={{ marginLeft: sidebarOpen ? 240 : 72 }}
@@ -342,16 +389,16 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
             </button>
 
             {/* Breadcrumb */}
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Accounts</span>
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40" />
-              <span className="text-foreground font-medium">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <span className="text-muted-foreground flex-shrink-0">Accounts</span>
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
+              <span className="text-foreground font-medium truncate">
                 {activeItem?.label ?? "Dashboard"}
               </span>
             </div>
 
             {/* Right */}
-            <div className="ml-auto flex items-center gap-4">
+            <div className="ml-auto flex items-center gap-4 flex-shrink-0">
               <Link
                 to="/"
                 className="text-sm text-muted-foreground hover:text-primary transition-colors"
@@ -379,23 +426,27 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
       </motion.div>
 
       {/* ════════════════════════════════════════
-          MOBILE LAYOUT
+          MOBILE LAYOUT  (< lg)
       ════════════════════════════════════════ */}
-      <div className="lg:hidden flex flex-col flex-1 min-h-screen">
+      <div className="lg:hidden flex flex-col flex-1 min-h-screen w-full overflow-hidden">
+
         {/* Mobile topbar */}
         <header className="glass border-b border-border px-4 h-14 flex items-center flex-shrink-0 sticky top-0 z-30">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 rounded-lg hover:bg-white/5 transition-all text-muted-foreground hover:text-foreground mr-3"
+            className="p-2 rounded-lg hover:bg-white/5 transition-all text-muted-foreground hover:text-foreground mr-3 flex-shrink-0"
             aria-label="Open menu"
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-nav"
           >
             <Menu className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-2 text-sm min-w-0 flex-1">
-            <span className="text-muted-foreground flex-shrink-0">Accounts</span>
-            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
-            <span className="text-foreground font-medium truncate">
+          {/* Breadcrumb — truncates cleanly */}
+          <div className="flex items-center gap-1.5 text-sm min-w-0 flex-1">
+            <span className="text-muted-foreground flex-shrink-0 text-xs">Accounts</span>
+            <ChevronRight className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
+            <span className="text-foreground font-medium truncate text-sm">
               {activeItem?.label ?? "Dashboard"}
             </span>
           </div>
@@ -405,29 +456,32 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           </div>
         </header>
 
-        {/* ── Mobile tab strip ── */}
-        {/* overflow-x-auto on the outer div, min-w-max on inner so pills never wrap or disappear */}
-        <div className="glass border-b border-border" style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-          <div style={{ display: "flex", gap: "4px", padding: "8px 16px", minWidth: "max-content" }}>
+        {/* ── Mobile horizontal tab strip ──
+            Scrollable pill row; uses native scroll for zero-jank feel on iOS */}
+        <div
+          id="mobile-nav"
+          className="glass border-b border-border flex-shrink-0"
+          style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
+        >
+          <div
+            className="flex gap-1.5 px-4 py-2"
+            style={{ minWidth: "max-content" }}
+          >
             {allItems.map((item) => {
               const isActive = location.pathname === item.path;
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  style={{
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    textDecoration: "none",
-                    transition: "all 0.15s",
-                    border: isActive ? "1px solid rgba(var(--primary), 0.3)" : "1px solid transparent",
-                    backgroundColor: isActive ? "rgba(var(--primary), 0.15)" : "transparent",
-                    color: isActive ? "rgb(var(--primary))" : "#94a3b8",
-                  }}
+                  className={`
+                    flex-shrink-0 whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold
+                    transition-all duration-150 select-none
+                    ${isActive
+                      ? "bg-primary/15 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent"
+                    }
+                  `}
+                  style={{ WebkitTapHighlightColor: "transparent" }}
                 >
                   {item.short}
                 </Link>
@@ -436,13 +490,14 @@ const FinanceLayout = ({ children }: FinanceLayoutProps) => {
           </div>
         </div>
 
-        {/* Mobile page */}
-        <main className="flex-1 overflow-y-auto p-4">
+        {/* Mobile page content */}
+        <main className="flex-1 overflow-y-auto p-4 w-full">
           <motion.div
             key={location.pathname}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
+            className="w-full"
           >
             {children}
           </motion.div>
