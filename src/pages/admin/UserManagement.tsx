@@ -50,26 +50,26 @@ interface FormData {
   role: string;
 }
 
-// ─── Static lookup tables (defined once, outside component) ───────────────────
+// ─── Static lookup tables ─────────────────────────────────────────────────────
 
 const STATUSES: Record<number, { name: string; color: string; icon: React.ElementType }> = {
   1: { name: 'Active',    color: 'text-green-400 bg-green-400/10 border-green-400/30',                      icon: UserCheck },
-  2: { name: 'Inactive',  color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',                   icon: Clock },
-  3: { name: 'Suspended', color: 'text-red-400 bg-red-400/10 border-red-400/30',                            icon: UserX },
-  4: { name: 'Pending',   color: 'text-blue-400 bg-blue-400/10 border-blue-400/30',                         icon: Clock },
-  5: { name: 'Archived',  color: 'text-muted-foreground bg-muted-foreground/10 border-muted-foreground/30', icon: Archive },
+  2: { name: 'Inactive',  color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',                   icon: Clock     },
+  3: { name: 'Suspended', color: 'text-red-400 bg-red-400/10 border-red-400/30',                            icon: UserX     },
+  4: { name: 'Pending',   color: 'text-blue-400 bg-blue-400/10 border-blue-400/30',                         icon: Clock     },
+  5: { name: 'Archived',  color: 'text-muted-foreground bg-muted-foreground/10 border-muted-foreground/30', icon: Archive   },
 };
 
 const ROLES: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  admin:           { label: 'Admin',           color: 'text-accent',         icon: Shield },
-  manager:         { label: 'Manager',         color: 'text-primary',        icon: UserCog },
-  client:          { label: 'Client',          color: 'text-green-400',      icon: Users },
-  finance:         { label: 'Finance',         color: 'text-green-400',      icon: Users },
-  surveyor:        { label: 'Surveyor',        color: 'text-blue-400',       icon: Building2 },
-  project_manager: { label: 'Project Manager', color: 'text-yellow-400',     icon: Briefcase },
+  admin:           { label: 'Admin',           color: 'text-accent',     icon: Shield    },
+  manager:         { label: 'Manager',         color: 'text-primary',    icon: UserCog   },
+  client:          { label: 'Client',          color: 'text-green-400',  icon: Users     },
+  finance:         { label: 'Finance',         color: 'text-green-400',  icon: Users     },
+  surveyor:        { label: 'Surveyor',        color: 'text-blue-400',   icon: Building2 },
+  project_manager: { label: 'Project Manager', color: 'text-yellow-400', icon: Briefcase },
 };
 
-// ─── EditModal (hoisted — stable identity across renders) ─────────────────────
+// ─── EditModal ────────────────────────────────────────────────────────────────
 
 interface EditModalProps {
   selectedUser: User;
@@ -94,32 +94,36 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
+      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-6"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
+        initial={{ y: '100%', opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: '100%', opacity: 0 }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="w-full sm:max-w-2xl max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl"
       >
-        <GlassCard className="p-8 md:p-12">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-3xl md:text-4xl font-bold">Edit User</h2>
+        <GlassCard className="p-6 sm:p-8 md:p-12 rounded-t-2xl sm:rounded-2xl">
+          {/* Drag handle — visible on mobile */}
+          <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5 sm:hidden" />
+
+          <div className="flex items-center justify-between mb-6 sm:mb-8">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold">Edit User</h2>
             <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
               <X className="w-6 h-6" />
             </button>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-5 sm:space-y-6">
             <div>
               <label className="text-sm font-medium text-muted-foreground mb-2 block">Full Name</label>
               <input
                 type="text"
                 value={formData.full_name}
                 onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
               />
             </div>
 
@@ -129,18 +133,18 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div>
                 <label className="text-sm font-medium text-muted-foreground mb-2 block">Phone</label>
                 <input
                   type="tel"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
               <div>
@@ -149,7 +153,7 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
                   type="text"
                   value={formData.job_title}
                   onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
             </div>
@@ -160,17 +164,17 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
                 type="text"
                 value={formData.company_name}
                 onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div>
                 <label className="text-sm font-medium text-muted-foreground mb-2 block">Status</label>
                 <select
                   value={formData.status_id}
                   onChange={(e) => setFormData({ ...formData, status_id: parseInt(e.target.value) })}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 >
                   {Object.entries(STATUSES).map(([id, status]) => (
                     <option key={id} value={id}>{status.name}</option>
@@ -182,7 +186,7 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-6 py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                  className="w-full px-4 sm:px-6 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 >
                   {Object.entries(ROLES).map(([key, role]) => (
                     <option key={key} value={key}>{role.label}</option>
@@ -191,18 +195,18 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
               </div>
             </div>
 
-            <div className="flex gap-4 pt-6">
+            <div className="flex gap-3 sm:gap-4 pt-4 sm:pt-6">
               <Button
                 onClick={onClose}
                 variant="outline"
-                className="flex-1 h-14 text-lg rounded-xl"
+                className="flex-1 h-12 sm:h-14 text-base sm:text-lg rounded-xl"
               >
                 Cancel
               </Button>
               <Button
                 onClick={() => onSave(selectedUser.id, formData)}
                 disabled={actionLoading}
-                className="flex-1 h-14 text-lg rounded-xl bg-primary hover:bg-primary/90"
+                className="flex-1 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-primary hover:bg-primary/90"
               >
                 {actionLoading ? 'Saving...' : 'Save Changes'}
               </Button>
@@ -214,7 +218,7 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
   );
 };
 
-// ─── DeleteModal (hoisted — stable identity across renders) ───────────────────
+// ─── DeleteModal ──────────────────────────────────────────────────────────────
 
 interface DeleteModalProps {
   selectedUser: User;
@@ -240,25 +244,29 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-center justify-center p-6"
+      className="fixed inset-0 bg-background/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-6"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.95, opacity: 0 }}
+        initial={{ y: '100%', opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: '100%', opacity: 0 }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md"
+        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl"
       >
-        <GlassCard className="p-8 border-destructive/30">
+        <GlassCard className="p-6 sm:p-8 border-destructive/30 rounded-t-2xl sm:rounded-2xl">
+          {/* Drag handle */}
+          <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5 sm:hidden" />
+
           <div className="text-center">
-            <div className="w-16 h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="w-8 h-8 text-destructive" />
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-destructive/20 rounded-full flex items-center justify-center mx-auto mb-5 sm:mb-6">
+              <AlertCircle className="w-7 h-7 sm:w-8 sm:h-8 text-destructive" />
             </div>
-            <h2 className="text-2xl md:text-3xl font-bold mb-4">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-3 sm:mb-4">
               {isSuspended ? 'Restore or Delete User' : 'Suspend or Delete User'}
             </h2>
-            <p className="text-muted-foreground mb-8">
+            <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">
               {isSuspended ? (
                 <>
                   This user is currently <strong>suspended</strong>. You can restore them to active,
@@ -277,7 +285,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
               <Button
                 onClick={onClose}
                 variant="outline"
-                className="h-14 text-lg rounded-xl"
+                className="h-12 sm:h-14 text-base sm:text-lg rounded-xl"
                 disabled={actionLoading}
               >
                 Cancel
@@ -287,7 +295,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
                 <Button
                   onClick={() => onSoftDelete(3)}
                   disabled={actionLoading}
-                  className="h-14 text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
+                  className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
                 >
                   {actionLoading ? 'Suspending...' : 'Suspend (Soft Delete)'}
                 </Button>
@@ -297,7 +305,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
                 <Button
                   onClick={onRestore}
                   disabled={actionLoading}
-                  className="h-14 text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
+                  className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
                 >
                   {actionLoading ? 'Restoring...' : 'Restore to Active'}
                 </Button>
@@ -306,7 +314,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
               <Button
                 onClick={onHardDelete}
                 disabled={actionLoading}
-                className="h-14 text-lg rounded-xl bg-destructive hover:bg-destructive/90"
+                className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-destructive hover:bg-destructive/90"
               >
                 {actionLoading ? 'Deleting...' : 'Delete Permanently'}
               </Button>
@@ -372,8 +380,6 @@ const UserManagement: React.FC = () => {
     filterUsers();
   }, [searchTerm, statusFilter, roleFilter, users]);
 
-  // silent = true  → background refresh after an action, no loading spinner
-  // silent = false → initial page load, show spinner
   const fetchUsers = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -432,8 +438,6 @@ const UserManagement: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // === ACTION HANDLERS ===
-
   const handleUpdateUser = async (userId: string, updates: Partial<FormData>) => {
     setActionLoading(true);
     try {
@@ -442,7 +446,7 @@ const UserManagement: React.FC = () => {
       });
       if (error) throw error;
 
-      await fetchUsers(true); // silent — no spinner
+      await fetchUsers(true);
       showNotification('User updated successfully');
       setShowEditModal(false);
       setSelectedUser(null);
@@ -462,7 +466,7 @@ const UserManagement: React.FC = () => {
       });
       if (error) throw error;
 
-      await fetchUsers(true); // silent
+      await fetchUsers(true);
       showNotification('User suspended');
       setShowDeleteModal(false);
       setSelectedUser(null);
@@ -482,7 +486,7 @@ const UserManagement: React.FC = () => {
       });
       if (error) throw error;
 
-      await fetchUsers(true); // silent
+      await fetchUsers(true);
       showNotification('User restored to active');
       setShowDeleteModal(false);
       setSelectedUser(null);
@@ -502,14 +506,11 @@ const UserManagement: React.FC = () => {
       });
       if (error) throw error;
 
-      // Optimistically remove the deleted user from local state immediately,
-      // then do a silent background refresh to sync.
       setUsers(prev => prev.filter(u => u.id !== selectedUser.id));
       setShowDeleteModal(false);
       setSelectedUser(null);
       showNotification('User permanently deleted');
-
-      fetchUsers(true); // silent — fire-and-forget sync
+      fetchUsers(true);
     } catch (err: any) {
       showNotification(err.message || 'Failed to delete user', 'error');
     } finally {
@@ -523,8 +524,6 @@ const UserManagement: React.FC = () => {
       year: 'numeric', month: 'short', day: 'numeric',
     });
   };
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
 
   if (checkingAuth || !session) {
     return (
@@ -551,17 +550,18 @@ const UserManagement: React.FC = () => {
         </div>
       </div>
 
-      <div className="container mx-auto px-2 sm:px-4 md:px-6 py-8 md:py-16 max-w-2xl md:max-w-4xl lg:max-w-7xl">
-        {/* Header */}
+      <div className="container mx-auto px-4 sm:px-6 py-8 md:py-16 max-w-7xl">
+
+        {/* ── Header ── */}
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
           className="mb-8 md:mb-16"
         >
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
             <div>
-              <h1 className="text-3xl sm:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-2 sm:mb-4">
+              <h1 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-2 sm:mb-4">
                 User
                 <br />
                 <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent animate-glow">
@@ -573,22 +573,22 @@ const UserManagement: React.FC = () => {
               </p>
             </div>
             <Button
-              onClick={() => fetchUsers()} // manual refresh = show spinner intentionally
+              onClick={() => fetchUsers()}
               size="lg"
               variant="outline"
-              className="glass rounded-xl h-12 sm:h-14 px-4 sm:px-6"
+              className="glass rounded-xl h-12 sm:h-14 px-4 sm:px-6 self-start sm:self-auto"
             >
               <RefreshCw className="w-5 h-5" />
             </Button>
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6">
             {[
-              { label: 'Total Users', value: users.length,                                  icon: Users,     color: 'primary' },
-              { label: 'Active',      value: users.filter(u => u.status_id === 1).length,   icon: UserCheck, color: 'green'   },
-              { label: 'Pending',     value: users.filter(u => u.status_id === 4).length,   icon: Clock,     color: 'blue'    },
-              { label: 'Suspended',   value: users.filter(u => u.status_id === 3).length,   icon: UserX,     color: 'red'     },
+              { label: 'Total Users', value: users.length,                                icon: Users,     color: 'primary' },
+              { label: 'Active',      value: users.filter(u => u.status_id === 1).length, icon: UserCheck, color: 'green'   },
+              { label: 'Pending',     value: users.filter(u => u.status_id === 4).length, icon: Clock,     color: 'blue'    },
+              { label: 'Suspended',   value: users.filter(u => u.status_id === 3).length, icon: UserX,     color: 'red'     },
             ].map((stat, i) => {
               const Icon = stat.icon;
               return (
@@ -598,8 +598,8 @@ const UserManagement: React.FC = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.2 + i * 0.1, duration: 0.6 }}
                 >
-                  <GlassCard className="text-center">
-                    <Icon className="w-8 sm:w-10 h-8 sm:h-10 mx-auto mb-2 sm:mb-4 text-primary" />
+                  <GlassCard className="text-center p-4 sm:p-6">
+                    <Icon className="w-7 sm:w-10 h-7 sm:h-10 mx-auto mb-2 sm:mb-4 text-primary" />
                     <div className="text-2xl sm:text-4xl font-bold mb-1 sm:mb-2 text-primary">{stat.value}</div>
                     <div className="text-xs sm:text-sm text-muted-foreground">{stat.label}</div>
                   </GlassCard>
@@ -609,28 +609,28 @@ const UserManagement: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Filters */}
+        {/* ── Filters ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.8 }}
         >
           <GlassCard className="p-4 sm:p-6 mb-6 sm:mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+            <div className="flex flex-col gap-3 sm:grid sm:grid-cols-3 sm:gap-4">
               <div className="relative">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="text"
                   placeholder="Search users..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
+                  className="w-full pl-11 pr-4 py-3 bg-background/50 border border-border rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-sm sm:text-base"
                 />
               </div>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
+                className="w-full px-4 py-3 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-sm sm:text-base"
               >
                 <option value="all">All Statuses</option>
                 {Object.entries(STATUSES).map(([id, status]) => (
@@ -640,7 +640,7 @@ const UserManagement: React.FC = () => {
               <select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 sm:px-4 py-3 sm:py-4 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
+                className="w-full px-4 py-3 bg-background/50 border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-sm sm:text-base"
               >
                 <option value="all">All Roles</option>
                 {Object.entries(ROLES).map(([key, role]) => (
@@ -651,18 +651,16 @@ const UserManagement: React.FC = () => {
           </GlassCard>
         </motion.div>
 
-        {/* User list */}
+        {/* ── User list ── */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-12 h-12 text-primary animate-spin" />
           </div>
         ) : (
-          <motion.div className="space-y-4">
+          <motion.div className="space-y-3 sm:space-y-4">
             <AnimatePresence mode="wait">
               {filteredUsers.map((user, i) => {
-                const StatusIcon = STATUSES[user.status_id]?.icon || UserCheck;
-                const roleInfo   = ROLES[user.user_roles?.[0]?.role_name as keyof typeof ROLES] || ROLES.client;
-                const RoleIcon   = roleInfo.icon;
+                const roleInfo = ROLES[user.user_roles?.[0]?.role_name as keyof typeof ROLES] || ROLES.client;
 
                 return (
                   <motion.div
@@ -672,16 +670,87 @@ const UserManagement: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{
-                      layout:   { duration: 0.3 },
-                      opacity:  { duration: 0.3 },
-                      y:        { duration: 0.4, delay: hasMounted ? 0 : i * 0.05 },
+                      layout:  { duration: 0.3 },
+                      opacity: { duration: 0.3 },
+                      y:       { duration: 0.4, delay: hasMounted ? 0 : i * 0.05 },
                     }}
-                    className="relative"
                   >
-                    <GlassCard className="p-6 hover:border-primary/30 transition-all group">
-                      <div className="flex items-center justify-between gap-6">
+                    <GlassCard className="p-4 sm:p-6 hover:border-primary/30 transition-all group">
+
+                      {/* ── MOBILE CARD layout (< sm) ── */}
+                      <div className="sm:hidden">
+                        {/* Top row: avatar + name + badges + actions */}
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className="w-11 h-11 bg-gradient-to-br from-primary via-accent to-primary rounded-xl flex items-center justify-center text-background text-base font-bold flex-shrink-0">
+                            {user.full_name?.charAt(0) || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-base leading-tight truncate mb-1.5">
+                              {user.full_name}
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${STATUSES[user.status_id]?.color}`}>
+                                {STATUSES[user.status_id]?.name}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${roleInfo.color} bg-background/50`}>
+                                {roleInfo.label}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Action buttons pinned top-right */}
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => { setSelectedUser(user); setShowEditModal(true); }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-white/10 transition-colors"
+                              aria-label="Edit user"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => { setSelectedUser(user); setShowDeleteModal(true); }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors"
+                              aria-label="Delete user"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Meta rows */}
+                        <div className="space-y-1.5 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{user.email}</span>
+                          </div>
+                          {user.phone && (
+                            <div className="flex items-center gap-2">
+                              <Phone className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span>{user.phone}</span>
+                            </div>
+                          )}
+                          {user.company_name && (
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{user.company_name}</span>
+                            </div>
+                          )}
+                          {user.job_title && (
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{user.job_title}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-3 pt-0.5 text-[11px]">
+                            <span>Joined: {formatDate(user.created_at)}</span>
+                            <span>·</span>
+                            <span>Last login: {formatDate(user.last_sign_in_at)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── DESKTOP CARD layout (sm+) — original unchanged ── */}
+                      <div className="hidden sm:flex items-center justify-between gap-6">
                         <div className="flex items-center gap-6 flex-1">
-                          {/* Avatar */}
                           <div className="w-16 h-16 bg-gradient-to-br from-primary via-accent to-primary rounded-2xl flex items-center justify-center text-background text-xl font-bold flex-shrink-0">
                             {user.full_name?.charAt(0) || '?'}
                           </div>
@@ -729,7 +798,6 @@ const UserManagement: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Actions */}
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <Button
                             onClick={() => { setSelectedUser(user); setShowEditModal(true); }}
@@ -749,6 +817,7 @@ const UserManagement: React.FC = () => {
                           </Button>
                         </div>
                       </div>
+
                     </GlassCard>
                   </motion.div>
                 );
@@ -765,7 +834,7 @@ const UserManagement: React.FC = () => {
         )}
       </div>
 
-      {/* Modals — rendered with stable component references (hoisted above) */}
+      {/* Modals */}
       <AnimatePresence>
         {showEditModal && selectedUser && (
           <EditModal
@@ -789,28 +858,28 @@ const UserManagement: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Toast notifications */}
+      {/* Toast */}
       <AnimatePresence>
         {notification && (
           <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-8 right-8 z-50"
+            className="fixed bottom-6 left-4 right-4 sm:left-auto sm:right-8 sm:w-auto z-50"
           >
             <div
-              className={`px-6 py-4 rounded-2xl backdrop-blur-xl border flex items-center gap-3 ${
+              className={`px-5 py-4 rounded-2xl backdrop-blur-xl border flex items-center gap-3 ${
                 notification.type === 'success'
                   ? 'bg-green-500/20 border-green-500/30 text-green-400'
                   : 'bg-destructive/20 border-destructive/30 text-destructive'
               }`}
             >
               {notification.type === 'success' ? (
-                <CheckCircle2 className="w-6 h-6" />
+                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
               ) : (
-                <AlertCircle className="w-6 h-6" />
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
               )}
-              <p className="font-medium">{notification.message}</p>
+              <p className="font-medium text-sm sm:text-base">{notification.message}</p>
             </div>
           </motion.div>
         )}
