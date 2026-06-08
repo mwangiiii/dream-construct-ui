@@ -1,25 +1,11 @@
+// src/pages/admin/users/UserManagement.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Users,
-  Search,
-  Edit2,
-  Trash2,
-  UserCheck,
-  UserX,
-  Shield,
-  Mail,
-  Phone,
-  Briefcase,
-  Building2,
-  X,
-  CheckCircle2,
-  AlertCircle,
-  RefreshCw,
-  UserCog,
-  Clock,
-  Archive,
+  Users, Search, Edit2, Trash2, UserCheck, UserX, Shield,
+  Mail, Phone, Briefcase, Building2, X, CheckCircle2,
+  AlertCircle, RefreshCw, UserCog, Clock, Archive, Eye, EyeOff,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -37,6 +23,7 @@ interface User {
   created_at: string;
   last_sign_in_at?: string;
   status_id: number;
+  show_on_team_page: boolean;
   user_roles?: Array<{ role_name: string }>;
 }
 
@@ -48,6 +35,7 @@ interface FormData {
   job_title: string;
   status_id: number;
   role: string;
+  show_on_team_page: boolean;
 }
 
 // ─── Static lookup tables ─────────────────────────────────────────────────────
@@ -80,14 +68,36 @@ interface EditModalProps {
 
 const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onClose, onSave }) => {
   const [formData, setFormData] = useState<FormData>({
-    full_name:    selectedUser.full_name || '',
-    email:        selectedUser.email || '',
-    phone:        selectedUser.phone || '',
-    company_name: selectedUser.company_name || '',
-    job_title:    selectedUser.job_title || '',
-    status_id:    selectedUser.status_id || 1,
-    role:         selectedUser.user_roles?.[0]?.role_name || 'client',
+    full_name:          selectedUser.full_name          || '',
+    email:              selectedUser.email              || '',
+    phone:              selectedUser.phone              || '',
+    company_name:       selectedUser.company_name       || '',
+    job_title:          selectedUser.job_title          || '',
+    status_id:          selectedUser.status_id          || 1,
+    role:               selectedUser.user_roles?.[0]?.role_name || 'client',
+    // Read the current DB value. If the column hasn't been added yet it will be
+    // undefined — we coerce to false so the toggle always has a defined state.
+    show_on_team_page:  selectedUser.show_on_team_page  ?? false,
   });
+
+  const handleSave = () => {
+    const updates: Partial<FormData> = {
+      full_name:         formData.full_name,
+      email:             formData.email,
+      phone:             formData.phone,
+      company_name:      formData.company_name,
+      job_title:         formData.job_title,
+      status_id:         formData.status_id,
+      // Always include show_on_team_page — it is always a known boolean here.
+      show_on_team_page: formData.show_on_team_page,
+    };
+
+    if (formData.role && formData.role.trim() !== '') {
+      updates.role = formData.role;
+    }
+
+    onSave(selectedUser.id, updates);
+  };
 
   return (
     <motion.div
@@ -106,7 +116,6 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
         className="w-full sm:max-w-2xl max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl"
       >
         <GlassCard className="p-6 sm:p-8 md:p-12 rounded-t-2xl sm:rounded-2xl">
-          {/* Drag handle — visible on mobile */}
           <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5 sm:hidden" />
 
           <div className="flex items-center justify-between mb-6 sm:mb-8">
@@ -195,6 +204,51 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
               </div>
             </div>
 
+            {/* ── Team Page Visibility Toggle ─────────────────────────────────── */}
+            <div
+              className={`
+                flex items-center justify-between gap-4 px-4 sm:px-6 py-4 sm:py-5
+                rounded-xl border transition-all cursor-pointer
+                ${formData.show_on_team_page
+                  ? 'bg-primary/10 border-primary/40'
+                  : 'bg-background/50 border-border'}
+              `}
+              onClick={() => setFormData({ ...formData, show_on_team_page: !formData.show_on_team_page })}
+            >
+              <div className="flex items-center gap-3">
+                {formData.show_on_team_page
+                  ? <Eye className="w-5 h-5 text-primary flex-shrink-0" />
+                  : <EyeOff className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                }
+                <div>
+                  <p className={`text-sm font-medium ${formData.show_on_team_page ? 'text-foreground' : 'text-muted-foreground'}`}>
+                    Show on Team Page
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {formData.show_on_team_page
+                      ? 'This user is visible on the public team page'
+                      : 'This user is hidden from the public team page'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle pill */}
+              <div
+                className={`
+                  relative w-11 h-6 rounded-full flex-shrink-0 transition-colors duration-200
+                  ${formData.show_on_team_page ? 'bg-primary' : 'bg-border'}
+                `}
+              >
+                <span
+                  className={`
+                    absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm
+                    transition-transform duration-200
+                    ${formData.show_on_team_page ? 'translate-x-5' : 'translate-x-0'}
+                  `}
+                />
+              </div>
+            </div>
+
             <div className="flex gap-3 sm:gap-4 pt-4 sm:pt-6">
               <Button
                 onClick={onClose}
@@ -204,7 +258,7 @@ const EditModal: React.FC<EditModalProps> = ({ selectedUser, actionLoading, onCl
                 Cancel
               </Button>
               <Button
-                onClick={() => onSave(selectedUser.id, formData)}
+                onClick={handleSave}
                 disabled={actionLoading}
                 className="flex-1 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-primary hover:bg-primary/90"
               >
@@ -230,12 +284,7 @@ interface DeleteModalProps {
 }
 
 const DeleteModal: React.FC<DeleteModalProps> = ({
-  selectedUser,
-  actionLoading,
-  onClose,
-  onSoftDelete,
-  onRestore,
-  onHardDelete,
+  selectedUser, actionLoading, onClose, onSoftDelete, onRestore, onHardDelete,
 }) => {
   const isSuspended = selectedUser.status_id === 3;
 
@@ -256,7 +305,6 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
         className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl"
       >
         <GlassCard className="p-6 sm:p-8 border-destructive/30 rounded-t-2xl sm:rounded-2xl">
-          {/* Drag handle */}
           <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5 sm:hidden" />
 
           <div className="text-center">
@@ -270,8 +318,7 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
               {isSuspended ? (
                 <>
                   This user is currently <strong>suspended</strong>. You can restore them to active,
-                  or permanently delete.
-                  <br />What would you like to do?
+                  or permanently delete.<br />What would you like to do?
                 </>
               ) : (
                 <>
@@ -282,40 +329,20 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
               )}
             </p>
             <div className="flex flex-col gap-3">
-              <Button
-                onClick={onClose}
-                variant="outline"
-                className="h-12 sm:h-14 text-base sm:text-lg rounded-xl"
-                disabled={actionLoading}
-              >
+              <Button onClick={onClose} variant="outline" className="h-12 sm:h-14 text-base sm:text-lg rounded-xl" disabled={actionLoading}>
                 Cancel
               </Button>
-
               {!isSuspended && (
-                <Button
-                  onClick={() => onSoftDelete(3)}
-                  disabled={actionLoading}
-                  className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900"
-                >
+                <Button onClick={() => onSoftDelete(3)} disabled={actionLoading} className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-yellow-500/80 hover:bg-yellow-600/90 text-yellow-900">
                   {actionLoading ? 'Suspending...' : 'Suspend (Soft Delete)'}
                 </Button>
               )}
-
               {isSuspended && (
-                <Button
-                  onClick={onRestore}
-                  disabled={actionLoading}
-                  className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900"
-                >
+                <Button onClick={onRestore} disabled={actionLoading} className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-green-500/80 hover:bg-green-600/90 text-green-900">
                   {actionLoading ? 'Restoring...' : 'Restore to Active'}
                 </Button>
               )}
-
-              <Button
-                onClick={onHardDelete}
-                disabled={actionLoading}
-                className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-destructive hover:bg-destructive/90"
-              >
+              <Button onClick={onHardDelete} disabled={actionLoading} className="h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-destructive hover:bg-destructive/90">
                 {actionLoading ? 'Deleting...' : 'Delete Permanently'}
               </Button>
             </div>
@@ -329,23 +356,23 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
 // ─── Main component ────────────────────────────────────────────────────────────
 
 const UserManagement: React.FC = () => {
-  const navigate  = useNavigate();
-  const location  = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [users,         setUsers]         = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
-  const [loading,       setLoading]       = useState(true);
-  const [searchTerm,    setSearchTerm]    = useState('');
-  const [statusFilter,  setStatusFilter]  = useState('all');
-  const [roleFilter,    setRoleFilter]    = useState('all');
-  const [selectedUser,  setSelectedUser]  = useState<User | null>(null);
+  const [users,           setUsers]           = useState<User[]>([]);
+  const [filteredUsers,   setFilteredUsers]   = useState<User[]>([]);
+  const [loading,         setLoading]         = useState(true);
+  const [searchTerm,      setSearchTerm]      = useState('');
+  const [statusFilter,    setStatusFilter]    = useState('all');
+  const [roleFilter,      setRoleFilter]      = useState('all');
+  const [selectedUser,    setSelectedUser]    = useState<User | null>(null);
   const [showEditModal,   setShowEditModal]   = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [notification,  setNotification]  = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [session,       setSession]       = useState<any>(null);
-  const [checkingAuth,  setCheckingAuth]  = useState(true);
-  const [hasMounted,    setHasMounted]    = useState(false);
+  const [notification,    setNotification]    = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [actionLoading,   setActionLoading]   = useState(false);
+  const [session,         setSession]         = useState<any>(null);
+  const [checkingAuth,    setCheckingAuth]    = useState(true);
+  const [hasMounted,      setHasMounted]      = useState(false);
 
   // === AUTH GUARD ===
   useEffect(() => {
@@ -380,6 +407,7 @@ const UserManagement: React.FC = () => {
     filterUsers();
   }, [searchTerm, statusFilter, roleFilter, users]);
 
+  // ── Fetch users + merge auth emails ────────────────────────────────────────
   const fetchUsers = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -387,19 +415,34 @@ const UserManagement: React.FC = () => {
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
-
       if (profilesError) throw profilesError;
 
       const { data: rolesData, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id, role_name');
-
       if (rolesError) throw rolesError;
 
-      const usersWithRoles = profilesData?.map(profile => ({
+      let emailMap: Record<string, string> = {};
+      try {
+        const { data: emailData, error: emailError } = await supabase.functions.invoke('manage-user', {
+          body: { action: 'list-emails' },
+        });
+        if (!emailError && emailData?.emails) {
+          emailMap = emailData.emails;
+        } else if (emailError) {
+          console.warn('Could not fetch auth emails:', emailError.message);
+        }
+      } catch (emailFetchErr) {
+        console.warn('Email fetch failed silently:', emailFetchErr);
+      }
+
+      const usersWithRoles: User[] = (profilesData || []).map(profile => ({
         ...profile,
-        user_roles: rolesData?.filter(role => role.user_id === profile.id) || [],
-      })) || [];
+        email:             emailMap[profile.id] || profile.email || '',
+        // Coerce null/undefined (pre-migration rows) to false so the UI is always defined
+        show_on_team_page: profile.show_on_team_page ?? false,
+        user_roles:        (rolesData || []).filter(role => role.user_id === profile.id),
+      }));
 
       setUsers(usersWithRoles);
     } catch (err: any) {
@@ -462,7 +505,7 @@ const UserManagement: React.FC = () => {
     setActionLoading(true);
     try {
       const { error } = await supabase.functions.invoke('manage-user', {
-        body: { action: 'soft-delete', userId: selectedUser.id, statusId },
+        body: { action: 'soft-delete', userId: selectedUser.id, updates: { statusId } },
       });
       if (error) throw error;
 
@@ -677,9 +720,8 @@ const UserManagement: React.FC = () => {
                   >
                     <GlassCard className="p-4 sm:p-6 hover:border-primary/30 transition-all group">
 
-                      {/* ── MOBILE CARD layout (< sm) ── */}
+                      {/* ── MOBILE layout ── */}
                       <div className="sm:hidden">
-                        {/* Top row: avatar + name + badges + actions */}
                         <div className="flex items-start gap-3 mb-3">
                           <div className="w-11 h-11 bg-gradient-to-br from-primary via-accent to-primary rounded-xl flex items-center justify-center text-background text-base font-bold flex-shrink-0">
                             {user.full_name?.charAt(0) || '?'}
@@ -695,9 +737,19 @@ const UserManagement: React.FC = () => {
                               <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${roleInfo.color} bg-background/50`}>
                                 {roleInfo.label}
                               </span>
+                              {/* Team page visibility badge */}
+                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium flex items-center gap-1 ${
+                                user.show_on_team_page
+                                  ? 'text-primary bg-primary/10 border border-primary/30'
+                                  : 'text-muted-foreground bg-muted/10 border border-border'
+                              }`}>
+                                {user.show_on_team_page
+                                  ? <><Eye className="w-3 h-3" /> Team</>
+                                  : <><EyeOff className="w-3 h-3" /> Hidden</>
+                                }
+                              </span>
                             </div>
                           </div>
-                          {/* Action buttons pinned top-right */}
                           <div className="flex gap-1.5 flex-shrink-0">
                             <button
                               onClick={() => { setSelectedUser(user); setShowEditModal(true); }}
@@ -716,7 +768,6 @@ const UserManagement: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Meta rows */}
                         <div className="space-y-1.5 text-xs text-muted-foreground">
                           <div className="flex items-center gap-2 min-w-0">
                             <Mail className="w-3.5 h-3.5 flex-shrink-0" />
@@ -742,19 +793,16 @@ const UserManagement: React.FC = () => {
                           )}
                           <div className="flex items-center gap-3 pt-0.5 text-[11px]">
                             <span>Joined: {formatDate(user.created_at)}</span>
-                            <span>·</span>
-                            <span>Last login: {formatDate(user.last_sign_in_at)}</span>
                           </div>
                         </div>
                       </div>
 
-                      {/* ── DESKTOP CARD layout (sm+) — original unchanged ── */}
+                      {/* ── DESKTOP layout ── */}
                       <div className="hidden sm:flex items-center justify-between gap-6">
                         <div className="flex items-center gap-6 flex-1">
                           <div className="w-16 h-16 bg-gradient-to-br from-primary via-accent to-primary rounded-2xl flex items-center justify-center text-background text-xl font-bold flex-shrink-0">
                             {user.full_name?.charAt(0) || '?'}
                           </div>
-
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <h3 className="text-xl font-semibold truncate">{user.full_name}</h3>
@@ -764,8 +812,18 @@ const UserManagement: React.FC = () => {
                               <span className={`px-3 py-1 rounded-lg text-xs font-medium ${roleInfo.color} bg-background/50`}>
                                 {roleInfo.label}
                               </span>
+                              {/* Team page visibility badge */}
+                              <span className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${
+                                user.show_on_team_page
+                                  ? 'text-primary bg-primary/10 border border-primary/30'
+                                  : 'text-muted-foreground bg-muted/10 border border-border'
+                              }`}>
+                                {user.show_on_team_page
+                                  ? <><Eye className="w-3.5 h-3.5" /> On Team Page</>
+                                  : <><EyeOff className="w-3.5 h-3.5" /> Hidden</>
+                                }
+                              </span>
                             </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm text-muted-foreground">
                               <div className="flex items-center gap-2">
                                 <Mail className="w-4 h-4 flex-shrink-0" />
@@ -790,14 +848,11 @@ const UserManagement: React.FC = () => {
                                 </div>
                               )}
                             </div>
-
                             <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                               <span>Joined: {formatDate(user.created_at)}</span>
-                              <span>Last login: {formatDate(user.last_sign_in_at)}</span>
                             </div>
                           </div>
                         </div>
-
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <Button
                             onClick={() => { setSelectedUser(user); setShowEditModal(true); }}
@@ -834,7 +889,7 @@ const UserManagement: React.FC = () => {
         )}
       </div>
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       <AnimatePresence>
         {showEditModal && selectedUser && (
           <EditModal
@@ -858,7 +913,7 @@ const UserManagement: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Toast */}
+      {/* ── Toast ── */}
       <AnimatePresence>
         {notification && (
           <motion.div

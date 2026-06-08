@@ -433,29 +433,37 @@ I would like to discuss the following:
             className="flex flex-col gap-8 lg:gap-12"
           >
             {/* Map */}
-            <GlassCard className="p-0 overflow-hidden h-[400px] shadow-xl flex-shrink-0">
-              <div className="w-full h-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center relative group">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYgMi42ODYgNiA2cy0yLjY4NiA2LTYgNi02LTIuNjg2LTYtNiAyLjY4Ni02IDYtNnoiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iLjA1IiBzdHJva2Utd2lkdGg9IjIiLz48L2c+PC9zdmc+')] opacity-20" />
-                <div className="text-center p-8 relative z-10">
-                  <motion.div
-                    animate={{ y: [0, -10, 0] }}
-                    transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                  >
-                    <MapPin className="w-20 h-20 text-primary mx-auto mb-4" />
-                  </motion.div>
-                  <h4 className="text-2xl font-semibold mb-2">Our Location</h4>
-                  <p className="text-muted-foreground mb-4">Nairobi, Kenya</p>
-                  <p className="text-sm text-muted-foreground/70 mb-6">
-                    Interactive map integration available
+            <GlassCard className="p-0 overflow-hidden h-[400px] shadow-xl flex-shrink-0 relative">
+              {/* Embedded Google Maps iframe */}
+              <iframe
+                title="Reve Construct Location"
+                src="https://maps.google.com/maps?q=Kahawa+Sukari,+Murang%27a+Road,+Nairobi,+Kenya&t=&z=15&ie=UTF8&iwloc=&output=embed"
+                width="100%"
+                height="100%"
+                style={{ border: 0, display: "block" }}
+                allowFullScreen
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                className="w-full h-full"
+              />
+
+              {/* Glass overlay bar at the bottom */}
+              <div className="absolute bottom-0 left-0 right-0 backdrop-blur-md bg-background/70 border-t border-border/50 px-4 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <MapPin className="w-4 h-4 text-primary flex-shrink-0" />
+                  <p className="text-xs text-muted-foreground truncate">
+                    Kahawa-Sukari, Murang'a Road, Nairobi
                   </p>
-                  <Button
-                    variant="outline"
-                    className="glass border-primary/20 hover:bg-primary/10"
-                    onClick={() => window.open("https://maps.app.goo.gl/gUh4dhLXzzRH35Jv9", "_blank")}
-                  >
-                    View on Google Maps
-                  </Button>
                 </div>
+                {/* <p className="text-sm text-muted-foreground/70">Interactive map integration available</p> */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="glass border-primary/30 hover:bg-primary/10 text-xs flex-shrink-0"
+                  onClick={() => window.open("https://maps.app.goo.gl/gUh4dhLXzzRH35Jv9", "_blank")}
+                >
+                  Open in Maps
+                </Button>
               </div>
             </GlassCard>
 

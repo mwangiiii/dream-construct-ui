@@ -1,7 +1,7 @@
-// app/admin/media/page.tsx  (or wherever you keep admin pages )
+// app/admin/media/page.tsx
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,9 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { toast } from "@/components/ui/use-toast";
 import {
-  Eye, MousePointerClick, Share2, Loader2, Image as ImageIcon,
-  Calendar, Home, MapPin, Music as MusicIcon, Sparkles,
-  Trash2, RotateCcw, Edit3, CheckCircle2, Clock, Archive, XCircle
+  Eye, MousePointerClick, Loader2, Image as ImageIcon,
+  Music as MusicIcon, Sparkles,
+  Trash2, RotateCcw, CheckCircle2, Clock, Archive
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -30,6 +30,7 @@ interface MediaPost {
   categories: string[];
   status: Status;
   is_pinned: boolean;
+  pin_order?: number | null;
   metadata: Record<string, any>;
   view_count: number;
   click_count: number;
@@ -45,21 +46,21 @@ const CATEGORIES = [
 
 const STATUS_CONFIG: Record<Status | "trash", { label: string; icon: any; color: string }> = {
   published: { label: "Published", icon: CheckCircle2, color: "text-green-400" },
-  draft: { label: "Draft", icon: Clock, color: "text-amber-400" },
-  archived: { label: "Archived", icon: Archive, color: "text-purple-400" },
-  trash: { label: "Trash", icon: Trash2, color: "text-red-400" },
+  draft:     { label: "Draft",     icon: Clock,        color: "text-amber-400" },
+  archived:  { label: "Archived",  icon: Archive,      color: "text-purple-400" },
+  trash:     { label: "Trash",     icon: Trash2,       color: "text-red-400" },
 };
 
 export default function MediaManagement() {
-  const [media, setMedia] = useState<MediaPost[]>([]);
-  const [filteredMedia, setFilteredMedia] = useState<MediaPost[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [media, setMedia]                   = useState<MediaPost[]>([]);
+  const [filteredMedia, setFilteredMedia]   = useState<MediaPost[]>([]);
+  const [activeTab, setActiveTab]           = useState<TabType>("all");
+  const [searchQuery, setSearchQuery]       = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading]           = useState(true);
+  const [selectedItems, setSelectedItems]   = useState<Set<string>>(new Set());
 
-  // Load all media (admin sees everything)
+  // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const fetchMedia = async () => {
       setIsLoading(true);
@@ -75,15 +76,13 @@ export default function MediaManagement() {
       }
       setIsLoading(false);
     };
-
     fetchMedia();
   }, []);
 
-  // Filter logic
+  // ── Filter ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     let filtered = media;
 
-    // Tab filter
     if (activeTab !== "all") {
       if (activeTab === "trash") {
         filtered = filtered.filter(m => m.deleted);
@@ -94,7 +93,6 @@ export default function MediaManagement() {
       filtered = filtered.filter(m => !m.deleted);
     }
 
-    // Search
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(item =>
@@ -104,7 +102,6 @@ export default function MediaManagement() {
       );
     }
 
-    // Category
     if (selectedCategory !== "all") {
       filtered = filtered.filter(item => item.categories.includes(selectedCategory));
     }
@@ -112,12 +109,9 @@ export default function MediaManagement() {
     setFilteredMedia(filtered);
   }, [media, activeTab, searchQuery, selectedCategory]);
 
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const updateStatus = async (id: string, status: Status) => {
-    const { error } = await supabase
-      .from("media_posts")
-      .update({ status })
-      .eq("id", id);
-
+    const { error } = await supabase.from("media_posts").update({ status }).eq("id", id);
     if (!error) {
       setMedia(prev => prev.map(m => m.id === id ? { ...m, status } : m));
       toast({ title: "Updated", description: "Status changed" });
@@ -128,17 +122,11 @@ export default function MediaManagement() {
     const nextPinOrder = current ? null : (media.filter(m => m.is_pinned).length + 1);
     const { error } = await supabase
       .from("media_posts")
-      .update({
-        is_pinned: !current,
-        pin_order: !current ? nextPinOrder : null
-      })
+      .update({ is_pinned: !current, pin_order: !current ? nextPinOrder : null })
       .eq("id", id);
-
     if (!error) {
       setMedia(prev => prev.map(m =>
-        m.id === id
-          ? { ...m, is_pinned: !current, pin_order: !current ? nextPinOrder : null }
-          : m
+        m.id === id ? { ...m, is_pinned: !current, pin_order: !current ? nextPinOrder : null } : m
       ));
     }
   };
@@ -146,12 +134,8 @@ export default function MediaManagement() {
   const softDelete = async (id: string) => {
     const { error } = await supabase
       .from("media_posts")
-      .update({
-        deleted: true,
-        deleted_at: new Date().toISOString()
-      })
+      .update({ deleted: true, deleted_at: new Date().toISOString() })
       .eq("id", id);
-
     if (!error) {
       setMedia(prev => prev.map(m => m.id === id ? { ...m, deleted: true, deleted_at: new Date().toISOString() } : m));
       toast({ title: "Moved to Trash", description: "Media can be restored later" });
@@ -161,12 +145,8 @@ export default function MediaManagement() {
   const restore = async (id: string) => {
     const { error } = await supabase
       .from("media_posts")
-      .update({
-        deleted: false,
-        deleted_at: null
-      })
+      .update({ deleted: false, deleted_at: null })
       .eq("id", id);
-
     if (!error) {
       setMedia(prev => prev.map(m => m.id === id ? { ...m, deleted: false, deleted_at: null } : m));
       toast({ title: "Restored", description: "Media restored successfully" });
@@ -175,11 +155,7 @@ export default function MediaManagement() {
 
   const permanentDelete = async (id: string) => {
     if (!confirm("Permanently delete this media? This cannot be undone.")) return;
-    const { error } = await supabase
-      .from("media_posts")
-      .delete()
-      .eq("id", id);
-
+    const { error } = await supabase.from("media_posts").delete().eq("id", id);
     if (!error) {
       setMedia(prev => prev.filter(m => m.id !== id));
       toast({ title: "Deleted Forever", variant: "destructive" });
@@ -189,15 +165,12 @@ export default function MediaManagement() {
   const bulkAction = async (action: "publish" | "archive" | "delete" | "restore") => {
     const items = media.filter(m => selectedItems.has(m.id));
     if (items.length === 0) return;
-
-    if (action === "delete") {
-      if (!confirm(`Move ${items.length} items to trash?`)) return;
-    }
+    if (action === "delete" && !confirm(`Move ${items.length} items to trash?`)) return;
 
     const updates = items.map(item => {
       if (action === "publish") return supabase.from("media_posts").update({ status: "published" }).eq("id", item.id);
       if (action === "archive") return supabase.from("media_posts").update({ status: "archived" }).eq("id", item.id);
-      if (action === "delete") return supabase.from("media_posts").update({ deleted: true, deleted_at: new Date().toISOString() }).eq("id", item.id);
+      if (action === "delete")  return supabase.from("media_posts").update({ deleted: true,  deleted_at: new Date().toISOString() }).eq("id", item.id);
       if (action === "restore") return supabase.from("media_posts").update({ deleted: false, deleted_at: null }).eq("id", item.id);
     });
 
@@ -206,100 +179,111 @@ export default function MediaManagement() {
     setSelectedItems(new Set());
   };
 
+  // ── Card ───────────────────────────────────────────────────────────────────
   const MediaCard = ({ item }: { item: MediaPost }) => {
-    const StatusIcon = STATUS_CONFIG[item.deleted ? "trash" : item.status].icon;
-    const statusColor = STATUS_CONFIG[item.deleted ? "trash" : item.status].color;
+    const statusKey = item.deleted ? "trash" : item.status;
+    const StatusIcon  = STATUS_CONFIG[statusKey].icon;
+    const statusColor = STATUS_CONFIG[statusKey].color;
 
     return (
       <motion.div
         layout
-        initial={{ opacity: 0, scale: 0.9 }}
+        initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.9 }}
-        className="break-inside-avoid mb-6"
+        exit={{ opacity: 0, scale: 0.95 }}
+        // On mobile: full-width block. On desktop: break-inside for masonry.
+        className="w-full mb-4 sm:mb-6 sm:break-inside-avoid"
       >
-        <GlassCard className={`overflow-hidden border ${item.deleted ? 'opacity-60' : ''} hover:border-primary/50 transition-all`}>
+        <GlassCard
+          className={`overflow-hidden border transition-all ${item.deleted ? "opacity-60" : ""} hover:border-primary/50`}
+        >
+          {/* ── Thumbnail ── */}
           <div className="relative group">
             {item.media_type === "video" ? (
               <video
                 src={item.thumbnail_url || item.media_url}
-                className="w-full h-64 object-cover"
+                // Shorter on mobile (h-48), taller on desktop (h-64)
+                className="w-full h-48 sm:h-64 object-cover"
                 muted loop playsInline
                 onMouseEnter={e => e.currentTarget.play()}
                 onMouseLeave={e => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
               />
             ) : item.media_type === "audio" ? (
-              <div className="h-64 bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center">
-                <MusicIcon className="w-20 h-20 text-white" />
+              <div className="h-48 sm:h-64 bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center">
+                <MusicIcon className="w-16 h-16 sm:w-20 sm:h-20 text-white" />
               </div>
             ) : (
               <img
                 src={item.thumbnail_url || item.media_url}
                 alt={item.caption}
-                className="w-full h-64 object-cover"
+                className="w-full h-48 sm:h-64 object-cover"
                 loading="lazy"
               />
             )}
 
-            {/* Overlay Controls */}
-            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+            {/* Desktop hover overlay — hidden on mobile (touch has no hover) */}
+            <div className="hidden sm:flex absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity items-center justify-center gap-3 flex-wrap p-2">
               <Button size="sm" onClick={() => updateStatus(item.id, "published")} disabled={item.status === "published"}>
-                <CheckCircle2 className="w-4 h-4" /> Publish
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Publish
               </Button>
               <Button size="sm" variant="secondary" onClick={() => updateStatus(item.id, "draft")}>
-                <Clock className="w-4 h-4" /> Draft
+                <Clock className="w-4 h-4 mr-1" /> Draft
               </Button>
               <Button size="sm" variant="outline" onClick={() => updateStatus(item.id, "archived")}>
-                <Archive className="w-4 h-4" /> Archive
+                <Archive className="w-4 h-4 mr-1" /> Archive
               </Button>
               {item.deleted ? (
                 <>
-                  <Button size="sm" onClick={() => restore(item.id)}><RotateCcw className="w-4 h-4" /> Restore</Button>
-                  <Button size="sm" variant="destructive" onClick={() => permanentDelete(item.id)}><Trash2 className="w-4 h-4" /> Delete Forever</Button>
+                  <Button size="sm" onClick={() => restore(item.id)}><RotateCcw className="w-4 h-4 mr-1" /> Restore</Button>
+                  <Button size="sm" variant="destructive" onClick={() => permanentDelete(item.id)}><Trash2 className="w-4 h-4 mr-1" /> Delete Forever</Button>
                 </>
               ) : (
                 <Button size="sm" variant="destructive" onClick={() => softDelete(item.id)}><Trash2 className="w-4 h-4" /></Button>
               )}
             </div>
 
-            {/* Status Badge */}
-            <div className="absolute top-3 left-3">
-              <Badge variant="secondary" className="bg-black/70 backdrop-blur">
+            {/* Status badge */}
+            <div className="absolute top-2 left-2 sm:top-3 sm:left-3">
+              <Badge variant="secondary" className="bg-black/70 backdrop-blur text-xs">
                 <StatusIcon className={`w-3 h-3 mr-1 ${statusColor}`} />
-                {STATUS_CONFIG[item.deleted ? "trash" : item.status].label}
+                {STATUS_CONFIG[statusKey].label}
               </Badge>
             </div>
 
             {item.is_pinned && !item.deleted && (
-              <Badge className="absolute top-3 right-3 bg-primary text-primary-foreground shadow-lg">
+              <Badge className="absolute top-2 right-2 sm:top-3 sm:right-3 bg-primary text-primary-foreground shadow-lg text-xs">
                 <Sparkles className="w-3 h-3 mr-1" /> Featured
               </Badge>
             )}
           </div>
 
-          <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
+          {/* ── Card body ── */}
+          <div className="p-3 sm:p-4 space-y-3">
+            {/* Caption + checkbox row */}
+            <div className="flex items-start gap-2">
               <input
                 type="checkbox"
                 checked={selectedItems.has(item.id)}
                 onChange={(e) => {
-                  const newSet = new Set(selectedItems);
-                  if (e.target.checked) newSet.add(item.id); else newSet.delete(item.id);
-                  setSelectedItems(newSet);
+                  const next = new Set(selectedItems);
+                  if (e.target.checked) next.add(item.id); else next.delete(item.id);
+                  setSelectedItems(next);
                 }}
-                className="rounded border-gray-600"
+                className="mt-0.5 rounded border-gray-600 shrink-0"
               />
               <p className="font-medium text-sm line-clamp-2 flex-1">{item.caption}</p>
             </div>
 
+            {/* Categories */}
             <div className="flex flex-wrap gap-1">
               {item.categories.slice(0, 3).map(cat => (
                 <Badge key={cat} variant="outline" className="text-xs">{cat}</Badge>
               ))}
             </div>
 
+            {/* Stats + pin */}
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <div className="flex gap-4">
+              <div className="flex gap-3">
                 <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{item.view_count}</span>
                 <span className="flex items-center gap-1"><MousePointerClick className="w-3 h-3" />{item.click_count}</span>
               </div>
@@ -310,8 +294,50 @@ export default function MediaManagement() {
                 className="h-7 px-2 text-xs"
               >
                 <Sparkles className="w-3 h-3 mr-1" />
-                {item.is_pinned ? "Pinned" : "Pin to Top"}
+                {item.is_pinned ? "Pinned" : "Pin"}
               </Button>
+            </div>
+
+            {/* ── Mobile-only action buttons (always visible, no hover needed) ── */}
+            <div className="flex flex-wrap gap-2 sm:hidden pt-1 border-t border-border/40">
+              {item.deleted ? (
+                <>
+                  <Button size="sm" className="flex-1 text-xs" onClick={() => restore(item.id)}>
+                    <RotateCcw className="w-3 h-3 mr-1" /> Restore
+                  </Button>
+                  <Button size="sm" variant="destructive" className="flex-1 text-xs" onClick={() => permanentDelete(item.id)}>
+                    <Trash2 className="w-3 h-3 mr-1" /> Delete Forever
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    className="flex-1 text-xs"
+                    onClick={() => updateStatus(item.id, "published")}
+                    disabled={item.status === "published"}
+                  >
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Publish
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 text-xs"
+                    onClick={() => updateStatus(item.id, "draft")}
+                    disabled={item.status === "draft"}
+                  >
+                    <Clock className="w-3 h-3 mr-1" /> Draft
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="text-xs px-3"
+                    onClick={() => softDelete(item.id)}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </GlassCard>
@@ -319,32 +345,51 @@ export default function MediaManagement() {
     );
   };
 
+  // ── Page ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background/95">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        <h1 className="text-4xl font-bold mb-8 text-center bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+      <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 max-w-7xl">
+        <h1 className="text-2xl sm:text-4xl font-bold mb-6 sm:mb-8 text-center bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
           Media Management
         </h1>
 
-        <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v as TabType); setSelectedItems(new Set()); }}>
-          <TabsList className="grid grid-cols-5 w-full mb-8">
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="published">Published</TabsTrigger>
-            <TabsTrigger value="draft">Draft</TabsTrigger>
-            <TabsTrigger value="archived">Archived</TabsTrigger>
-            <TabsTrigger value="trash">Trash ({media.filter(m => m.deleted).length})</TabsTrigger>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => { setActiveTab(v as TabType); setSelectedItems(new Set()); }}
+        >
+          {/*
+            TabsList:
+            - Mobile: 2-column grid for top row (All, Published, Draft),
+              remainder wraps. We use a simple flex-wrap so it never overflows.
+            - Desktop: unchanged 5-column grid.
+          */}
+          <TabsList className="
+            flex flex-wrap gap-1 h-auto p-1 mb-6
+            sm:grid sm:grid-cols-5 sm:gap-0 sm:h-10 sm:p-0 sm:mb-8
+          ">
+            <TabsTrigger value="all"       className="flex-1 min-w-[calc(50%-2px)] sm:min-w-0">All</TabsTrigger>
+            <TabsTrigger value="published" className="flex-1 min-w-[calc(50%-2px)] sm:min-w-0">Published</TabsTrigger>
+            <TabsTrigger value="draft"     className="flex-1 min-w-[calc(50%-2px)] sm:min-w-0">Draft</TabsTrigger>
+            <TabsTrigger value="archived"  className="flex-1 min-w-[calc(50%-2px)] sm:min-w-0">Archived</TabsTrigger>
+            <TabsTrigger value="trash"     className="flex-1 min-w-[calc(50%-2px)] sm:min-w-0">
+              Trash ({media.filter(m => m.deleted).length})
+            </TabsTrigger>
           </TabsList>
 
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-8">
+          {/* ── Filters ── */}
+          {/*
+            Mobile: full-width vertical stack, each control 100% width.
+            Desktop: unchanged horizontal flex row.
+          */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 mb-6 sm:mb-8">
             <Input
               placeholder="Search caption, location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1"
+              className="w-full sm:flex-1"
             />
             <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-64">
+              <SelectTrigger className="w-full sm:w-64">
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
@@ -356,32 +401,55 @@ export default function MediaManagement() {
             </Select>
 
             {selectedItems.size > 0 && (
-              <div className="flex gap-2">
+              /*
+                Bulk action bar:
+                Mobile: vertical stack of full-width buttons.
+                Desktop: horizontal flex row.
+              */
+              <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
                 {activeTab !== "trash" ? (
                   <>
-                    <Button size="sm" onClick={() => bulkAction("publish")}>Publish Selected</Button>
-                    <Button size="sm" variant="secondary" onClick={() => bulkAction("archive")}>Archive Selected</Button>
-                    <Button size="sm" variant="destructive" onClick={() => bulkAction("delete")}>Move to Trash</Button>
+                    <Button size="sm" className="w-full sm:w-auto" onClick={() => bulkAction("publish")}>
+                      Publish Selected
+                    </Button>
+                    <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => bulkAction("archive")}>
+                      Archive Selected
+                    </Button>
+                    <Button size="sm" variant="destructive" className="w-full sm:w-auto" onClick={() => bulkAction("delete")}>
+                      Move to Trash
+                    </Button>
                   </>
                 ) : (
-                  <Button size="sm" onClick={() => bulkAction("restore")}>Restore Selected</Button>
+                  <Button size="sm" className="w-full sm:w-auto" onClick={() => bulkAction("restore")}>
+                    Restore Selected
+                  </Button>
                 )}
-                <Badge>{selectedItems.size} selected</Badge>
+                <Badge className="self-center">{selectedItems.size} selected</Badge>
               </div>
             )}
           </div>
 
+          {/* ── Grid ── */}
           {isLoading ? (
             <div className="flex justify-center py-20">
               <Loader2 className="w-12 h-12 animate-spin text-primary" />
             </div>
           ) : filteredMedia.length === 0 ? (
             <div className="text-center py-20 text-muted-foreground">
-              <ImageIcon className="w-20 h-20 mx-auto mb-4 opacity-30" />
-              <p className="text-xl">No media found in this section</p>
+              <ImageIcon className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 opacity-30" />
+              <p className="text-lg sm:text-xl">No media found in this section</p>
             </div>
           ) : (
-            <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6">
+            /*
+              Mobile:  single-column block flow (no masonry).
+              Desktop: masonry columns (sm:columns-2 lg:columns-3 xl:columns-4).
+              overflow-x-hidden on the wrapper guarantees zero horizontal scroll.
+            */
+            <div className="
+              w-full overflow-x-hidden
+              block
+              sm:columns-2 lg:columns-3 xl:columns-4 sm:gap-6
+            ">
               {filteredMedia.map(item => (
                 <MediaCard key={item.id} item={item} />
               ))}

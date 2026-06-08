@@ -1690,7 +1690,70 @@ function StatementTable({
           <p className="text-sm font-normal">No matching entries found.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+        {/* Mobile card list — no horizontal scroll */}
+        <div className="md:hidden divide-y divide-white/8">
+          {filtered.map((entry) => {
+            const s = STATUS_STYLE[entry.status];
+            const rb = n0(entry.running_balance);
+            const meta = [
+              { label: "Entry Date",  node: fmtDate(entry.entry_date) },
+              { label: "Due Date",    node: <span className={isOverdue(entry.due_date, entry.status) ? "text-rose-400 font-semibold" : ""}>{fmtDate(entry.due_date)}</span> },
+              { label: "Type",        node: entry.entry_type },
+              { label: "Account",     node: entry.account_code || "—" },
+              { label: "Reference",   node: entry.reference_no || "—" },
+              ...(showProjectCol ? [{ label: "Project", node: projects.find(p => p.id === entry.project_id)?.project_number ?? "—" }] : []),
+            ];
+            return (
+              <div key={entry.id} className="px-4 py-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground text-sm truncate">{entry.description}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{entry.entry_type}</p>
+                  </div>
+                  <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold shrink-0 ${s.badge}`}>{entry.status}</Badge>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  {[
+                    { l: "Charges", v: fmt(n0(entry.charges)), c: "text-rose-400" },
+                    { l: "Credits", v: fmt(n0(entry.credits)), c: "text-emerald-400" },
+                    { l: "Balance", v: fmt(rb),                c: rb > 0 ? "text-rose-400" : rb < 0 ? "text-emerald-400" : "text-muted-foreground" },
+                  ].map(a => (
+                    <div key={a.l} className="rounded-lg bg-white/5 border border-white/8 px-2.5 py-2">
+                      <p className="text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">{a.l}</p>
+                      <p className={`text-xs font-mono font-bold tabular-nums ${a.c}`}>{a.v}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {meta.map((m, mi) => (
+                    <div key={mi} className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">{m.label}</span>
+                      <span className="font-mono text-xs text-muted-foreground/90 truncate text-right">{m.node}</span>
+                    </div>
+                  ))}
+                </div>
+                {canEdit && (
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/8">
+                    <button onClick={() => onEdit(entry)}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground border border-white/10 hover:bg-white/5 transition-all">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      Edit
+                    </button>
+                    <button onClick={() => onDelete(entry)}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/10 transition-all">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm min-w-[800px]">
             <thead>
               <tr className="border-b border-white/8 bg-white/3">
@@ -1720,6 +1783,7 @@ function StatementTable({
             </tbody>
           </table>
         </div>
+        </>
       )}
     </>
   );

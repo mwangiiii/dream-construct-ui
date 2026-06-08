@@ -23,7 +23,7 @@ import { Link } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 
 import { supabase } from "@/lib/supabaseClient";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getPrimaryRole } from "@/lib/auth";
 
 // ─── Layouts ──────────────────────────────────────────────────────────────────
 import MainLayout from "./components/layout/MainLayout";
@@ -106,6 +106,33 @@ import NotFound from "./pages/NotFound";
 import InvoiceViewPage from "./pages/InvoiceViewPage";
 
 const queryClient = new QueryClient();
+
+// ─── Role-aware wrapper for the shared /policies route ───────────────────────
+// Renders PoliciesPage inside whichever layout matches the user's primary role.
+const PolicyRouteWrapper = () => {
+  const [layoutType, setLayoutType] = useState<"admin" | "finance" | "pm" | "loading">("loading");
+
+  useEffect(() => {
+    getCurrentUser().then(user => {
+      if (!user) { setLayoutType("admin"); return; }
+      const role = getPrimaryRole(user.roles);
+      if (role === "finance") setLayoutType("finance");
+      else if (role === "project_manager") setLayoutType("pm");
+      else setLayoutType("admin");
+    });
+  }, []);
+
+  if (layoutType === "loading") {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+  if (layoutType === "finance") return <FinanceLayout><PoliciesPage /></FinanceLayout>;
+  if (layoutType === "pm")      return <ProjectManagerLayout><PoliciesPage /></ProjectManagerLayout>;
+  return <AdminLayout><PoliciesPage /></AdminLayout>;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROLES REFERENCE
@@ -509,7 +536,13 @@ const App = () => {
             <Route path="/contact"  element={<MainLayout><Contact /></MainLayout>} />
             <Route path="/reviews"  element={<MainLayout><Reviews /></MainLayout>} />
             <Route path="/media"    element={<MainLayout><MediaGalleryPage /></MainLayout>} />
-            <Route path="/policies" element={<PoliciesPage />} />
+            <Route path="/policies"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.STAFF}>
+                  <PolicyRouteWrapper />
+                </ProtectedRoute>
+              }
+            />
 
             {/* ══════════════════════════════════════════════════════════════
                 AUTH ROUTES

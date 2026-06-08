@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Target, Heart, Award, Users, Clock, User } from "lucide-react";
+import { Target, Heart, Award, Users, Clock, User, AlertCircle } from "lucide-react";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { supabase } from "@/lib/supabaseClient";
@@ -7,119 +7,109 @@ import { useEffect, useState } from "react";
 
 interface TeamMember {
   id: string;
-  full_name: string | null;
+  full_name: string;
   avatar_url: string | null;
   job_title: string | null;
   role_name: string;
 }
 
-const EXCLUDED_USER_ID = "ca0d3ca5-10db-4e24-a166-e98167e72631";
+// Role display priority — highest wins when a user holds multiple roles
+const ROLE_PRIORITY: Record<string, number> = {
+  admin:           1,
+  manager:         2,
+  project_manager: 3,
+  finance:         4,
+  surveyor:        5,
+};
+
+const ROLE_LABELS: Record<string, string> = {
+  admin:           "Admin",
+  manager:         "Manager",
+  project_manager: "Project Manager",
+  finance:         "Finance",
+  surveyor:        "Surveyor",
+};
+
+const TEAM_ROLES = Object.keys(ROLE_PRIORITY);
 
 const Team = () => {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTeam = async () => {
-      console.log("=== TEAM FETCH DEBUG START ===");
-      console.log("1. Component mounted, starting fetchTeam()");
-
       try {
-        console.log("2. Fetching user_roles first...");
-        
-        // Step 1: Get user_roles with team roles
+        // Step 1: Get all role rows for internal staff roles
         const { data: rolesData, error: rolesError } = await supabase
           .from("user_roles")
           .select("user_id, role_name")
-          .in("role_name", [
-            "admin",
-            "manager",
-            "project_manager",
-            "finance",
-            "surveyor"
-          ])
-          .neq("user_id", EXCLUDED_USER_ID); // Exclude specific user
+          .in("role_name", TEAM_ROLES);
 
-        console.log("3. Roles query result:", { rolesData, rolesError });
+        if (rolesError) throw rolesError;
+        if (!rolesData || rolesData.length === 0) { setTeamMembers([]); return; }
 
-        if (rolesError) {
-          console.error("❌ Error fetching roles:", rolesError);
-          throw rolesError;
+        // Build a map: userId → primary role (highest priority wins)
+        const primaryRole = new Map<string, string>();
+        for (const row of rolesData) {
+          const existing = primaryRole.get(row.user_id);
+          const newPriority = ROLE_PRIORITY[row.role_name] ?? 99;
+          const existingPriority = existing ? (ROLE_PRIORITY[existing] ?? 99) : 99;
+          if (!existing || newPriority < existingPriority) {
+            primaryRole.set(row.user_id, row.role_name);
+          }
         }
 
-        if (!rolesData || rolesData.length === 0) {
-          console.warn("⚠️ No matching roles found");
-          setTeamMembers([]);
-          return;
-        }
+        const userIds = [...primaryRole.keys()];
 
-        // Step 2: Get unique user IDs
-        const userIds = [...new Set(rolesData.map(r => r.user_id))];
-        console.log("4. User IDs to fetch profiles for:", userIds);
-
-        // Step 3: Fetch profiles for those users
+        // Step 2: Fetch profiles — only those with show_on_team_page = true
         const { data: profilesData, error: profilesError } = await supabase
           .from("profiles")
           .select("id, full_name, avatar_url, job_title")
-          .in("id", userIds);
+          .in("id", userIds)
+          .eq("show_on_team_page", true);
 
-        console.log("5. Profiles query result:", { profilesData, profilesError });
+        if (profilesError) throw profilesError;
+        if (!profilesData || profilesData.length === 0) { setTeamMembers([]); return; }
 
-        if (profilesError) {
-          console.error("❌ Error fetching profiles:", profilesError);
-          throw profilesError;
-        }
+        // Step 3: Build deduplicated member list, one entry per person
+        const members: TeamMember[] = profilesData.map(profile => ({
+          id:         profile.id,
+          full_name:  profile.full_name || "Team Member",
+          avatar_url: profile.avatar_url,
+          job_title:  profile.job_title || null,
+          role_name:  primaryRole.get(profile.id) || "surveyor",
+        }));
 
-        // Step 4: Manually join the data
-        const members: TeamMember[] = rolesData
-          .map((role: any) => {
-            const profile = profilesData?.find(p => p.id === role.user_id);
-            
-            if (!profile) {
-              console.warn(`⚠️ No profile found for user_id: ${role.user_id}`);
-              return null;
-            }
+        // Sort: top-level leadership titles first, then role priority, then alphabetically
+        const LEADER_KEYWORDS = ["ceo", "chief executive", "founder", "co-founder", "managing director", "president", "owner"];
+        const isLeader = (m: TeamMember) => {
+          const title = m.job_title?.toLowerCase().trim() ?? "";
+          return LEADER_KEYWORDS.some(kw => title.includes(kw));
+        };
 
-            return {
-              id: profile.id,
-              full_name: profile.full_name || "Unnamed Team Member",
-              avatar_url: profile.avatar_url,
-              job_title: profile.job_title || "Team Member",
-              role_name: role.role_name,
-            };
-          })
-          .filter(Boolean) as TeamMember[];
+        members.sort((a, b) => {
+          if (isLeader(a) !== isLeader(b)) return isLeader(a) ? -1 : 1;
+          const pd = (ROLE_PRIORITY[a.role_name] ?? 99) - (ROLE_PRIORITY[b.role_name] ?? 99);
+          if (pd !== 0) return pd;
+          return a.full_name.localeCompare(b.full_name);
+        });
 
-        console.log("✅ 6. Final team members:", members);
-        console.log("   - Total members:", members.length);
         setTeamMembers(members);
-        
       } catch (err: any) {
-        console.error("❌ FATAL ERROR in fetchTeam()");
-        console.error("   - Message:", err.message);
-        console.error("   - Full error:", err);
+        setError(err.message || "Failed to load team members");
       } finally {
-        console.log("7. Setting loading to false");
         setLoading(false);
-        console.log("=== TEAM FETCH DEBUG END ===");
       }
     };
 
     fetchTeam();
   }, []);
 
-  const getAvatarUrl = (path: string | null) => {
-    if (!path) {
-      console.log("No avatar path → using fallback icon");
-      return null;
-    }
-    if (path.startsWith("http")) {
-      console.log("Avatar is full URL:", path);
-      return path;
-    }
-    console.log("Generating public URL for path:", path);
+  const getAvatarUrl = (path: string | null): string | null => {
+    if (!path) return null;
+    if (path.startsWith("http")) return path;
     const { data } = supabase.storage.from("profile-pictures").getPublicUrl(path);
-    console.log("Generated public URL:", data.publicUrl);
     return data.publicUrl;
   };
 
@@ -175,11 +165,19 @@ const Team = () => {
               </GlassCard>
             ))}
           </div>
+        ) : error ? (
+          <div className="text-center py-20">
+            <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-destructive" />
+            </div>
+            <p className="text-xl font-semibold mb-2">Could not load team</p>
+            <p className="text-sm text-muted-foreground">{error}</p>
+          </div>
         ) : teamMembers.length === 0 ? (
           <div className="text-center py-20">
-            <p className="text-2xl text-muted-foreground mb-4">No team members found.</p>
+            <p className="text-2xl text-muted-foreground mb-4">No team members to display.</p>
             <p className="text-sm text-muted-foreground">
-              Team members will appear here as you add users with admin, manager, project_manager, finance, or surveyor roles.
+              Team members are shown here once an admin enables their visibility.
             </p>
           </div>
         ) : (
@@ -189,7 +187,7 @@ const Team = () => {
 
               return (
                 <motion.div
-                  key={`${member.id}-${member.role_name}`}
+                  key={member.id}
                   initial={{ opacity: 0, scale: 0.95 }}
                   whileInView={{ opacity: 1, scale: 1 }}
                   viewport={{ once: true }}
@@ -200,10 +198,9 @@ const Team = () => {
                       <div className="relative w-32 h-32 mx-auto mb-6 rounded-2xl overflow-hidden border-4 border-background">
                         <img
                           src={avatarSrc}
-                          alt={member.full_name || "Team member"}
+                          alt={member.full_name}
                           className="w-full h-full object-cover"
                           loading="lazy"
-                          onError={(e) => console.warn("Avatar failed to load:", avatarSrc)}
                         />
                       </div>
                     ) : (
@@ -212,14 +209,10 @@ const Team = () => {
                       </div>
                     )}
 
-                    <h3 className="text-2xl font-bold mb-1">{member.full_name || "Team Member"}</h3>
+                    <h3 className="text-2xl font-bold mb-1">{member.full_name}</h3>
 
-                    {member.job_title && member.job_title !== "Team Member" && (
-                      <p className="text-lg text-foreground/80 font-medium mb-1">{member.job_title}</p>
-                    )}
-
-                    <p className="text-primary font-medium capitalize">
-                      {member.role_name === "project_manager" ? "Project Manager" : member.role_name}
+                    <p className="text-primary font-medium">
+                      {member.job_title || (ROLE_LABELS[member.role_name] ?? member.role_name)}
                     </p>
                   </GlassCard>
                 </motion.div>
