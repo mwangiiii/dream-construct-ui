@@ -1192,8 +1192,8 @@ export default function ChangeOrdersTrackingPage({ projectId, canEdit = true }: 
     <AnimatePresence mode="wait">
       {selectedProject ? (
         <motion.div key={selectedProject.id}
-          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}>
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
           <EntriesView
             project={selectedProject}
             canEdit={canEdit}
@@ -1202,8 +1202,8 @@ export default function ChangeOrdersTrackingPage({ projectId, canEdit = true }: 
         </motion.div>
       ) : (
         <motion.div key="picker"
-          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}>
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
           <ProjectPickerView onSelect={setSelectedProject} />
         </motion.div>
       )}

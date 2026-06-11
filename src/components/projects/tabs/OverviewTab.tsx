@@ -1,5 +1,5 @@
 // src/components/projects/tabs/OverviewTab.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
 import {
@@ -94,6 +94,29 @@ export default function OverviewTab({
   const [isEditingStatus, setIsEditingStatus] = useState(false);
   const [isEditingDates,  setIsEditingDates]  = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ── Revised budget from approved change orders ────────────────────────────
+  const [budgetData, setBudgetData] = useState<{
+    original_budget: number;
+    approved_changes: number;
+    revised_budget: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!project?.id || isClient) return;
+    supabase
+      .from("vw_project_budget")
+      .select("original_budget,approved_changes,revised_budget")
+      .eq("project_id", project.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setBudgetData({
+          original_budget:  Number(data.original_budget)  || 0,
+          approved_changes: Number(data.approved_changes) || 0,
+          revised_budget:   Number(data.revised_budget)   || 0,
+        });
+      });
+  }, [project?.id, isClient]);
 
   const [statusValue,   setStatusValue]   = useState(project.status);
   const [startDate,     setStartDate]     = useState(project.start_date || "");
@@ -454,14 +477,48 @@ export default function OverviewTab({
       {/* ── RIGHT COLUMN ── */}
       <div className="space-y-4 sm:space-y-8">
 
-        {/* Budget — unchanged, hidden from client */}
+        {/* Budget Summary — shows revised budget when approved COs exist */}
         {!isClient && (
           <GlassCard>
-            <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-4">Budget Summary</h3>
-            <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 sm:mb-2 break-all">
-              {(project.budget_numeric || 0).toLocaleString()} {project.currency || "KES"}
+            <h3 className="text-base sm:text-lg md:text-xl font-bold mb-3 sm:mb-4">Budget Summary</h3>
+            <div className="text-xl sm:text-2xl md:text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent mb-1 break-all">
+              {(budgetData?.revised_budget ?? project.budget_numeric ?? 0).toLocaleString()}{" "}
+              {project.currency || "KES"}
             </div>
-            <p className="text-xs sm:text-sm text-muted-foreground">Total Project Budget</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mb-3">
+              {budgetData?.approved_changes && budgetData.approved_changes > 0
+                ? "Revised Contract Value"
+                : "Total Project Budget"}
+            </p>
+
+            {/* Breakdown — only when approved change orders exist */}
+            {budgetData && budgetData.approved_changes > 0 && (
+              <div className="border-t border-white/10 pt-3 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Original Budget</span>
+                  <span className="font-mono text-foreground/80">
+                    {budgetData.original_budget.toLocaleString()} {project.currency || "KES"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-emerald-400/80 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    Approved Change Orders
+                  </span>
+                  <span className="font-mono text-emerald-400 font-semibold">
+                    +{budgetData.approved_changes.toLocaleString()} {project.currency || "KES"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-white/10">
+                  <span className="font-semibold text-foreground">Revised Total</span>
+                  <span className="font-mono font-bold text-primary">
+                    {budgetData.revised_budget.toLocaleString()} {project.currency || "KES"}
+                  </span>
+                </div>
+              </div>
+            )}
           </GlassCard>
         )}
 

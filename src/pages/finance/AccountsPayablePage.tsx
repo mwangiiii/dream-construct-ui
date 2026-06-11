@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
-import { VendorSelect, type Vendor } from "@/components/finance/VendorSelect";
+import { VendorSelect, type Vendor, type PMVendorFill } from "@/components/finance/VendorSelect";
 
 // ─── ACTUAL SCHEMA (already migrated) ────────────────────────────────────────
 //
@@ -293,9 +293,10 @@ const inputCls =
   "focus:border-primary/40 transition-all";
 
 const selectCls =
-  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none " +
+  "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none " +
   "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
-  "appearance-none pr-10 font-medium bg-[#111318] border-white/10 [color-scheme:dark]";
+  "appearance-none pr-10 cursor-pointer bg-[hsl(var(--background))] border-white/10 " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 const SelectChevron = () => (
@@ -434,10 +435,8 @@ function APModal({
     setForm(p => deriveAP({
       ...p,
       project_id: projectId,
-      // Auto-fill due_date from expected_completion_date only when not already set
-      due_date: (!p.due_date && proj?.expected_completion_date)
-        ? proj.expected_completion_date
-        : p.due_date,
+      // Always sync due_date from the project's expected completion date
+      due_date: proj?.expected_completion_date ?? p.due_date,
     }));
   };
 
@@ -447,6 +446,16 @@ function APModal({
       ...p,
       vendor_id:   vendor.id,
       vendor_name: vendor.name,
+    }));
+  };
+
+  const handlePMVendorSelect = (fill: PMVendorFill) => {
+    setForm(p => deriveAP({
+      ...p,
+      vendor_id:    null,
+      vendor_name:  fill.vendorName,
+      total_amount: fill.totalAmount > 0 ? fill.totalAmount : p.total_amount,
+      notes:        fill.notes || p.notes,
     }));
   };
 
@@ -527,30 +536,77 @@ function APModal({
                 </Field>
               </div>
 
-              {/* Project budget context — appears after project is selected */}
-              {form.project_id && (
-                <div className="col-span-2">
-                  {budgetLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground/60 py-1">
-                      <span className="w-3 h-3 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
-                      Loading budget…
+              {/* Project Info — read-only panel, auto-populated from selected project */}
+              {form.project_id && (() => {
+                const proj = projects.find(p => p.id === form.project_id);
+                if (!proj) return null;
+                const status = proj.status ?? "planning";
+                const statusCls = {
+                  planning:  "bg-blue-500/15 text-blue-300 border-blue-500/30",
+                  active:    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+                  on_hold:   "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+                  completed: "bg-gray-500/15 text-gray-300 border-gray-500/30",
+                  cancelled: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+                }[status] ?? "bg-blue-500/15 text-blue-300 border-blue-500/30";
+                return (
+                  <div className="col-span-2 rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+                    {/* Project header */}
+                    <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-primary/10 flex-wrap">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-primary">Project Info</span>
+                      <span className="font-mono text-xs text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-lg">
+                        {proj.project_number}
+                      </span>
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusCls}`}>
+                        {status.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-xs font-medium text-foreground truncate">{proj.title}</span>
                     </div>
-                  ) : projectBudget && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {[
-                        { label: "Project Budget",  value: fmtKES(projectBudget.budget),    color: "text-foreground"   },
-                        { label: "AP Committed",    value: fmtKES(projectBudget.committed), color: "text-amber-400"    },
-                        { label: "Budget Remaining",value: fmtKES(projectBudget.remaining), color: projectBudget.remaining < 0 ? "text-rose-400" : "text-emerald-400" },
-                      ].map(c => (
-                        <div key={c.label} className="rounded-xl border border-white/8 bg-white/3 px-3 py-2">
-                          <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 mb-0.5">{c.label}</div>
-                          <div className={`text-xs font-bold font-mono tabular-nums ${c.color}`}>{c.value}</div>
-                        </div>
-                      ))}
+                    {/* Details row */}
+                    <div className="px-4 py-2.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                      {proj.site_city && (
+                        <span className="flex items-center gap-1">
+                          <svg className="w-3 h-3 text-muted-foreground/50" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                            <circle cx="12" cy="9" r="2.5"/>
+                          </svg>
+                          {proj.site_city}{proj.site_country ? `, ${proj.site_country}` : ""}
+                        </span>
+                      )}
+                      {proj.expected_completion_date && (
+                        <span className="flex items-center gap-1">
+                          <svg className="w-3 h-3 text-muted-foreground/50" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+                          </svg>
+                          Due {fmtDate(proj.expected_completion_date)}
+                        </span>
+                      )}
+                      {proj.description && (
+                        <span className="text-muted-foreground/60 italic line-clamp-1 w-full">{proj.description}</span>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                    {/* Budget strip */}
+                    {budgetLoading ? (
+                      <div className="px-4 pb-3 flex items-center gap-2 text-xs text-muted-foreground/60">
+                        <span className="w-3 h-3 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                        Loading budget…
+                      </div>
+                    ) : projectBudget && (
+                      <div className="grid grid-cols-3 gap-px bg-primary/10 border-t border-primary/10">
+                        {[
+                          { label: "Project Budget",   value: fmtKES(projectBudget.budget),    color: "text-foreground"   },
+                          { label: "AP Committed",     value: fmtKES(projectBudget.committed), color: "text-amber-400"    },
+                          { label: "Budget Remaining", value: fmtKES(projectBudget.remaining), color: projectBudget.remaining < 0 ? "text-rose-400" : "text-emerald-400" },
+                        ].map(c => (
+                          <div key={c.label} className="bg-[#0d0d0d]/60 px-3 py-2">
+                            <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 mb-0.5">{c.label}</div>
+                            <div className={`text-xs font-bold font-mono tabular-nums ${c.color}`}>{c.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Vendor selector */}
               <div className="col-span-2">
@@ -558,17 +614,22 @@ function APModal({
                   value={form.vendor_id ?? null}
                   onChange={v => set("vendor_id", v || null)}
                   onSelect={handleVendorSelect}
+                  onPMVendorSelect={handlePMVendorSelect}
+                  projectId={form.project_id || null}
                   label="Vendor *"
-                  hint="Select from the companies master list"
+                  hint={form.project_id ? "Shows project vendors from PM — or pick from master list" : "Select a project first to see PM vendors"}
                   required
                 />
               </div>
 
-              {/* Vendor name — auto-filled, still editable */}
-              <Field label="Vendor Name *" hint="Auto-filled from vendor selection, editable if needed">
-                <input value={form.vendor_name}
-                  onChange={e => set("vendor_name", e.target.value)}
-                  placeholder="e.g. ABC Supplies Ltd." className={inputCls} />
+              {/* Vendor name — auto-filled, read-only */}
+              <Field label="Vendor Name" hint="Auto-filled from vendor selection">
+                <div className={inputCls + " cursor-not-allowed bg-white/3 text-foreground/80 flex items-center justify-between"}>
+                  <span className={form.vendor_name ? "text-foreground" : "text-muted-foreground/50 italic"}>
+                    {form.vendor_name || "Auto-fills when vendor is selected"}
+                  </span>
+                  <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
+                </div>
               </Field>
               <Field label="Invoice Number *">
                 <input value={form.invoice_number}
@@ -585,15 +646,19 @@ function APModal({
                 onChange={v => set("status", v as APStatus)}
                 options={AP_STATUSES.map(s => ({ value: s, label: STATUS_LABEL[s] }))}
               />
-              <Field label="Invoice Date *">
-                <input type="date" value={form.date}
-                  onChange={e => set("date", e.target.value)}
-                  className={inputCls + " [color-scheme:dark]"} />
+              <Field label="Invoice Date" hint="Auto-set to today">
+                <div className={inputCls + " cursor-not-allowed bg-white/3 text-foreground/80 flex items-center justify-between"}>
+                  <span className="font-mono text-sm">{form.date ? fmtDate(form.date) : "—"}</span>
+                  <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
+                </div>
               </Field>
-              <Field label="Due Date *">
-                <input type="date" value={form.due_date}
-                  onChange={e => set("due_date", e.target.value)}
-                  className={inputCls + " [color-scheme:dark]"} />
+              <Field label="Due Date" hint="Auto-set from project completion date">
+                <div className={inputCls + " cursor-not-allowed bg-white/3 text-foreground/80 flex items-center justify-between"}>
+                  <span className={`font-mono text-sm ${form.due_date ? "" : "text-muted-foreground/50 italic text-xs"}`}>
+                    {form.due_date ? fmtDate(form.due_date) : "Select a project to auto-fill"}
+                  </span>
+                  <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
+                </div>
               </Field>
               <Field label="Total Amount (KES) *">
                 <NumericInput value={form.total_amount}
@@ -2016,8 +2081,8 @@ export default function AccountsPayablePage({ projectId, canEdit = true }: Props
       {selectedProject ? (
         <motion.div
           key={selectedProject.id}
-          initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.25 }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
         >
           <ProjectAPView
             project={selectedProject}
@@ -2028,8 +2093,8 @@ export default function AccountsPayablePage({ projectId, canEdit = true }: Props
       ) : (
         <motion.div
           key="picker"
-          initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.25 }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
         >
           <ProjectPickerView onSelect={setSelectedProject} />
         </motion.div>

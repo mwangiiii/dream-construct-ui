@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +18,17 @@ interface Project {
   budget_numeric: number | null;
   site_city: string | null;
   site_country: string | null;
+  start_date: string | null;
   expected_completion_date: string | null;
   created_at: string;
+}
+
+interface PMaterial {
+  id: number;
+  name: string;
+  qty: number;
+  unit: string;
+  unitPrice: number;
 }
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled" | "partial";
@@ -214,7 +223,7 @@ const api = {
   async projects(): Promise<Project[]> {
     const { data, error } = await supabase
       .from("projects")
-      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,start_date,expected_completion_date,created_at")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return (data ?? []) as Project[];
@@ -696,9 +705,10 @@ const inputCls =
   "focus:border-primary/40 transition-all";
 
 const selectCls =
-  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none " +
+  "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none " +
   "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
-  "appearance-none pr-10 font-medium bg-[#111318] border-white/10 [color-scheme:dark]";
+  "appearance-none pr-10 cursor-pointer bg-[hsl(var(--background))] border-white/10 " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 const SelectChevron = () => (
   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
@@ -755,10 +765,11 @@ function ToastStack({ toasts }: { toasts: { id: number; msg: string; type: "succ
 
 // ─── LINE ITEMS SECTION ───────────────────────────────────────────────────────
 function LineItemsSection({
-  title, items, type, onChange,
+  title, items, type, onChange, pmMaterials = [],
 }: {
   title: string; items: LineItem[]; type: "labor" | "material" | "other";
   onChange: (items: LineItem[]) => void;
+  pmMaterials?: PMaterial[];
 }) {
   const isLabor = type === "labor";
   const update = (id: string, field: keyof LineItem, val: unknown) => {
@@ -781,6 +792,42 @@ function LineItemsSection({
         <span className="text-xs font-bold uppercase tracking-[0.15em] text-primary px-2">{title}</span>
         <div className="h-px flex-1 bg-white/10" />
       </div>
+
+      {/* PM material quick-add — only on material section when PM data is available */}
+      {type === "material" && pmMaterials.length > 0 && (
+        <div className="mb-3 relative">
+          <select
+            value=""
+            onChange={e => {
+              if (!e.target.value) return;
+              const m = pmMaterials.find(x => String(x.id) === e.target.value);
+              if (!m) return;
+              const item: LineItem = {
+                id: crypto.randomUUID(),
+                description: m.name,
+                hours: null,
+                qty: m.qty,
+                unit_price: m.unitPrice,
+                amount: Math.round(m.qty * m.unitPrice * 100) / 100,
+              };
+              // Replace placeholder empty rows first, else append
+              const nonEmpty = items.filter(i => i.description.trim() || i.amount > 0);
+              onChange([...nonEmpty, item]);
+              e.currentTarget.value = "";
+            }}
+            className={selectCls}
+          >
+            <option value="">＋ Import from PM $ materials…</option>
+            {pmMaterials.map(m => (
+              <option key={m.id} value={String(m.id)}>
+                {m.name} — {m.qty} {m.unit} @ KES {m.unitPrice.toLocaleString("en-KE")}
+              </option>
+            ))}
+          </select>
+          <SelectChevron />
+        </div>
+      )}
+
       <div className="grid gap-2 mb-2 px-1 grid-cols-[2fr_1fr_1fr_1fr_auto]">
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Description</span>
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">{isLabor ? "Hours" : "Qty"}</span>
@@ -832,10 +879,93 @@ function InvoiceModal({
   const [form, setForm] = useState<InvoiceFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
   const [tab, setTab] = useState<"details" | "items" | "payment">("details");
+  const [pmMaterials, setPMMaterials] = useState<PMaterial[]>([]);
+  const [pmLoading, setPMLoading] = useState(false);
+  const loadedProjectRef = useRef<string | null>(null);
+
   const set = <K extends keyof InvoiceFormData>(k: K, v: InvoiceFormData[K]) => setForm(p => ({ ...p, [k]: v }));
   const { subtotal, subtotalLessDiscount, totalTax, total } = computeTotals(form);
   const isStandalone = showProjectSelector && (!form.project_id || form.project_id === "");
   const tabs = [{ key: "details" as const, label: "Details" }, { key: "items" as const, label: "Line Items" }, { key: "payment" as const, label: "Payment" }];
+
+  // Load workers (→ labor items with computed hours) + PM materials when project changes
+  useEffect(() => {
+    const pid = form.project_id;
+    if (!pid || pid === loadedProjectRef.current) return;
+    loadedProjectRef.current = pid;
+
+    const proj = projects.find(p => p.id === pid);
+    setPMLoading(true);
+
+    Promise.all([
+      // Workers for this project
+      supabase.from("workers").select("id,full_name,role").eq("project_id", pid),
+      // PM materials
+      supabase.from("project_financials")
+        .select("id,material_name,material_quantity,material_unit,price_per_unit")
+        .eq("project_id", pid)
+        .not("material_name", "is", null),
+    ]).then(async ([workersRes, matsRes]) => {
+      const workers = (workersRes.data ?? []) as { id: string; full_name: string; role: string | null }[];
+
+      // Fetch attendance to compute hours
+      let hoursMap: Record<string, number> = {};
+      if (workers.length > 0) {
+        const { data: att } = await supabase
+          .from("worker_attendance")
+          .select("worker_id,check_in,check_out")
+          .in("worker_id", workers.map(w => w.id));
+        (att ?? []).forEach((rec: any) => {
+          if (rec.check_in && rec.check_out) {
+            const [inH, inM]   = rec.check_in.split(":").map(Number);
+            const [outH, outM] = rec.check_out.split(":").map(Number);
+            const hrs = (outH * 60 + outM - inH * 60 - inM) / 60;
+            if (hrs > 0) hoursMap[rec.worker_id] = (hoursMap[rec.worker_id] ?? 0) + hrs;
+          }
+        });
+      }
+
+      // Build labour line items (only on create, not when editing)
+      if (workers.length > 0 && !isEdit) {
+        const laborItems: LineItem[] = workers.map(w => {
+          const hrs = Math.round((hoursMap[w.id] ?? 0) * 100) / 100;
+          return {
+            id: crypto.randomUUID(),
+            description: `${w.full_name}${w.role ? ` · ${w.role.replace(/_/g, " ")}` : ""}`,
+            hours: hrs,
+            qty: null,
+            unit_price: 0,
+            amount: 0,
+          };
+        });
+        setForm(p => ({ ...p, labor_items: laborItems }));
+      }
+
+      // Set PM materials for the quick-add picker
+      setPMMaterials((matsRes.data ?? []).map((m: any) => ({
+        id: m.id,
+        name: m.material_name,
+        qty: Number(m.material_quantity) || 0,
+        unit: m.material_unit || "units",
+        unitPrice: Number(m.price_per_unit) || 0,
+      })));
+
+      // Auto-fill project info fields + due date (editable — user can override)
+      if (proj && !isEdit) {
+        setForm(p => ({
+          ...p,
+          project_start_date: proj.start_date ?? p.project_start_date,
+          project_end_date:   proj.expected_completion_date ?? p.project_end_date,
+          project_location:   proj.site_city
+            ? `${proj.site_city}${proj.site_country ? ", " + proj.site_country : ""}`
+            : p.project_location,
+          due_date: proj.expected_completion_date ?? p.due_date,
+        }));
+      }
+
+      setPMLoading(false);
+    }).catch(() => setPMLoading(false));
+  }, [form.project_id, projects, isEdit]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -930,8 +1060,14 @@ function InvoiceModal({
 
           {tab === "items" && (
             <div className="space-y-6">
+              {pmLoading && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground/70 pb-1">
+                  <span className="w-3 h-3 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+                  Loading workers and PM materials from project…
+                </div>
+              )}
               <LineItemsSection title="Labor"    items={form.labor_items}    type="labor"    onChange={items => set("labor_items", items)} />
-              <LineItemsSection title="Material" items={form.material_items} type="material" onChange={items => set("material_items", items)} />
+              <LineItemsSection title="Material" items={form.material_items} type="material" onChange={items => set("material_items", items)} pmMaterials={pmMaterials} />
               <LineItemsSection title="Other"    items={form.other_items}    type="other"    onChange={items => set("other_items", items)} />
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground mb-3">Totals Preview</p>

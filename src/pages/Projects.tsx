@@ -144,6 +144,22 @@ export default function CompletedProjects() {
       // Fetch additional data in background (non-blocking)
       if (data && data.length > 0) {
         enrichProjectsInBackground(data);
+        // Overlay revised budgets from approved change orders
+        const projectIds = data.map((p: any) => p.id);
+        supabase
+          .from("vw_project_budget")
+          .select("project_id,revised_budget,approved_changes")
+          .in("project_id", projectIds)
+          .then(({ data: budgets }) => {
+            if (!budgets || budgets.length === 0) return;
+            const budgetMap: Record<string, number> = {};
+            (budgets as any[]).forEach(b => {
+              budgetMap[b.project_id] = Number(b.revised_budget) || 0;
+            });
+            setProjects(prev =>
+              prev.map(p => budgetMap[p.id] ? { ...p, budget_numeric: budgetMap[p.id] } : p)
+            );
+          });
       }
     } catch (err: any) {
       console.error("Error fetching completed projects:", err);

@@ -344,9 +344,10 @@ const inputCls =
   "focus:border-primary/40 transition-all";
 
 const selectCls =
-  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none " +
+  "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none " +
   "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
-  "appearance-none pr-10 font-medium bg-[#111318] border-white/10 [color-scheme:dark]";
+  "appearance-none pr-10 cursor-pointer bg-[hsl(var(--background))] border-white/10 " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 const SelectChevron = () => (
@@ -480,6 +481,8 @@ function ARModal({
   const [tab, setTab] = useState<"billing" | "receipt" | "notes">("billing");
   const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [wipCostIncurred, setWipCostIncurred] = useState<number | null>(null);
+  const [wipLoading, setWipLoading] = useState(false);
 
   const set = <K extends keyof ARFormData>(k: K, v: ARFormData[K]) =>
     setForm(p => deriveAR({ ...p, [k]: v }));
@@ -510,6 +513,30 @@ function ARModal({
       .finally(() => { if (!cancelled) setInvoicesLoading(false); });
     return () => { cancelled = true; };
   }, [form.project_id]);
+
+  // Auto-fill amount_billed from WIP cost_incurred when creating a new record
+  useEffect(() => {
+    if (!form.project_id || isEdit) { setWipCostIncurred(null); return; }
+    let cancelled = false;
+    setWipLoading(true);
+    supabase
+      .from("work_in_progress")
+      .select("cost_incurred")
+      .eq("project_id", form.project_id)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const total = (data ?? []).reduce(
+          (sum, row) => sum + (Number((row as any).cost_incurred) || 0), 0
+        );
+        setWipCostIncurred(total);
+        if (total > 0) {
+          setForm(p => deriveAR({ ...p, amount_billed: total }));
+        }
+        setWipLoading(false);
+      })
+      .catch(() => { if (!cancelled) setWipLoading(false); });
+    return () => { cancelled = true; };
+  }, [form.project_id, isEdit]);
 
   // Picking an invoice auto-fills billing number, amount billed and client
   const handleInvoiceSelect = (invoiceId: string) => {
@@ -684,9 +711,32 @@ function ARModal({
                   onChange={e => set("due_date", e.target.value)}
                   className={inputCls + " [color-scheme:dark]"} />
               </Field>
-              <Field label="Amount Billed (KES) *">
-                <NumericInput value={form.amount_billed}
-                  onChange={v => set("amount_billed", v)} placeholder="e.g. 100000" />
+              <Field
+                label="Amount Billed (KES) *"
+                hint={
+                  wipLoading
+                    ? "Loading WIP cost incurred…"
+                    : wipCostIncurred !== null && wipCostIncurred > 0
+                      ? `Auto-filled from WIP cost incurred (${fmtKES(wipCostIncurred)}) — editable`
+                      : wipCostIncurred === 0
+                        ? "No WIP cost incurred found for this project — enter manually"
+                        : undefined
+                }
+              >
+                <div className="relative">
+                  <NumericInput value={form.amount_billed}
+                    onChange={v => set("amount_billed", v)} placeholder="e.g. 100000" />
+                  {wipLoading && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-primary rounded-full animate-spin block" />
+                    </span>
+                  )}
+                  {!wipLoading && wipCostIncurred !== null && wipCostIncurred > 0 && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] uppercase tracking-wider text-primary/60 pointer-events-none">
+                      wip
+                    </span>
+                  )}
+                </div>
               </Field>
               <Field label="Retaining %" hint="Retention held back by client">
                 <NumericInput value={form.retaining_percent}

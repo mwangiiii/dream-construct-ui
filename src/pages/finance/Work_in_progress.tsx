@@ -61,7 +61,8 @@ interface ProjectFinancials {
   job_cost: number;
   tax_cost: number;
   loan_cost: number;
-  cost_incurred: number;     // total of the above
+  payroll_cost: number;      // SUM gross_pay from payroll_checklist
+  cost_incurred: number;     // AP + JC + Tax + Loans + Payroll
   billed_to_date: number;    // from AR
   original_budget: number;   // projects.budget_numeric
   approved_changes: number;  // SUM approved change orders
@@ -234,9 +235,9 @@ const api = {
     return data as WIPSummary;
   },
 
-  // Auto-fill source: cost from all expense modules + billed-to-date from AR.
+  // Auto-fill source: cost from all expense modules + payroll + AR + budget view.
   async projectFinancials(projectId: string): Promise<ProjectFinancials> {
-    const [costRes, arRes, budgetRes] = await Promise.all([
+    const [costRes, arRes, budgetRes, payrollRes] = await Promise.all([
       supabase
         .from("vw_project_cost_incurred")
         .select("ap_cost,job_cost,tax_cost,loan_cost,total_cost")
@@ -252,18 +253,28 @@ const api = {
         .select("original_budget,approved_changes,revised_budget")
         .eq("project_id", projectId)
         .maybeSingle(),
+      supabase
+        .from("payroll_checklist")
+        .select("gross_pay")
+        .eq("project_id", projectId),
     ]);
     if (costRes.error)   throw new Error(`Cost view: ${costRes.error.message}`);
     if (arRes.error)     throw new Error(`AR view: ${arRes.error.message}`);
     if (budgetRes.error) throw new Error(`Budget view: ${budgetRes.error.message}`);
+    // payroll errors are non-fatal — fall back to 0
     const c = costRes.data;
     const b = budgetRes.data;
+    const payrollCost = (payrollRes.data ?? []).reduce(
+      (sum, row) => sum + n0(Number((row as any).gross_pay)), 0
+    );
+    const viewTotal = n0(Number(c?.total_cost));
     return {
       ap_cost:          n0(Number(c?.ap_cost)),
       job_cost:         n0(Number(c?.job_cost)),
       tax_cost:         n0(Number(c?.tax_cost)),
       loan_cost:        n0(Number(c?.loan_cost)),
-      cost_incurred:    n0(Number(c?.total_cost)),
+      payroll_cost:     payrollCost,
+      cost_incurred:    viewTotal + payrollCost,
       billed_to_date:   n0(Number(arRes.data?.total_billed)),
       original_budget:  n0(Number(b?.original_budget)),
       approved_changes: n0(Number(b?.approved_changes)),
@@ -742,13 +753,14 @@ function WIPModal({
 
             {/* Cost breakdown — hairline-divided metric cells */}
             {breakdown && (
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-white/[0.06]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-white/[0.06]">
                 {[
-                  { label: "AP", value: fmt(breakdown.ap_cost), emphasis: false },
-                  { label: "Job Costs", value: fmt(breakdown.job_cost), emphasis: false },
-                  { label: "Taxes", value: fmt(breakdown.tax_cost), emphasis: false },
-                  { label: "Loans", value: fmt(breakdown.loan_cost), emphasis: false },
-                  { label: "Total Cost", value: fmt(breakdown.cost_incurred), emphasis: true },
+                  { label: "AP",       value: fmt(breakdown.ap_cost),       emphasis: false },
+                  { label: "Job Costs",value: fmt(breakdown.job_cost),      emphasis: false },
+                  { label: "Taxes",    value: fmt(breakdown.tax_cost),      emphasis: false },
+                  { label: "Loans",    value: fmt(breakdown.loan_cost),     emphasis: false },
+                  { label: "Payroll",  value: fmt(breakdown.payroll_cost),  emphasis: false },
+                  { label: "Total Cost",value: fmt(breakdown.cost_incurred),emphasis: true  },
                 ].map((c) => (
                   <div
                     key={c.label}
@@ -1991,9 +2003,9 @@ export default function WorkInProgressPage({ projectId, canEdit = true }: Props)
       {selectedProject ? (
         <motion.div
           key="wip"
-          initial={{ opacity: 0, x: 40 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -40 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
         >
           <WIPView project={selectedProject} canEdit={canEdit} onBack={() => setSelectedProject(null)} />
@@ -2001,9 +2013,9 @@ export default function WorkInProgressPage({ projectId, canEdit = true }: Props)
       ) : (
         <motion.div
           key="picker"
-          initial={{ opacity: 0, x: -40 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 40 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
         >
           <ProjectPickerView onSelect={setSelectedProject} />

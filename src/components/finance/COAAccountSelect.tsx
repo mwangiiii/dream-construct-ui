@@ -31,9 +31,10 @@ interface COAAccountSelectProps {
 // ─── DESIGN TOKENS (match AP/AR/WIP/Invoice pages) ──────────────────────────
 
 const selectCls =
-  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none " +
+  "w-full px-3 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none " +
   "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
-  "appearance-none pr-10 font-medium bg-[#111318] border-white/10 [color-scheme:dark]";
+  "appearance-none pr-10 cursor-pointer bg-[hsl(var(--background))] border-white/10 " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 const SelectChevron = () => (
   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
