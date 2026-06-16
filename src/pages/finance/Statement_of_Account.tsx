@@ -814,45 +814,102 @@ const mapAPStatusToEntryStatus = (s: string): EntryStatus => {
   }
 };
 
-async function fetchErpSources(projectId: string | null): Promise<ErpSource[]> {
+// Invoice-type entries (Invoice / Debit Note) → list project invoices and
+// auto-fill the DEBIT (charges) side from the chosen invoice total.
+async function fetchInvoiceSources(projectId: string | null): Promise<ErpSource[]> {
   if (!projectId) return [];
+  const { data } = await supabase
+    .from("invoices")
+    .select("id,invoice_number,client_company_name,total,due_date,invoice_date,status")
+    .eq("project_id", projectId)
+    .order("invoice_date", { ascending: false });
 
-  const [arRes, apRes] = await Promise.all([
-    supabase.from("accounts_receivable")
-      .select("id,billing,purpose,client,amount_billed,amount_received,due_date,status,date")
-      .eq("project_id", projectId)
-      .order("date", { ascending: false }),
-    supabase.from("accounts_payable")
-      .select("id,vendor_name,invoice_number,total_amount,paid_amount,due_date,status,date")
-      .eq("project_id", projectId)
-      .order("date", { ascending: false }),
-  ]);
-
-  const ar: ErpSource[] = (arRes.data ?? []).map((r: any) => ({
-    key:          `ar:${r.id}`,
-    label:        `AR · ${r.billing ?? r.id} · ${r.client ?? r.purpose ?? ""} · ${fmt(r.amount_billed)}`,
-    description:  `Invoice ${r.billing ?? r.id}${r.purpose ? " — " + r.purpose : ""}${r.client ? " (" + r.client + ")" : ""}`,
+  return (data ?? []).map((r: any) => ({
+    key:          `inv:${r.id}`,
+    label:        `Invoice · ${r.invoice_number ?? r.id} · ${r.client_company_name ?? "—"} · ${fmt(r.total)}`,
+    description:  `Invoice ${r.invoice_number ?? r.id}${r.client_company_name ? " — " + r.client_company_name : ""}`,
     entry_type:   "Invoice",
-    charges:      Number(r.amount_billed)   || 0,
-    credits:      Number(r.amount_received) || 0,
-    reference_no: r.billing ?? null,
-    due_date:     r.due_date ?? null,
-    status:       mapARStatusToEntryStatus(r.status),
-  }));
-
-  const ap: ErpSource[] = (apRes.data ?? []).map((r: any) => ({
-    key:          `ap:${r.id}`,
-    label:        `AP · ${r.invoice_number ?? r.id} · ${r.vendor_name ?? ""} · ${fmt(r.total_amount)}`,
-    description:  `Vendor bill ${r.invoice_number ?? r.id}${r.vendor_name ? " — " + r.vendor_name : ""}`,
-    entry_type:   "Debit Note",
-    charges:      Number(r.total_amount) || 0,
-    credits:      Number(r.paid_amount)  || 0,
+    charges:      Number(r.total) || 0,
+    credits:      0,
     reference_no: r.invoice_number ?? null,
     due_date:     r.due_date ?? null,
-    status:       mapAPStatusToEntryStatus(r.status),
+    status:       (r.status === "paid" ? "Paid" : r.status === "overdue" ? "Overdue" : r.status === "partial" ? "Partial" : "Outstanding") as EntryStatus,
+  }));
+}
+
+// Payment-type entries (Payment / Credit Note) → list PM vendors and project
+// workers; auto-fill the CREDITS side from what we'd pay them.
+//
+//   Vendor amount  = Σ project_financials.total_price billed by that vendor
+//   Worker amount  = most recent payroll_checklist.net_pay for that worker
+async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[]> {
+  if (!projectId) return [];
+
+  const [pmRes, wkRes] = await Promise.all([
+    supabase.from("project_financials")
+      .select("id,tender_company_id,total_price,tender_company:tender_companies(id,name)")
+      .eq("project_id", projectId)
+      .not("tender_company_id", "is", null),
+    supabase.from("workers")
+      .select("id,full_name,role,worker_assignments!inner(project_id)")
+      .eq("worker_assignments.project_id", projectId),
+  ]);
+
+  // Roll up PM vendors by tender_company_id
+  const vendorMap = new Map<string, { name: string; total: number }>();
+  for (const r of (pmRes.data ?? []) as any[]) {
+    const tcId = r.tender_company_id as string;
+    if (!tcId) continue;
+    const cur = vendorMap.get(tcId) ?? { name: r.tender_company?.name ?? "—", total: 0 };
+    cur.total += Number(r.total_price) || 0;
+    vendorMap.set(tcId, cur);
+  }
+
+  const workers = ((wkRes.data ?? []) as any[]).map(w => ({
+    id:        w.id as string,
+    full_name: w.full_name as string,
+    role:      (w.role as string | null) ?? null,
   }));
 
-  return [...ar, ...ap];
+  // Latest payroll net pay per worker
+  const netPayByWorker: Record<string, number> = {};
+  if (workers.length) {
+    const payRes = await supabase
+      .from("payroll_checklist")
+      .select("worker_id,net_pay,due_date,project_id")
+      .in("worker_id", workers.map(w => w.id))
+      .eq("project_id", projectId)
+      .order("due_date", { ascending: false });
+    for (const r of (payRes.data ?? []) as any[]) {
+      if (!netPayByWorker[r.worker_id]) netPayByWorker[r.worker_id] = Number(r.net_pay) || 0;
+    }
+  }
+
+  const out: ErpSource[] = [];
+  vendorMap.forEach((v, id) => out.push({
+    key:          `vendor:${id}`,
+    label:        `Vendor · ${v.name} · PM total ${fmt(v.total)}`,
+    description:  `Payment to vendor ${v.name}`,
+    entry_type:   "Payment",
+    charges:      0,
+    credits:      v.total,
+    reference_no: null,
+    due_date:     null,
+    status:       "Outstanding",
+  }));
+  workers.forEach(w => out.push({
+    key:          `worker:${w.id}`,
+    label:        `Worker · ${w.full_name}${w.role ? " · " + w.role.replace(/_/g, " ") : ""} · Net pay ${fmt(netPayByWorker[w.id] || 0)}`,
+    description:  `Payment to worker ${w.full_name}${w.role ? " (" + w.role.replace(/_/g, " ") + ")" : ""}`,
+    entry_type:   "Payment",
+    charges:      0,
+    credits:      netPayByWorker[w.id] || 0,
+    reference_no: null,
+    due_date:     null,
+    status:       "Outstanding",
+  }));
+
+  return out;
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
@@ -881,21 +938,30 @@ function EntryModal({
     entry_date: initial.entry_date ?? todayISO(),
   });
 
-  // ERP import: AR + AP rows the user can drop into this entry
+  // ERP import — sources depend on the chosen entry type:
+  //   Invoice / Debit Note → project invoices → fill DEBIT (charges)
+  //   Payment / Credit Note → PM vendors + project workers → fill CREDITS
+  const importKind: "invoice" | "payment" | null =
+    form.entry_type === "Invoice" || form.entry_type === "Debit Note"   ? "invoice" :
+    form.entry_type === "Payment" || form.entry_type === "Credit Note"  ? "payment" :
+    null;
+
   const [erpSources, setErpSources] = useState<ErpSource[]>([]);
   const [erpLoading, setErpLoading] = useState(false);
   const [erpPick, setErpPick]       = useState<string>("");
 
   useEffect(() => {
+    setErpPick("");
     if (isEdit) return;
     const pid = form.project_id;
-    if (!pid) { setErpSources([]); return; }
+    if (!pid || !importKind) { setErpSources([]); return; }
     setErpLoading(true);
-    fetchErpSources(pid)
+    const loader = importKind === "invoice" ? fetchInvoiceSources(pid) : fetchPaymentSources(pid);
+    loader
       .then(setErpSources)
       .catch(() => setErpSources([]))
       .finally(() => setErpLoading(false));
-  }, [form.project_id, isEdit]);
+  }, [form.project_id, form.entry_type, isEdit, importKind]);
 
   const applyErpSource = (key: string) => {
     setErpPick(key);
@@ -1054,23 +1120,39 @@ function EntryModal({
             </>
           )}
 
-          {/* Import from ERP (AR / AP) — only on create */}
-          {!isEdit && form.project_id && (
+          {/* Import from ERP — type-aware: invoices for DR side, vendors/workers for CR side */}
+          {!isEdit && form.project_id && importKind && (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
               <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Import from ERP</p>
-                {erpLoading && <span className="text-[9px] text-emerald-200/70 italic">Loading AR / AP…</span>}
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
+                  {importKind === "invoice" ? "Pick an invoice (DR)" : "Pick a vendor or worker (CR)"}
+                </p>
+                {erpLoading && <span className="text-[9px] text-emerald-200/70 italic">Loading…</span>}
               </div>
               <Select
                 value={erpPick}
                 onChange={(v) => applyErpSource(v as string)}
                 options={[
-                  { value: "", label: erpSources.length === 0 ? (erpLoading ? "Loading…" : "— No AR / AP rows for this project —") : "— Pick an AR or AP record to import —" },
+                  {
+                    value: "",
+                    label: erpSources.length === 0
+                      ? (erpLoading
+                          ? "Loading…"
+                          : importKind === "invoice"
+                            ? "— No invoices on this project —"
+                            : "— No PM vendors or workers on this project —")
+                      : (importKind === "invoice"
+                          ? "— Pick an invoice to import —"
+                          : "— Pick a vendor or worker to pay —"),
+                  },
                   ...erpSources.map(s => ({ value: s.key, label: s.label })),
                 ]}
               />
               <p className="text-[9px] text-emerald-200/60 mt-1.5 italic leading-relaxed">
-                Picks one Accounts Receivable invoice or Accounts Payable bill and pre-fills the description, type, charges, credits, reference and due date below.
+                {importKind === "invoice"
+                  ? "Lists invoices raised under this project. Picking one auto-fills the description, reference, due date and Debit amount below."
+                  : "Lists PM vendors (project_financials → tender_companies) and workers assigned to this project. Picking one auto-fills the description and Credits amount."
+                }
               </p>
             </div>
           )}
@@ -1111,10 +1193,10 @@ function EntryModal({
             label="Amounts"
             dotColor="bg-emerald-400"
             textColor="text-emerald-400"
-            sub="charges = debits owed · credits = payments received"
+            sub="debit = money owed to us · credits = payment to be paid to someone else"
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Charges (KES)" hint="Amount billed / invoiced">
+            <Field label="Debit (KES)" hint="Money owed to us">
               <div className="relative">
                 <input
                   type="number"
@@ -1132,7 +1214,7 @@ function EntryModal({
                 </span>
               </div>
             </Field>
-            <Field label="Credits (KES)" hint="Amount paid / received">
+            <Field label="Credits (KES)" hint="Payment to be paid to someone else">
               <div className="relative">
                 <input
                   type="number"
