@@ -107,6 +107,213 @@ function toWritable(form: ISFormData): ISFormData {
   };
 }
 
+// ─── AUTO-DERIVE FROM ERP (read-only, Kenya tax law) ──────────────────────────
+//
+// Four of the five Income Statement input lines are derived automatically from
+// the rest of the ERP whenever the period + project changes. They are made
+// read-only in the form. The fifth — Income Tax Expense — is computed locally
+// using the Kenya resident corporate income-tax rate (Income Tax Act, Cap. 470).
+//
+// Derivation rules (per user spec):
+//
+//   Gross Revenue          = Σ accounts_receivable.amount_billed
+//                            scoped to the project, where AR.date is within
+//                            the period window [start_date, end_date].
+//
+//   Returns & Allowances   = Σ accounts_payable.total_amount
+//                            scoped to the project, where AP.date is within
+//                            the period window.
+//
+//   Cost of Goods Sold     = Σ material_items[].amount across invoices
+//                            scoped to the project, where invoices.invoice_date
+//                            is within the period window.
+//
+//   Operating Expenses     = Σ accounts_payable.total_amount for the project
+//                          + Σ accounts_payable.total_amount where project_id
+//                            IS NULL (firm-wide AP),
+//                            both within the period window.
+//
+//   Income Tax Expense     = max(0, income_before_tax × KENYA_CORPORATE_TAX_RATE)
+//                            where income_before_tax = operating_income
+//                            + other_income − other_expenses.
+
+const KENYA_CORPORATE_TAX_RATE = 0.30; // Resident company rate per ITA Cap. 470
+
+// ─── DE-DUPLICATED CONSOLIDATION (global income statements table) ─────────────
+// Each per-project income statement bakes in the firm-wide AR / AP for its
+// period as Other Income and Other Expenses (and adds firm-wide AP into
+// Operating Expenses). If we naively SUM(s.operating_expenses) and
+// SUM(s.other_income) / SUM(s.other_expenses) across N project statements in
+// the same period, the firm-wide portion gets multiplied N times.
+//
+// This helper groups statements by (start_date, end_date) and counts the
+// firm-wide portion **once per period**:
+//
+//   Per period:
+//     project_OpEx_period = Σ (s.operating_expenses − s.other_expenses)
+//     period_OpEx         = project_OpEx_period + firm_wide_AP_for_period
+//     period_other_income = firm_wide_AR_for_period         (once)
+//     period_other_exp    = firm_wide_AP_for_period         (once)
+//
+//   firm_wide_AR_for_period and firm_wide_AP_for_period are read from any
+//   single row in the period (they're identical across all project rows
+//   sharing the same period, because they're sourced from the same firm-wide
+//   query).
+//
+// Income tax is RECOMPUTED from the corrected income-before-tax so the global
+// total reflects the real Kenya 30% on the de-duplicated figures.
+
+interface ConsolidatedTotals {
+  gross_revenue:          number;
+  returns_and_allowances: number;
+  cost_of_goods_sold:     number;
+  operating_expenses:     number;
+  other_income:           number;
+  other_expenses:         number;
+  income_tax_expense:     number;
+  net_revenue:            number;
+  gross_profit:           number;
+  operating_income:       number;
+  income_before_tax:      number;
+  net_income:             number;
+}
+
+function computeConsolidatedTotals(statements: IncomeStatement[]): ConsolidatedTotals {
+  const byPeriod = new Map<string, IncomeStatement[]>();
+  for (const s of statements) {
+    const key = `${s.start_date}_${s.end_date}`;
+    const arr = byPeriod.get(key) ?? [];
+    arr.push(s);
+    byPeriod.set(key, arr);
+  }
+
+  let gross_revenue = 0, returns_and_allowances = 0, cost_of_goods_sold = 0;
+  let operating_expenses = 0, other_income = 0, other_expenses = 0;
+  let income_tax_expense = 0;
+
+  byPeriod.forEach((rows) => {
+    const periodGross   = rows.reduce((a, s) => a + Number(s.gross_revenue),          0);
+    const periodReturns = rows.reduce((a, s) => a + Number(s.returns_and_allowances), 0);
+    const periodCOGS    = rows.reduce((a, s) => a + Number(s.cost_of_goods_sold),     0);
+    const periodProjectOpEx = rows.reduce(
+      (a, s) => a + (Number(s.operating_expenses) - Number(s.other_expenses)),
+      0,
+    );
+
+    // Firm-wide portion — identical across rows sharing this period.
+    const firmAR = Number(rows[0].other_income)   || 0;
+    const firmAP = Number(rows[0].other_expenses) || 0;
+
+    const periodOpEx = periodProjectOpEx + firmAP; // count firm-wide once
+
+    const periodNetRev      = periodGross - periodReturns;
+    const periodGrossProfit = periodNetRev - periodCOGS;
+    const periodOpIncome    = periodGrossProfit - periodOpEx;
+    const periodBeforeTax   = periodOpIncome + firmAR - firmAP;
+    const periodTax         = Math.max(0, periodBeforeTax * KENYA_CORPORATE_TAX_RATE);
+
+    gross_revenue          += periodGross;
+    returns_and_allowances += periodReturns;
+    cost_of_goods_sold     += periodCOGS;
+    operating_expenses     += periodOpEx;
+    other_income           += firmAR;
+    other_expenses         += firmAP;
+    income_tax_expense     += periodTax;
+  });
+
+  const net_revenue       = gross_revenue - returns_and_allowances;
+  const gross_profit      = net_revenue - cost_of_goods_sold;
+  const operating_income  = gross_profit - operating_expenses;
+  const income_before_tax = operating_income + other_income - other_expenses;
+  const net_income        = income_before_tax - income_tax_expense;
+
+  return {
+    gross_revenue, returns_and_allowances, cost_of_goods_sold,
+    operating_expenses, other_income, other_expenses, income_tax_expense,
+    net_revenue, gross_profit, operating_income, income_before_tax, net_income,
+  };
+}
+
+interface DerivedIS {
+  gross_revenue:          number;
+  returns_and_allowances: number;
+  cost_of_goods_sold:     number;
+  operating_expenses:     number;
+  other_income:           number;
+  other_expenses:         number;
+}
+
+async function deriveISTotals(
+  startISO: string,
+  endISO: string,
+  projectId: string | null,
+): Promise<DerivedIS> {
+  if (!startISO || !endISO) {
+    return {
+      gross_revenue: 0, returns_and_allowances: 0, cost_of_goods_sold: 0,
+      operating_expenses: 0, other_income: 0, other_expenses: 0,
+    };
+  }
+
+  const sum = <T,>(rows: T[] | null | undefined, pick: (r: T) => number) =>
+    (rows ?? []).reduce((s, r) => s + (Number(pick(r)) || 0), 0);
+
+  // 1. AR amounts billed in window, scoped to project
+  let arQ: any = supabase.from("accounts_receivable")
+    .select("amount_billed,project_id,date")
+    .gte("date", startISO).lte("date", endISO);
+  if (projectId) arQ = arQ.eq("project_id", projectId);
+
+  // 2. AP project-linked totals in window
+  let apProjectQ: any = supabase.from("accounts_payable")
+    .select("total_amount,project_id,date")
+    .gte("date", startISO).lte("date", endISO);
+  if (projectId) apProjectQ = apProjectQ.eq("project_id", projectId);
+
+  // 3. Invoice material line items in window, scoped to project
+  let invQ: any = supabase.from("invoices")
+    .select("material_items,project_id,invoice_date")
+    .gte("invoice_date", startISO).lte("invoice_date", endISO);
+  if (projectId) invQ = invQ.eq("project_id", projectId);
+
+  // 4. Firm-wide AR (project_id IS NULL) in window → Other Income
+  const arGlobalQ: any = supabase.from("accounts_receivable")
+    .select("amount_billed,project_id,date")
+    .is("project_id", null)
+    .gte("date", startISO).lte("date", endISO);
+
+  // 5. Firm-wide AP (project_id IS NULL) in window → Other Expenses, + part of OpEx
+  const apGlobalQ: any = supabase.from("accounts_payable")
+    .select("total_amount,project_id,date")
+    .is("project_id", null)
+    .gte("date", startISO).lte("date", endISO);
+
+  const [arRes, apProjectRes, invRes, arGlobalRes, apGlobalRes] = await Promise.all([
+    arQ, apProjectQ, invQ, arGlobalQ, apGlobalQ,
+  ]);
+
+  const gross_revenue          = sum(arRes.data as { amount_billed: number }[], r => r.amount_billed);
+  const returns_and_allowances = sum(apProjectRes.data as { total_amount: number }[], r => r.total_amount);
+
+  // COGS — sum nested material_items[].amount across all matching invoices
+  const cost_of_goods_sold = (invRes.data ?? []).reduce((acc: number, row: any) => {
+    const items = Array.isArray(row.material_items) ? row.material_items : [];
+    return acc + items.reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0);
+  }, 0);
+
+  // Firm-wide AR / AP — feed Other Income / Other Expenses AND OpEx
+  const other_income   = sum(arGlobalRes.data as { amount_billed: number }[], r => r.amount_billed);
+  const other_expenses = sum(apGlobalRes.data as { total_amount: number }[], r => r.total_amount);
+
+  // OpEx — project AP + firm-wide AP, both within the same window
+  const operating_expenses = returns_and_allowances + other_expenses;
+
+  return {
+    gross_revenue, returns_and_allowances, cost_of_goods_sold,
+    operating_expenses, other_income, other_expenses,
+  };
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 const api = {
   async projects(): Promise<Project[]> {
@@ -178,6 +385,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function ReadOnlyMoney({ value, hint }: { value: number; hint?: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        title="Auto-derived from ERP — not editable"
+        className="w-full px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.08] text-foreground/85 cursor-not-allowed select-none flex items-center justify-between gap-2"
+      >
+        <span className="font-mono tabular-nums truncate">{fmt(value || 0)}</span>
+        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80 shrink-0">
+          AUTO
+        </span>
+      </div>
+      {hint && <span className="text-[10px] text-muted-foreground/60 italic">{hint}</span>}
+    </div>
+  );
+}
+
 function SectionDivider({ label, dotColor, textColor }: { label: string; dotColor: string; textColor: string }) {
   return (
     <div className="col-span-2 flex items-center gap-2 pt-1">
@@ -204,15 +428,52 @@ function StatementModal({
 }) {
   const [form, setForm] = useState<ISFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoError, setAutoError]     = useState<string | null>(null);
 
   const set = <K extends keyof ISFormData>(k: K, v: ISFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
+  // ── Auto-derive Gross Revenue / Returns / COGS / OpEx from the ERP whenever
+  //    the period or the linked project changes. The five derived fields are
+  //    rendered as read-only.
+  useEffect(() => {
+    let cancelled = false;
+    if (!form.start_date || !form.end_date) return;
+    setAutoLoading(true);
+    setAutoError(null);
+    deriveISTotals(form.start_date, form.end_date, form.project_id ?? null)
+      .then(d => {
+        if (cancelled) return;
+        setForm(p => ({
+          ...p,
+          gross_revenue:          d.gross_revenue,
+          returns_and_allowances: d.returns_and_allowances,
+          cost_of_goods_sold:     d.cost_of_goods_sold,
+          operating_expenses:     d.operating_expenses,
+          other_income:           d.other_income,
+          other_expenses:         d.other_expenses,
+        }));
+      })
+      .catch(err => { if (!cancelled) setAutoError(err instanceof Error ? err.message : "Auto-derive failed."); })
+      .finally(() => { if (!cancelled) setAutoLoading(false); });
+    return () => { cancelled = true; };
+  }, [form.start_date, form.end_date, form.project_id]);
+
+  // Live running totals
   const netRev    = (form.gross_revenue || 0) - (form.returns_and_allowances || 0);
   const grossPnL  = netRev - (form.cost_of_goods_sold || 0);
   const opIncome  = grossPnL - (form.operating_expenses || 0);
   const beforeTax = opIncome + (form.other_income || 0) - (form.other_expenses || 0);
-  const netInc    = beforeTax - (form.income_tax_expense || 0);
+
+  // ── Income Tax Expense — Kenya resident corporate rate (30%), auto-recompute
+  //    whenever any derived figure OR other_income / other_expenses changes.
+  const derivedTax = Math.max(0, beforeTax * KENYA_CORPORATE_TAX_RATE);
+  useEffect(() => {
+    setForm(p => p.income_tax_expense === derivedTax ? p : { ...p, income_tax_expense: derivedTax });
+  }, [derivedTax]);
+
+  const netInc = beforeTax - (form.income_tax_expense || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -314,29 +575,43 @@ function StatementModal({
             />
           </Field>
 
+          {/* Auto-derive banner */}
+          <div className="col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
+            <svg className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-emerald-300 mb-1 flex items-center gap-2">
+                Auto-derived from ERP
+                {autoLoading && <span className="w-3 h-3 border-2 border-emerald-300/30 border-t-emerald-300 rounded-full animate-spin" />}
+              </p>
+              <p className="text-[11px] text-emerald-200/70 leading-relaxed">
+                Revenue, Returns & Allowances, COGS, OpEx, Other Income, Other Expenses and Income Tax are all computed live from AR / AP / Invoices for the selected period{form.project_id ? " (this project; Other Income / Expenses still come from the firm-wide AR / AP)" : " (firm-wide)"}.
+                Income tax uses the Kenya resident corporate rate ({(KENYA_CORPORATE_TAX_RATE * 100).toFixed(0)}%, ITA Cap. 470). All seven fields are read-only.
+              </p>
+              {autoError && (
+                <p className="text-[10px] mt-1.5 text-rose-300 italic">⚠ {autoError}</p>
+              )}
+              {(!form.start_date || !form.end_date) && (
+                <p className="text-[10px] mt-1.5 text-amber-300/90 italic">Set the start and end dates above to populate these figures.</p>
+              )}
+            </div>
+          </div>
+
           {/* Revenue */}
           <SectionDivider label="Revenue" dotColor="bg-sky-400" textColor="text-sky-400" />
           <Field label="Gross Revenue (KES) *">
-            <input type="number" step="0.01" min="0"
-              value={form.gross_revenue || ""}
-              onChange={e => set("gross_revenue", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-              className={inputCls} />
+            <ReadOnlyMoney value={form.gross_revenue} hint="Σ AR billed in period (project)" />
           </Field>
           <Field label="Returns & Allowances (KES)">
-            <input type="number" step="0.01" min="0"
-              value={form.returns_and_allowances || ""}
-              onChange={e => set("returns_and_allowances", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-              className={inputCls} />
+            <ReadOnlyMoney value={form.returns_and_allowances} hint="Σ AP totals in period (project)" />
           </Field>
 
           {/* COGS */}
           <SectionDivider label="Cost of Goods Sold" dotColor="bg-rose-400" textColor="text-rose-400" />
           <div className="col-span-2">
             <Field label="Cost of Goods Sold (KES) *">
-              <input type="number" step="0.01" min="0"
-                value={form.cost_of_goods_sold || ""}
-                onChange={e => set("cost_of_goods_sold", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-                className={inputCls} />
+              <ReadOnlyMoney value={form.cost_of_goods_sold} hint="Σ material line items on project invoices in period" />
             </Field>
           </div>
 
@@ -344,36 +619,24 @@ function StatementModal({
           <SectionDivider label="Operating Expenses" dotColor="bg-orange-400" textColor="text-orange-400" />
           <div className="col-span-2">
             <Field label="Total Operating Expenses (KES)">
-              <input type="number" step="0.01" min="0"
-                value={form.operating_expenses || ""}
-                onChange={e => set("operating_expenses", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-                className={inputCls} />
+              <ReadOnlyMoney value={form.operating_expenses} hint="Σ AP project-linked + AP firm-wide in period" />
             </Field>
           </div>
 
           {/* Other Income / Expenses */}
           <SectionDivider label="Other Income / Expenses" dotColor="bg-emerald-400" textColor="text-emerald-400" />
           <Field label="Other Income (KES)">
-            <input type="number" step="0.01"
-              value={form.other_income || ""}
-              onChange={e => set("other_income", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-              className={inputCls} />
+            <ReadOnlyMoney value={form.other_income} hint="Σ AR firm-wide (project_id IS NULL) in period" />
           </Field>
           <Field label="Other Expenses (KES)">
-            <input type="number" step="0.01" min="0"
-              value={form.other_expenses || ""}
-              onChange={e => set("other_expenses", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-              className={inputCls} />
+            <ReadOnlyMoney value={form.other_expenses} hint="Σ AP firm-wide (project_id IS NULL) in period" />
           </Field>
 
           {/* Tax */}
           <SectionDivider label="Tax" dotColor="bg-violet-400" textColor="text-violet-400" />
           <div className="col-span-2">
-            <Field label="Income Tax Expense (KES)">
-              <input type="number" step="0.01" min="0"
-                value={form.income_tax_expense || ""}
-                onChange={e => set("income_tax_expense", e.target.value === "" ? 0 : parseFloat(e.target.value))}
-                className={inputCls} />
+            <Field label={`Income Tax Expense (KES) — Kenya ${(KENYA_CORPORATE_TAX_RATE * 100).toFixed(0)}%`}>
+              <ReadOnlyMoney value={form.income_tax_expense} hint={`Income Before Tax × ${(KENYA_CORPORATE_TAX_RATE * 100).toFixed(0)}% · Income Tax Act Cap. 470`} />
             </Field>
           </div>
 
@@ -683,10 +946,14 @@ function GlobalIncomeStatementsTable({
     return g;
   }, [filtered]);
 
-  const grandRevenue  = statements.reduce((a, s) => a + Number(s.gross_revenue), 0);
-  const grandCOGS     = statements.reduce((a, s) => a + Number(s.cost_of_goods_sold), 0);
-  const grandOpEx     = statements.reduce((a, s) => a + Number(s.operating_expenses), 0);
-  const grandNetIncome = statements.reduce((a, s) => a + Number(s.net_income), 0);
+  // De-duplicated consolidation: firm-wide AR / AP are counted ONCE per unique
+  // period instead of once per per-project row, so OpEx / Other Income /
+  // Other Expenses don't get multiplied.
+  const consolidated   = useMemo(() => computeConsolidatedTotals(statements), [statements]);
+  const grandRevenue   = consolidated.gross_revenue;
+  const grandCOGS      = consolidated.cost_of_goods_sold;
+  const grandOpEx      = consolidated.operating_expenses;
+  const grandNetIncome = consolidated.net_income;
   const finalizedCount = statements.filter((s) => s.status === "Final").length;
   const finalizedPct  = statements.length > 0 ? Math.round((finalizedCount / statements.length) * 100) : 0;
   const standaloneCount = statements.filter((s) => !s.project_id).length;
@@ -777,8 +1044,9 @@ function GlobalIncomeStatementsTable({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
             {STATEMENT_STATUSES.map((st) => {
               const s = STATUS_STYLE_IS[st];
-              const count = statements.filter((x) => x.status === st).length;
-              const net = statements.filter((x) => x.status === st).reduce((a, x) => a + Number(x.net_income), 0);
+              const statusRows = statements.filter((x) => x.status === st);
+              const count = statusRows.length;
+              const net = computeConsolidatedTotals(statusRows).net_income;
               return (
                 <button
                   key={st}
@@ -863,11 +1131,14 @@ function GlobalIncomeStatementsTable({
                 const s = STATUS_STYLE_IS[stStatus];
                 const isOpen = expanded[stStatus];
                 const rows = grouped[stStatus]!;
-                const subtotalRevenue  = rows.reduce((a, r) => a + Number(r.gross_revenue), 0);
-                const subtotalNetRev   = rows.reduce((a, r) => a + Number(r.net_revenue), 0);
-                const subtotalGross    = rows.reduce((a, r) => a + Number(r.gross_profit), 0);
-                const subtotalOpIncome = rows.reduce((a, r) => a + Number(r.operating_income), 0);
-                const subtotalNet      = rows.reduce((a, r) => a + Number(r.net_income), 0);
+                // De-duplicated subtotals: firm-wide AR / AP counted once per
+                // (start_date, end_date) period inside this status group.
+                const subC = computeConsolidatedTotals(rows);
+                const subtotalRevenue  = subC.gross_revenue;
+                const subtotalNetRev   = subC.net_revenue;
+                const subtotalGross    = subC.gross_profit;
+                const subtotalOpIncome = subC.operating_income;
+                const subtotalNet      = subC.net_income;
 
                 return (
                   <div key={stStatus}>

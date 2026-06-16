@@ -130,37 +130,48 @@ const newLineItem = (): LineItem => ({
   amount: 0,
 });
 
-const makeEmpty = (projectId: string | null): InvoiceFormData => ({
-  project_id:             projectId,
-  invoice_number:         "",
-  status:                 "draft",
-  company_name:           "",
-  company_address:        null,
-  company_city_state_zip: null,
-  company_phone:          null,
-  company_email:          null,
-  client_company_name:    "",
-  client_contact_name:    null,
-  client_address:         null,
-  client_phone:           null,
-  client_email:           null,
-  project_start_date:     null,
-  project_end_date:       null,
-  project_location:       null,
-  project_client_ref:     null,
-  invoice_date:           new Date().toISOString().split("T")[0],
-  due_date:               "",
-  labor_items:            [newLineItem()],
-  material_items:         [newLineItem()],
-  other_items:            [newLineItem()],
-  discount_amount:        0,
-  tax_rate:               5,
-  payment_terms:          null,
-  bank_account_code:      null,
-  bank_name:              null,
-  account_number:         null,
-  notes:                  null,
-});
+const isoDate = (d: Date) => d.toISOString().split("T")[0];
+
+const defaultDueDate = (invoiceDateISO: string): string => {
+  const base = new Date(invoiceDateISO + "T00:00:00");
+  base.setDate(base.getDate() + 30);
+  return isoDate(base);
+};
+
+const makeEmpty = (projectId: string | null): InvoiceFormData => {
+  const today = isoDate(new Date());
+  return {
+    project_id:             projectId,
+    invoice_number:         "",
+    status:                 "draft",
+    company_name:           "",
+    company_address:        null,
+    company_city_state_zip: null,
+    company_phone:          null,
+    company_email:          null,
+    client_company_name:    "",
+    client_contact_name:    null,
+    client_address:         null,
+    client_phone:           null,
+    client_email:           null,
+    project_start_date:     null,
+    project_end_date:       null,
+    project_location:       null,
+    project_client_ref:     null,
+    invoice_date:           today,
+    due_date:               defaultDueDate(today),
+    labor_items:            [newLineItem()],
+    material_items:         [newLineItem()],
+    other_items:            [newLineItem()],
+    discount_amount:        0,
+    tax_rate:               5,
+    payment_terms:          null,
+    bank_account_code:      null,
+    bank_name:              null,
+    account_number:         null,
+    notes:                  null,
+  };
+};
 
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
 const fmtKES = (n: number) =>
@@ -730,6 +741,20 @@ function Field({ label, hint, children, span2 }: {
   );
 }
 
+function ReadOnlyField({ value, badge = "AUTO" }: { value: string; badge?: string }) {
+  return (
+    <div
+      title="Auto-filled — not editable"
+      className="w-full px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.08] text-foreground/85 cursor-not-allowed select-none flex items-center justify-between gap-2 min-h-[38px]"
+    >
+      <span className="truncate font-medium">{value || "—"}</span>
+      <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80 shrink-0">
+        {badge}
+      </span>
+    </div>
+  );
+}
+
 function NumericInput({ value, onChange, step = "0.01", min = "0", max, placeholder }: {
   value: number; onChange: (n: number) => void;
   step?: string; min?: string; max?: string; placeholder?: string;
@@ -891,7 +916,25 @@ function InvoiceModal({
   // Load workers (→ labor items with computed hours) + PM materials when project changes
   useEffect(() => {
     const pid = form.project_id;
-    if (!pid || pid === loadedProjectRef.current) return;
+
+    // Un-linked → reset the auto-filled project info + due_date to defaults (create only).
+    if (!pid) {
+      if (loadedProjectRef.current && !isEdit) {
+        setForm(p => ({
+          ...p,
+          project_start_date: null,
+          project_end_date:   null,
+          project_location:   null,
+          project_client_ref: null,
+          due_date:           defaultDueDate(p.invoice_date),
+        }));
+        setPMMaterials([]);
+      }
+      loadedProjectRef.current = null;
+      return;
+    }
+
+    if (pid === loadedProjectRef.current) return;
     loadedProjectRef.current = pid;
 
     const proj = projects.find(p => p.id === pid);
@@ -950,16 +993,17 @@ function InvoiceModal({
         unitPrice: Number(m.price_per_unit) || 0,
       })));
 
-      // Auto-fill project info fields + due date (editable — user can override)
+      // Auto-fill project info fields + due date (read-only in the UI).
       if (proj && !isEdit) {
         setForm(p => ({
           ...p,
-          project_start_date: proj.start_date ?? p.project_start_date,
-          project_end_date:   proj.expected_completion_date ?? p.project_end_date,
+          project_start_date: proj.start_date ?? null,
+          project_end_date:   proj.expected_completion_date ?? null,
           project_location:   proj.site_city
             ? `${proj.site_city}${proj.site_country ? ", " + proj.site_country : ""}`
-            : p.project_location,
-          due_date: proj.expected_completion_date ?? p.due_date,
+            : null,
+          project_client_ref: proj.project_number ?? null,
+          due_date:           proj.expected_completion_date ?? defaultDueDate(p.invoice_date),
         }));
       }
 
@@ -1019,11 +1063,14 @@ function InvoiceModal({
                     <SelectChevron />
                   </div>
                 </Field>
-                <Field label="Invoice Date *">
-                  <input type="date" value={form.invoice_date} onChange={e => set("invoice_date", e.target.value)} className={inputCls + " [color-scheme:dark]"} />
+                <Field label="Invoice Date *" hint="Auto-set to today's date">
+                  <ReadOnlyField value={fmtDate(form.invoice_date)} />
                 </Field>
-                <Field label="Due Date *">
-                  <input type="date" value={form.due_date} onChange={e => set("due_date", e.target.value)} className={inputCls + " [color-scheme:dark]"} />
+                <Field
+                  label="Due Date *"
+                  hint={form.project_id ? "Auto: linked project's expected completion date" : "Auto: 30 days from invoice date"}
+                >
+                  <ReadOnlyField value={fmtDate(form.due_date)} />
                 </Field>
               </div>
               <div>
@@ -1047,12 +1094,27 @@ function InvoiceModal({
                 </div>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary mb-3">Project Info</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary mb-3">
+                  Project Info
+                  {!form.project_id && (
+                    <span className="ml-2 text-[9px] font-normal text-muted-foreground/70 normal-case tracking-normal italic">
+                      Link a project above to auto-fill these fields
+                    </span>
+                  )}
+                </p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Start Date"><input type="date" value={form.project_start_date ?? ""} onChange={e => set("project_start_date", e.target.value || null)} className={inputCls + " [color-scheme:dark]"} /></Field>
-                  <Field label="End Date"><input type="date" value={form.project_end_date ?? ""} onChange={e => set("project_end_date", e.target.value || null)} className={inputCls + " [color-scheme:dark]"} /></Field>
-                  <Field label="Location"><input value={form.project_location ?? ""} onChange={e => set("project_location", e.target.value || null)} placeholder="e.g. Westlands, Nairobi" className={inputCls} /></Field>
-                  <Field label="Client Reference"><input value={form.project_client_ref ?? ""} onChange={e => set("project_client_ref", e.target.value || null)} placeholder="e.g. PO-2026-009" className={inputCls} /></Field>
+                  <Field label="Start Date" hint="From linked project">
+                    <ReadOnlyField value={form.project_start_date ? fmtDate(form.project_start_date) : ""} />
+                  </Field>
+                  <Field label="End Date" hint="From linked project">
+                    <ReadOnlyField value={form.project_end_date ? fmtDate(form.project_end_date) : ""} />
+                  </Field>
+                  <Field label="Location" hint="From linked project's site">
+                    <ReadOnlyField value={form.project_location ?? ""} />
+                  </Field>
+                  <Field label="Client Reference" hint="Linked project's number">
+                    <ReadOnlyField value={form.project_client_ref ?? ""} />
+                  </Field>
                 </div>
               </div>
             </div>

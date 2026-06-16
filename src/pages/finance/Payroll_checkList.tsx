@@ -1253,35 +1253,50 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
       </motion.tr>
       <AnimatePresence initial={false}>
         {expanded && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="bg-white/2">
-            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 10 : 9)} className="px-2 sm:px-6 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-[10px] min-w-0">
-                {[
-                  { label: "Rate",            value: `${fmt(entry.rate)} / ${entry.rate_type}` },
-                  { label: "Time Worked",      value: entry.time_worked || "—" },
-                  { label: "NSSF Tier I",      value: fmt(entry.nssf_tier1) },
-                  { label: "NSSF Tier II",     value: fmt(entry.nssf_tier2) },
-                  { label: "Pension",          value: fmt(entry.pension) },
-                  { label: "Taxable Income",   value: fmt(entry.taxable_income) },
-                  { label: "PAYE Gross",       value: fmt(entry.paye_gross_tax) },
-                  { label: "Personal Relief",  value: fmt(entry.personal_relief) },
-                  { label: "Insurance Relief", value: fmt(entry.insurance_relief) },
-                  { label: "Total Deductions", value: fmt(entry.total_deductions) },
-                  ...(showProject && entry.job_id ? [{ label: "Job Ref",   value: entry.job_id   }] : []),
-                  ...(entry.bank_code  ? [{ label: "Bank Code",  value: entry.bank_code  }] : []),
-                  ...(entry.serial_no  ? [{ label: "Serial No.", value: entry.serial_no  }] : []),
-                  ...(entry.etims_code ? [{ label: "eTIMS Code", value: entry.etims_code }] : []),
-                  ...(entry.paid_date  ? [{ label: "Paid Date",  value: fmtDate(entry.paid_date) }] : []),
-                  ...(entry.notes      ? [{ label: "Notes",      value: entry.notes      }] : []),
-                ].map((item) => (
-                  <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
-                    <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">{item.label}</p>
-                    <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{item.value}</p>
-                  </div>
-                ))}
-              </div>
+          <tr className="bg-white/2">
+            <td colSpan={showProject ? (canEdit ? 13 : 12) : (canEdit ? 10 : 9)} className="px-2 sm:px-6 py-0">
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                style={{ overflow: "hidden" }}
+              >
+                <div
+                  className="grid gap-3 py-4 min-w-0"
+                  style={{ gridTemplateColumns: "repeat(auto-fit, minmax(9.5rem, 1fr))" }}
+                >
+                  {[
+                    { label: "Rate",             value: `${fmt(entry.rate)} / ${entry.rate_type}` },
+                    { label: "Time Worked",      value: entry.time_worked || "—" },
+                    { label: "NSSF Tier I",      value: fmt(entry.nssf_tier1) },
+                    { label: "NSSF Tier II",     value: fmt(entry.nssf_tier2) },
+                    { label: "Pension",          value: fmt(entry.pension) },
+                    { label: "Taxable Income",   value: fmt(entry.taxable_income) },
+                    { label: "PAYE Gross",       value: fmt(entry.paye_gross_tax) },
+                    { label: "Personal Relief",  value: fmt(entry.personal_relief) },
+                    { label: "Insurance Relief", value: fmt(entry.insurance_relief) },
+                    { label: "Total Deductions", value: fmt(entry.total_deductions) },
+                    ...(showProject && entry.job_id ? [{ label: "Job Ref",   value: entry.job_id   }] : []),
+                    ...(entry.bank_code  ? [{ label: "Bank Code",  value: entry.bank_code  }] : []),
+                    ...(entry.serial_no  ? [{ label: "Serial No.", value: entry.serial_no  }] : []),
+                    ...(entry.etims_code ? [{ label: "eTIMS Code", value: entry.etims_code }] : []),
+                    ...(entry.paid_date  ? [{ label: "Paid Date",  value: fmtDate(entry.paid_date) }] : []),
+                    ...(entry.notes      ? [{ label: "Notes",      value: entry.notes      }] : []),
+                  ].map((item) => (
+                    <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8 min-w-0">
+                      <p className="text-muted-foreground uppercase tracking-wider mb-1 text-[9px] font-bold">{item.label}</p>
+                      <p
+                        title={item.value}
+                        className="text-[13px] font-black tabular-nums tracking-tight text-foreground whitespace-normal break-words leading-tight"
+                      >
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
             </td>
-          </motion.div>
+          </tr>
         )}
       </AnimatePresence>
     </>
@@ -1318,9 +1333,15 @@ function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: Payroll
           { label: "PAYE",      value: paye,  color: "text-rose-300"    },
           { label: "Net Pay",   value: net,   color: "text-emerald-400" },
         ].map((item) => (
-          <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1 font-bold">{item.label}</p>
-            <p className={`text-sm font-black tabular-nums tracking-tight ${item.color}`}>{fmt(item.value)}</p>
+          <div key={item.label} className="bg-white/4 rounded-xl p-3 border border-white/8 min-w-0 overflow-hidden">
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1 font-bold truncate">{item.label}</p>
+            <p
+              title={fmt(item.value)}
+              className={`text-sm font-black tabular-nums tracking-tight truncate ${item.color}`}
+            >
+              KES {fmtC(item.value)}
+            </p>
+            <p className="text-[9px] text-muted-foreground/60 mt-0.5 tabular-nums truncate">{fmt(item.value)}</p>
           </div>
         ))}
       </div>

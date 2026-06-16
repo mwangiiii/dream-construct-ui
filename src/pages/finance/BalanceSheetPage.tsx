@@ -37,9 +37,9 @@ interface Project {
 }
 
 type EntryType     = "Asset" | "Liability" | "Equity";
-type AssetType     = "Current Asset" | "Fixed Asset" | "Other Asset";
-type LiabilityType = "Current Liability" | "Long-term Liability";
-type EquityType    = "Owner's Capital" | "Retained Earnings" | "Shareholder Equity";
+type AssetType     = "Current Asset" | "Non-Current Asset" | "Fixed Asset" | "Other Asset";
+type LiabilityType = "Current Liability" | "Non-Current Liability" | "Long-term Liability";
+type EquityType    = "Owner's Equity" | "Retained Earnings" | "Owner's Capital" | "Shareholder Equity";
 
 interface BalanceSheetEntry {
   id:             number;
@@ -69,10 +69,29 @@ interface Props {
 
 const ENTRY_TYPES: EntryType[] = ["Asset", "Liability", "Equity"];
 
+// Sub-types align with the Chart of Accounts subcategories so the account
+// dropdown can be filtered correctly. Older values ("Fixed Asset",
+// "Long-term Liability", "Owner's Capital", "Shareholder Equity") remain
+// valid in the TS union and in the DB CHECK constraint for legacy rows.
 const SUB_TYPES: Record<EntryType, string[]> = {
-  Asset:     ["Current Asset", "Fixed Asset", "Other Asset"],
-  Liability: ["Current Liability", "Long-term Liability"],
-  Equity:    ["Owner's Capital", "Retained Earnings", "Shareholder Equity"],
+  Asset:     ["Current Asset", "Non-Current Asset"],
+  Liability: ["Current Liability", "Non-Current Liability"],
+  Equity:    ["Owner's Equity", "Retained Earnings"],
+};
+
+// Map legacy BS sub-types to the COA subcategory used for filtering.
+const COA_SUBCATEGORY: Record<string, string> = {
+  "Current Asset":         "Current Asset",
+  "Non-Current Asset":     "Non-Current Asset",
+  "Fixed Asset":           "Non-Current Asset",
+  "Other Asset":           "Non-Current Asset",
+  "Current Liability":     "Current Liability",
+  "Non-Current Liability": "Non-Current Liability",
+  "Long-term Liability":   "Non-Current Liability",
+  "Owner's Equity":        "Owner's Equity",
+  "Owner's Capital":       "Owner's Equity",
+  "Shareholder Equity":    "Owner's Equity",
+  "Retained Earnings":     "Retained Earnings",
 };
 
 const TYPE_STYLE: Record<EntryType, { accent: string; badge: string; dot: string; row: string }> = {
@@ -409,7 +428,9 @@ function PostEntryModal({
         const et = v as EntryType;
         next.asset_type     = et === "Asset"     ? "Current Asset"     : null;
         next.liability_type = et === "Liability" ? "Current Liability" : null;
-        next.equity_type    = et === "Equity"    ? "Owner's Capital"   : null;
+        next.equity_type    = et === "Equity"    ? "Owner's Equity"    : null;
+        next.account_name   = "";
+        next.amount         = 0;
       }
       return next;
     });
@@ -417,6 +438,38 @@ function PostEntryModal({
   const subKey     = form.entry_type === "Asset" ? "asset_type" : form.entry_type === "Liability" ? "liability_type" : "equity_type";
   const subVal     = ((form as Record<string, unknown>)[subKey] as string) ?? "";
   const isFirmWide = showProjectSelector && (form.project_id === null || form.project_id === "");
+
+  // ── COA accounts for the chosen entry_type + sub-type ──────────────────────
+  const [coaAccounts, setCoaAccounts] = useState<COAAccount[]>([]);
+  const [coaLoading, setCoaLoading]   = useState(false);
+
+  useEffect(() => {
+    const coaSub = COA_SUBCATEGORY[subVal] ?? subVal;
+    if (!coaSub) { setCoaAccounts([]); return; }
+    setCoaLoading(true);
+    fetchCOAAccounts(form.entry_type, coaSub)
+      .then(setCoaAccounts)
+      .catch(() => setCoaAccounts([]))
+      .finally(() => setCoaLoading(false));
+  }, [form.entry_type, subVal]);
+
+  const selectedCOA = coaAccounts.find(a => a.account_name === form.account_name) ?? null;
+
+  // ── Amount sources for the chosen COA account ──────────────────────────────
+  const [amountSources, setAmountSources] = useState<AmountSource[]>([]);
+  const [amountLoading, setAmountLoading] = useState(false);
+  const [amountPick, setAmountPick]       = useState<string>("");
+
+  useEffect(() => {
+    setAmountSources([]);
+    setAmountPick("");
+    if (!selectedCOA) return;
+    setAmountLoading(true);
+    fetchAccountAmountSources(selectedCOA, form.project_id ?? null)
+      .then(setAmountSources)
+      .catch(() => setAmountSources([]))
+      .finally(() => setAmountLoading(false));
+  }, [selectedCOA?.id, form.project_id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -506,45 +559,108 @@ function PostEntryModal({
             </SelectWrapper>
           </Field>
 
-          {/* ── Account Name ── */}
+          {/* ── Account Name — select from Chart of Accounts ── */}
           <div className="col-span-2">
-            <Field label="Account Name *">
-              <input
-                value={form.account_name}
-                onChange={(e) => setField("account_name", e.target.value)}
-                placeholder="e.g. Cash – Operating Account"
-                className={inputCls}
-              />
+            <Field label="Account Name *" hint={`From Chart of Accounts (category: ${form.entry_type}, sub-category: ${COA_SUBCATEGORY[subVal] ?? subVal})`}>
+              <SelectWrapper>
+                <select
+                  value={selectedCOA?.account_code ?? ""}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    const acct = coaAccounts.find(a => a.account_code === code) ?? null;
+                    setField("account_name", acct?.account_name ?? "");
+                    setField("amount", 0);
+                  }}
+                  disabled={coaLoading}
+                  className={selectCls}
+                >
+                  <option value="">
+                    {coaLoading
+                      ? "Loading accounts…"
+                      : coaAccounts.length === 0
+                        ? "— No active COA accounts for this sub-type —"
+                        : "— Select an account —"}
+                  </option>
+                  {coaAccounts.map(a => (
+                    <option key={a.id} value={a.account_code}>
+                      {a.account_code} — {a.account_name}
+                    </option>
+                  ))}
+                </select>
+              </SelectWrapper>
             </Field>
           </div>
 
-          {/* ── Amount ── KES prefix badge, border-l omitted to join cleanly */}
-          <Field label="Amount *">
-            <div className="flex items-stretch">
-              <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-r-0 border-emerald-500/20 whitespace-nowrap select-none">
-                KES
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.amount === 0 ? "0" : form.amount || ""}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setField("amount", val === "" ? "" : parseFloat(val));
-                }}
-                className={
-                  "flex-1 px-3 py-2.5 rounded-r-xl " +
-                  "text-sm font-normal tracking-normal leading-snug " +
-                  "bg-white/5 border border-white/10 border-l-0 " +
-                  "text-foreground placeholder-muted-foreground " +
-                  "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
-                  "transition-all"
-                }
-                placeholder="0.00"
-              />
-            </div>
-          </Field>
+          {/* ── Amount — drop down sourced from real ERP movements on this account ── */}
+          <div className="col-span-2">
+            <Field
+              label="Amount *"
+              hint={selectedCOA
+                ? (form.project_id
+                    ? "Pick a money input from this project. Fixed-asset options use NET BOOK VALUE (cost − accumulated depreciation auto-deducted)."
+                    : "Pick a firm-wide money input. Fixed-asset options use NET BOOK VALUE.")
+                : "Select an account above to load amount options."
+              }
+            >
+              <div className="flex flex-col gap-2">
+                <SelectWrapper>
+                  <select
+                    value={amountPick}
+                    onChange={(e) => {
+                      const key = e.target.value;
+                      setAmountPick(key);
+                      if (key === "" || key === "__custom__") return;
+                      const src = amountSources.find(s => s.key === key);
+                      if (src) setField("amount", src.amount);
+                    }}
+                    disabled={!selectedCOA || amountLoading}
+                    className={selectCls}
+                  >
+                    <option value="">
+                      {!selectedCOA
+                        ? "— Select an account above first —"
+                        : amountLoading
+                          ? "Loading money inputs…"
+                          : amountSources.length === 0
+                            ? "— No automatic source for this account; enter a custom amount —"
+                            : "— Pick a money input from the database —"}
+                    </option>
+                    {amountSources.map(s => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                    {selectedCOA && (
+                      <option value="__custom__">— Custom amount (type below) —</option>
+                    )}
+                  </select>
+                </SelectWrapper>
+                <div className="flex items-stretch">
+                  <span className="inline-flex items-center px-3 rounded-l-xl text-xs font-bold text-emerald-300 bg-emerald-500/10 border border-r-0 border-emerald-500/20 whitespace-nowrap select-none">
+                    KES
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.amount === 0 ? "0" : form.amount || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setField("amount", val === "" ? "" : parseFloat(val));
+                      setAmountPick("__custom__");
+                    }}
+                    className={
+                      "flex-1 px-3 py-2.5 rounded-r-xl " +
+                      "text-sm font-normal tracking-normal leading-snug " +
+                      "bg-white/5 border border-white/10 border-l-0 " +
+                      "text-foreground placeholder-muted-foreground " +
+                      "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
+                      "transition-all"
+                    }
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            </Field>
+          </div>
 
           {/* ── Posting Date — read-only ── */}
           <Field label="Posting Date">
@@ -889,11 +1005,19 @@ function EntriesTable({
                             ...(entry.description ? [{ label: "Description", node: entry.description }] : []),
                             ...(showProjectCol ? [{ label: "Scope", node: projectLabel(entry.project_id) }] : []),
                           ];
+                          const auto = isAutoEntry(entry);
                           return (
                             <div key={entry.id} className="py-4">
                               <div className="flex items-start justify-between gap-3 mb-3">
                                 <div className="min-w-0">
-                                  <p className="font-medium text-foreground text-sm truncate">{entry.account_name}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-foreground text-sm truncate">{entry.account_name}</p>
+                                    {auto && (
+                                      <span className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80 shrink-0">
+                                        AUTO
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="font-mono text-xs text-primary mt-0.5">{entry.reference_code || "—"}</p>
                                 </div>
                                 <span className={`text-sm font-bold tabular-nums shrink-0 ${s.accent}`}>{fmt(entry.amount)}</span>
@@ -906,7 +1030,7 @@ function EntriesTable({
                                   </div>
                                 ))}
                               </div>
-                              {canEdit && (
+                              {canEdit && !auto && (
                                 <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/8">
                                   <button onClick={() => onDelete(entry)}
                                     className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/10 transition-all">
@@ -950,6 +1074,7 @@ function EntriesTable({
                                 entry.entry_type === "Asset"     ? entry.asset_type     :
                                 entry.entry_type === "Liability" ? entry.liability_type :
                                 entry.equity_type;
+                              const auto = isAutoEntry(entry);
                               return (
                                 <motion.tr
                                   key={entry.id}
@@ -961,7 +1086,19 @@ function EntriesTable({
                                   <td className="px-5 py-3.5 whitespace-nowrap">
                                     <span className="font-mono text-xs font-semibold text-primary">{entry.reference_code || "—"}</span>
                                   </td>
-                                  <td className="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-foreground">{entry.account_name}</td>
+                                  <td className="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-foreground">
+                                    <span className="inline-flex items-center gap-2">
+                                      {entry.account_name}
+                                      {auto && (
+                                        <span
+                                          title="Auto-derived from ERP modules"
+                                          className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80"
+                                        >
+                                          AUTO
+                                        </span>
+                                      )}
+                                    </span>
+                                  </td>
                                   <td className="px-5 py-3.5 whitespace-nowrap text-xs font-normal text-muted-foreground">{subType || "—"}</td>
                                   <td className="px-5 py-3.5 text-xs font-normal text-muted-foreground max-w-xs">
                                     <span className="line-clamp-1">{entry.description || "—"}</span>
@@ -975,16 +1112,20 @@ function EntriesTable({
                                   </td>
                                   {canEdit && (
                                     <td className="px-5 py-3.5 whitespace-nowrap">
-                                      <button
-                                        onClick={() => onDelete(entry)}
-                                        title="Reverse entry"
-                                        className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                                          <polyline points="3 6 5 6 21 6"/>
-                                          <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                                        </svg>
-                                      </button>
+                                      {auto ? (
+                                        <span className="text-[10px] font-normal text-muted-foreground/40 italic">read-only</span>
+                                      ) : (
+                                        <button
+                                          onClick={() => onDelete(entry)}
+                                          title="Reverse entry"
+                                          className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                        >
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                                          </svg>
+                                        </button>
+                                      )}
                                     </td>
                                   )}
                                 </motion.tr>
@@ -1114,6 +1255,310 @@ function AccountingBar({ entries }: { entries: BalanceSheetEntry[] }) {
   );
 }
 
+// ─── COA ACCOUNT + AMOUNT-SOURCE HELPERS (per-entry pickers) ─────────────────
+//
+// When the user picks an entry type + sub-type in the Post Journal Entry modal,
+// the Account Name field becomes a select sourced from chart_of_accounts so the
+// user can only pick a real GL account. Once an account is picked, the Amount
+// field becomes a select whose options are the actual money movements that
+// flow through that account elsewhere in the ERP:
+//
+//   10xx (Cash & bank)        → AR receipts + AP payments + Payroll net pay
+//   11xx (Receivables)        → AR rows (balance)
+//   12xx (Inventory)          → Inventory rows (on-hand value)
+//   15xx not 1590 (Fixed)     → Fixed assets at NET BOOK VALUE
+//                               (cost − accumulated_depreciation — auto-deducted)
+//   1590 (Accum. Depreciation)→ Per-asset accumulated_depreciation
+//   20xx (Current liabilities)→ AP rows (balance)
+//   25xx (Non-current)        → Loans (latest closing_balance per facility)
+//
+// Each option still surfaces the raw amount; the user can also leave the
+// amount blank and type a custom value if their entry doesn't fit any source.
+
+interface COAAccount {
+  id:           number;
+  account_code: string;
+  account_name: string;
+  subcategory:  string;
+}
+
+interface AmountSource {
+  key:    string;
+  label:  string;
+  amount: number;
+}
+
+async function fetchCOAAccounts(category: EntryType, subcategory: string): Promise<COAAccount[]> {
+  const { data } = await supabase
+    .from("chart_of_accounts")
+    .select("id,account_code,account_name,subcategory")
+    .eq("category", category)
+    .eq("subcategory", subcategory)
+    .eq("active", true)
+    .order("account_code", { ascending: true });
+  return (data ?? []) as COAAccount[];
+}
+
+async function fetchAccountAmountSources(
+  acct: COAAccount,
+  projectId: string | null,
+): Promise<AmountSource[]> {
+  const scoped = (q: any) => projectId ? q.eq("project_id", projectId) : q;
+  const code = acct.account_code;
+  const out: AmountSource[] = [];
+  const fmtA = (n: number) => fmt(n, "Kshs");
+
+  // ── Cash & Bank (10xx) ─────────────────────────────────────────────────────
+  if (code.startsWith("10")) {
+    const [arRes, apRes, payRes] = await Promise.all([
+      scoped(supabase.from("accounts_receivable")
+        .select("id,client,billing,amount_received,date,account_received")
+        .eq("account_received", code).gt("amount_received", 0)),
+      scoped(supabase.from("accounts_payable")
+        .select("id,vendor_name,invoice_number,paid_amount,date_of_payment,receiving_account_code")
+        .eq("receiving_account_code", code).gt("paid_amount", 0)),
+      scoped(supabase.from("payroll_entries")
+        .select("id,employee_name,net_pay,paid_date,bank_code,payment_status")
+        .eq("bank_code", code).eq("payment_status", "Paid")),
+    ]);
+    (arRes.data ?? []).forEach((r: any) => out.push({
+      key:    `ar:${r.id}`,
+      label:  `+ AR Receipt · ${r.client ?? "—"}${r.billing ? " · " + r.billing : ""} (${fmtA(Number(r.amount_received) || 0)})`,
+      amount: Number(r.amount_received) || 0,
+    }));
+    (apRes.data ?? []).forEach((r: any) => out.push({
+      key:    `ap:${r.id}`,
+      label:  `− AP Payment · ${r.vendor_name ?? "—"}${r.invoice_number ? " · " + r.invoice_number : ""} (${fmtA(Number(r.paid_amount) || 0)})`,
+      amount: Number(r.paid_amount) || 0,
+    }));
+    (payRes.data ?? []).forEach((r: any) => out.push({
+      key:    `pay:${r.id}`,
+      label:  `− Payroll · ${r.employee_name ?? "—"} (${fmtA(Number(r.net_pay) || 0)})`,
+      amount: Number(r.net_pay) || 0,
+    }));
+    return out;
+  }
+
+  // ── Receivables (11xx) ─────────────────────────────────────────────────────
+  if (code.startsWith("11")) {
+    const arRes = await scoped(supabase.from("accounts_receivable")
+      .select("id,client,billing,balance,amount_billed,date,status"));
+    (arRes.data ?? []).forEach((r: any) => out.push({
+      key:    `ar:${r.id}`,
+      label:  `AR · ${r.billing ?? r.id} · ${r.client ?? "—"} (outstanding ${fmtA(Number(r.balance) || 0)})`,
+      amount: Number(r.balance) || 0,
+    }));
+    return out;
+  }
+
+  // ── Inventory (12xx) ───────────────────────────────────────────────────────
+  if (code.startsWith("12")) {
+    const invRes = await scoped(supabase.from("inventory")
+      .select("id,factorial_code,description,total_value,total_value_used"));
+    (invRes.data ?? []).forEach((r: any) => {
+      const onHand = Math.max(0, (Number(r.total_value) || 0) - (Number(r.total_value_used) || 0));
+      out.push({
+        key:    `inv:${r.id}`,
+        label:  `Inventory · ${r.factorial_code ?? ""} ${r.description ?? ""} (on hand ${fmtA(onHand)})`,
+        amount: onHand,
+      });
+    });
+    return out;
+  }
+
+  // ── Fixed Assets at NET BOOK VALUE (15xx, excluding 1590) ──────────────────
+  // net_book_value is a generated column = cost − accumulated_depreciation,
+  // so depreciation is automatically subtracted from the gross cost.
+  if (code.startsWith("15") && code !== "1590") {
+    const faRes = await supabase.from("fixed_asset_equipment_depreciation")
+      .select("id,assets_number,name,class,cost,accumulated_depreciation,net_book_value");
+    (faRes.data ?? []).forEach((r: any) => {
+      const cost = Number(r.cost) || 0;
+      const dep  = Number(r.accumulated_depreciation) || 0;
+      const nbv  = Math.max(0, Number(r.net_book_value) || (cost - dep));
+      out.push({
+        key:    `fa:${r.id}`,
+        label:  `${r.name ?? r.assets_number ?? "—"} · NBV ${fmtA(nbv)} (cost ${fmtA(cost)} − dep ${fmtA(dep)})`,
+        amount: nbv,
+      });
+    });
+    return out;
+  }
+
+  // ── Accumulated Depreciation contra-asset (1590) ───────────────────────────
+  if (code === "1590") {
+    const faRes = await supabase.from("fixed_asset_equipment_depreciation")
+      .select("id,assets_number,name,accumulated_depreciation");
+    (faRes.data ?? []).forEach((r: any) => out.push({
+      key:    `fa-dep:${r.id}`,
+      label:  `Accumulated dep · ${r.name ?? r.assets_number ?? "—"} (${fmtA(Number(r.accumulated_depreciation) || 0)})`,
+      amount: Number(r.accumulated_depreciation) || 0,
+    }));
+    return out;
+  }
+
+  // ── Accounts Payable & current liabilities (20xx) ──────────────────────────
+  if (code.startsWith("20")) {
+    const apRes = await scoped(supabase.from("accounts_payable")
+      .select("id,vendor_name,invoice_number,balance,total_amount,date"));
+    (apRes.data ?? []).forEach((r: any) => out.push({
+      key:    `ap:${r.id}`,
+      label:  `AP · ${r.invoice_number ?? r.id} · ${r.vendor_name ?? "—"} (balance ${fmtA(Number(r.balance) || 0)})`,
+      amount: Number(r.balance) || 0,
+    }));
+    return out;
+  }
+
+  // ── Long-term Liabilities — Loans (25xx) ───────────────────────────────────
+  if (code.startsWith("25")) {
+    const loansRes = await scoped(supabase.from("loans")
+      .select("id,facility_ref,lender_name,closing_balance,due_date"));
+    const latest: Record<string, any> = {};
+    (loansRes.data ?? []).forEach((r: any) => {
+      const cur = latest[r.facility_ref];
+      if (!cur || (r.due_date ?? "") > (cur.due_date ?? "")) latest[r.facility_ref] = r;
+    });
+    Object.values(latest).forEach((r: any) => out.push({
+      key:    `loan:${r.facility_ref}`,
+      label:  `Loan · ${r.facility_ref ?? "—"} · ${r.lender_name ?? "—"} (outstanding ${fmtA(Number(r.closing_balance) || 0)})`,
+      amount: Number(r.closing_balance) || 0,
+    }));
+    return out;
+  }
+
+  // ── Equity & other accounts have no automatic source ──────────────────────
+  return out;
+}
+
+
+// ─── AUTO-DERIVED CONSOLIDATION (firm-wide ERP rollups) ──────────────────────
+//
+// The consolidated balance sheet shows the firm's true financial position by
+// pulling totals straight from the rest of the ERP — AR, AP, Inventory, WIP,
+// Loans, Cash — rather than re-summing per-project journal entries (which
+// would double-count or miss whatever the operator never journaled). The
+// derived rows are presented as virtual entries with negative ids so they
+// can never be deleted and never collide with real balance_sheet_entries.id.
+
+interface DerivedTotals {
+  cash:             number;
+  ar:               number;
+  inventoryOnHand:  number;
+  wipUnderbilled:   number;
+  ap:               number;
+  wipOverbilled:    number;
+  loans:            number;
+}
+
+const ZERO_TOTALS: DerivedTotals = {
+  cash: 0, ar: 0, inventoryOnHand: 0, wipUnderbilled: 0, ap: 0, wipOverbilled: 0, loans: 0,
+};
+
+const isAutoEntry = (e: BalanceSheetEntry) => e.id < 0;
+
+async function fetchDerivedTotals(): Promise<DerivedTotals> {
+  const safeSum = <T extends Record<string, unknown>>(
+    rows: T[] | null | undefined,
+    pick: (r: T) => number,
+  ) => (rows ?? []).reduce((s, r) => s + (Number(pick(r)) || 0), 0);
+
+  const [
+    arRes, apRes, invRes, wipRes, loansRes, cashRes,
+  ] = await Promise.all([
+    supabase.from("accounts_receivable").select("balance,status")
+      .in("status", ["outstanding", "overdue", "partial"]),
+    supabase.from("accounts_payable").select("balance,status")
+      .in("status", ["open", "overdue", "partial"]),
+    supabase.from("inventory").select("total_value,total_value_used"),
+    supabase.from("work_in_progress").select("amount,billed_status"),
+    supabase.from("loans").select("facility_ref,closing_balance,due_date"),
+    supabase.from("cash_flow").select("project_id,year,quarter,month,ending_balance"),
+  ]);
+
+  // AR: sum of unpaid balances
+  const ar = safeSum(arRes.data as { balance: number }[] | null, (r) => r.balance);
+
+  // AP: sum of unpaid balances
+  const ap = safeSum(apRes.data as { balance: number }[] | null, (r) => r.balance);
+
+  // Inventory on hand = total_value − total_value_used (per row, floor 0)
+  const inventoryOnHand = (invRes.data as { total_value: number; total_value_used: number }[] | null ?? [])
+    .reduce((s, r) => s + Math.max(0, (Number(r.total_value) || 0) - (Number(r.total_value_used) || 0)), 0);
+
+  // WIP: underbilled rows = current-asset CIP; overbilled rows = current liability
+  const wipRows = (wipRes.data as { amount: number; billed_status: string }[] | null) ?? [];
+  const wipUnderbilled = wipRows.filter((r) => r.billed_status === "underbilled")
+    .reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const wipOverbilled  = wipRows.filter((r) => r.billed_status === "overbilled")
+    .reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  // Loans: most-recent closing_balance per facility (one row per facility)
+  const loansRows = (loansRes.data as { facility_ref: string; closing_balance: number; due_date: string }[] | null) ?? [];
+  const latestLoan: Record<string, { closing_balance: number; due_date: string }> = {};
+  loansRows.forEach((r) => {
+    const cur = latestLoan[r.facility_ref];
+    if (!cur || (r.due_date ?? "") > (cur.due_date ?? "")) {
+      latestLoan[r.facility_ref] = { closing_balance: Number(r.closing_balance) || 0, due_date: r.due_date };
+    }
+  });
+  const loans = Object.values(latestLoan).reduce((s, x) => s + x.closing_balance, 0);
+
+  // Cash: latest ending_balance per project
+  const cashRows = (cashRes.data as { project_id: string; year: number; quarter: string; month: string; ending_balance: number }[] | null) ?? [];
+  const qRank = (q: string) => ({ Q1: 1, Q2: 2, Q3: 3, Q4: 4 } as Record<string, number>)[q] ?? 0;
+  const mRank = (m: string) => {
+    const idx = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+      .findIndex((x) => (m ?? "").toLowerCase().startsWith(x.toLowerCase()));
+    return idx < 0 ? 0 : idx + 1;
+  };
+  const latestCash: Record<string, { y: number; q: number; m: number; bal: number }> = {};
+  cashRows.forEach((r) => {
+    const y = Number(r.year) || 0, q = qRank(r.quarter), m = mRank(r.month);
+    const cur = latestCash[r.project_id];
+    const newer = !cur || y > cur.y || (y === cur.y && q > cur.q) || (y === cur.y && q === cur.q && m > cur.m);
+    if (newer) latestCash[r.project_id] = { y, q, m, bal: Number(r.ending_balance) || 0 };
+  });
+  const cash = Object.values(latestCash).reduce((s, x) => s + x.bal, 0);
+
+  return { cash, ar, inventoryOnHand, wipUnderbilled, ap, wipOverbilled, loans };
+}
+
+function buildDerivedEntries(d: DerivedTotals): BalanceSheetEntry[] {
+  let nextId = -1;
+  const today = todayISO();
+  const mk = (
+    entry_type:     EntryType,
+    sub:            AssetType | LiabilityType | EquityType,
+    account_name:   string,
+    amount:         number,
+    description:    string,
+    reference_code: string,
+  ): BalanceSheetEntry => ({
+    id:             nextId--,
+    project_id:     null,
+    entry_type,
+    asset_type:     entry_type === "Asset"     ? (sub as AssetType)     : null,
+    liability_type: entry_type === "Liability" ? (sub as LiabilityType) : null,
+    equity_type:    entry_type === "Equity"    ? (sub as EquityType)    : null,
+    account_name,
+    description,
+    amount,
+    entry_date:     today,
+    reference_code,
+    notes:          "Auto-derived from ERP modules; not editable.",
+  });
+
+  const out: BalanceSheetEntry[] = [];
+  if (d.cash            > 0) out.push(mk("Asset",     "Current Asset",       "Cash & Bank (consolidated)",          d.cash,            "Sum of the latest period ending_balance per project from cash_flow", "AUTO-CASH"));
+  if (d.ar              > 0) out.push(mk("Asset",     "Current Asset",       "Accounts Receivable (consolidated)",  d.ar,              "Sum of unpaid AR balances across every project",                      "AUTO-AR"));
+  if (d.inventoryOnHand > 0) out.push(mk("Asset",     "Current Asset",       "Inventory on Hand",                   d.inventoryOnHand, "Sum of (total_value − total_value_used) across the inventory register", "AUTO-INV"));
+  if (d.wipUnderbilled  > 0) out.push(mk("Asset",     "Current Asset",       "Construction in Progress",            d.wipUnderbilled,  "Earned revenue not yet billed (under-billed WIP rows)",               "AUTO-CIP"));
+  if (d.ap              > 0) out.push(mk("Liability", "Current Liability",   "Accounts Payable (consolidated)",     d.ap,              "Sum of unpaid AP balances across every project",                      "AUTO-AP"));
+  if (d.wipOverbilled   > 0) out.push(mk("Liability", "Current Liability",   "Billings in Excess of Costs",         d.wipOverbilled,   "Over-billings across all projects (WIP overbilled rows)",             "AUTO-OBE"));
+  if (d.loans           > 0) out.push(mk("Liability", "Long-term Liability", "Loans Outstanding",                   d.loans,           "Latest closing_balance summed per loan facility",                     "AUTO-LOAN"));
+  return out;
+}
+
 // ─── GLOBAL BALANCE SHEET VIEW ────────────────────────────────────────────────
 
 type GlobalTab = "consolidated" | "firm-wide";
@@ -1123,6 +1568,7 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
   projects: Project[];
 }) {
   const [allEntries,    setAllEntries]    = useState<BalanceSheetEntry[]>([]);
+  const [derived,       setDerived]       = useState<DerivedTotals>(ZERO_TOTALS);
   const [fetching,      setFetching]      = useState(false);
   const [showModal,     setShowModal]     = useState(false);
   const [deleting,      setDeleting]      = useState<BalanceSheetEntry | null>(null);
@@ -1136,9 +1582,16 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
   const fetchEntries = useCallback(async () => {
     setFetching(true);
     setAllEntries([]);
-    try { setAllEntries(await api.listAll()); }
-    catch (err: unknown) { push(err instanceof Error ? err.message : "Failed to load entries.", "error"); }
-    finally { setFetching(false); }
+    setDerived(ZERO_TOTALS);
+    try {
+      const [entries, totals] = await Promise.all([api.listAll(), fetchDerivedTotals()]);
+      setAllEntries(entries);
+      setDerived(totals);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to load entries.", "error");
+    } finally {
+      setFetching(false);
+    }
   }, [push]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
@@ -1172,17 +1625,32 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
     } finally { setSaving(false); }
   };
 
-  const displayEntries = useMemo(
-    () => activeTab === "firm-wide" ? allEntries.filter((e) => e.project_id === null) : allEntries,
-    [allEntries, activeTab]
+  const firmWideManual = useMemo(
+    () => allEntries.filter((e) => e.project_id === null),
+    [allEntries],
+  );
+  const derivedEntries = useMemo(() => buildDerivedEntries(derived), [derived]);
+
+  const consolidatedEntries = useMemo(
+    () => [...derivedEntries, ...firmWideManual],
+    [derivedEntries, firmWideManual],
   );
 
-  const firmWideCount     = allEntries.filter((e) => e.project_id === null).length;
-  const consolidatedCount = allEntries.length;
+  const displayEntries = activeTab === "firm-wide" ? firmWideManual : consolidatedEntries;
+
+  const firmWideCount     = firmWideManual.length;
+  const derivedCount      = derivedEntries.length;
+  const consolidatedCount = consolidatedEntries.length;
 
   const tabs: { key: GlobalTab; label: string; count: number; description: string }[] = [
-    { key: "consolidated", label: "Consolidated",   count: consolidatedCount, description: "All entries across every project + firm-wide accounts" },
-    { key: "firm-wide",    label: "Firm-wide Only", count: firmWideCount,     description: "Entries not linked to any specific project" },
+    {
+      key: "consolidated", label: "Consolidated", count: consolidatedCount,
+      description: "Auto-derived totals from AR, AP, Inventory, WIP, Loans & Cash — plus any firm-wide journal entries not linked to a project.",
+    },
+    {
+      key: "firm-wide", label: "Firm-wide Only", count: firmWideCount,
+      description: "Manually-posted journal entries that aren't tied to a specific project.",
+    },
   ];
 
   return (
@@ -1248,7 +1716,7 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
         {showMigration && <MigrationBanner onDismiss={() => setShowMigration(false)} />}
       </AnimatePresence>
 
-      <StatCards entries={allEntries} filterType={filterType} setFilterType={setFilterType} />
+      <StatCards entries={consolidatedEntries} filterType={filterType} setFilterType={setFilterType} />
 
       <Card className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-lg">
         <CardHeader className="pb-4">
@@ -1313,7 +1781,7 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
               <p className="text-sm font-normal">
                 {activeTab === "firm-wide"
                   ? "No firm-wide entries yet. Post an entry without linking a project."
-                  : "No entries posted yet."}
+                  : "Nothing to consolidate yet — no ERP activity and no firm-wide journal entries."}
               </p>
               {canEdit && (
                 <button onClick={() => setShowModal(true)} className="text-xs text-primary hover:underline">
@@ -1334,12 +1802,19 @@ function GlobalBalanceSheetView({ canEdit, projects }: {
             </>
           )}
 
-          {!fetching && allEntries.length > 0 && (
+          {!fetching && (consolidatedEntries.length > 0 || allEntries.length > 0) && (
             <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs font-normal text-muted-foreground">
               <div className="flex items-center gap-4">
-                <span className="tabular-nums">{allEntries.length} total entries</span>
-                {firmWideCount > 0 && <span className="tabular-nums text-violet-400/70">{firmWideCount} firm-wide</span>}
-                <span className="tabular-nums text-primary/70">{allEntries.length - firmWideCount} project-linked</span>
+                <span className="tabular-nums">{displayEntries.length} shown</span>
+                {derivedCount > 0 && activeTab === "consolidated" && (
+                  <span className="tabular-nums text-emerald-400/70">{derivedCount} auto-derived</span>
+                )}
+                {firmWideCount > 0 && (
+                  <span className="tabular-nums text-violet-400/70">{firmWideCount} firm-wide</span>
+                )}
+                <span className="tabular-nums text-primary/70">
+                  {allEntries.length - firmWideCount} project-linked (excluded from consolidated)
+                </span>
               </div>
               <button onClick={fetchEntries} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

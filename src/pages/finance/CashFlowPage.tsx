@@ -104,6 +104,9 @@ const PROJECT_STATUS_STYLE: Record<string, string> = {
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
 
+const selectCls =
+  "w-full px-3 py-2 rounded-xl text-sm bg-background border border-white/10 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all [&>option]:bg-background";
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 const makeEmptyForm = (projectId: string | null = null): CFFormData => ({
@@ -140,6 +143,49 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="flex flex-col gap-1.5">
       <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function ReadOnlyMoney({ value, hint }: { value: number; hint?: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        title="Auto-derived from ERP — not editable"
+        className="w-full px-3 py-2 rounded-xl text-sm bg-white/[0.03] border border-white/[0.08] text-foreground/85 cursor-not-allowed select-none flex items-center justify-between gap-2"
+      >
+        <span className="font-mono tabular-nums truncate">{fmt(value || 0)}</span>
+        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400/80 shrink-0">
+          AUTO
+        </span>
+      </div>
+      {hint && <span className="text-[10px] text-muted-foreground/60 italic">{hint}</span>}
+    </div>
+  );
+}
+
+function CodeChips({ title, hint, codes, accent, border, bg }: {
+  title:  string;
+  hint:   string;
+  codes:  string[];
+  accent: string;
+  border: string;
+  bg:     string;
+}) {
+  return (
+    <div className={`rounded-xl border ${border} ${bg} px-3 py-2.5`}>
+      <p className={`text-[10px] font-bold uppercase tracking-widest ${accent} mb-1`}>{title}</p>
+      <div className="flex flex-wrap gap-1.5 min-h-[1.5rem]">
+        {codes.length === 0
+          ? <span className="text-[10px] text-muted-foreground/60 italic">— none in this window —</span>
+          : codes.map(c => (
+              <span key={c} className={`font-mono text-[11px] px-1.5 py-0.5 rounded border ${border} ${accent} bg-white/[0.04]`}>
+                {c}
+              </span>
+            ))
+        }
+      </div>
+      <p className="text-[9px] text-muted-foreground/50 mt-1.5 italic">{hint}</p>
     </div>
   );
 }
@@ -185,6 +231,80 @@ function NumericField({
     </div>
   );
 }
+
+// ─── AUTO-DERIVE FROM ERP (read-only) ─────────────────────────────────────────
+// For a chosen (year, month) and project:
+//
+//   inflows  = Σ accounts_receivable.amount_received in that month
+//              (scoped to the project)
+//   outflows = Σ accounts_payable.paid_amount in that month
+//              (scoped to the project, by date_of_payment)
+//
+// account_codes is the union of the distinct COA codes those movements flowed
+// through. Inflow codes (AR.account_received) and outflow codes
+// (AP.receiving_account_code) are listed separately.
+
+const MONTH_INDEX: Record<CashFlowMonth, number> = {
+  January: 0, February: 1, March: 2, April: 3, May: 4, June: 5,
+  July: 6, August: 7, September: 8, October: 9, November: 10, December: 11,
+};
+
+function monthWindow(year: number, month: CashFlowMonth): { startISO: string; endISO: string } {
+  const m = MONTH_INDEX[month];
+  const start = new Date(Date.UTC(year, m, 1));
+  const end   = new Date(Date.UTC(year, m + 1, 0));
+  return {
+    startISO: start.toISOString().slice(0, 10),
+    endISO:   end.toISOString().slice(0, 10),
+  };
+}
+
+interface DerivedCF {
+  inflows:        number;
+  outflows:       number;
+  inflowCodes:    string[];
+  outflowCodes:   string[];
+}
+
+async function deriveCFTotals(
+  year: number,
+  month: CashFlowMonth,
+  projectId: string | null,
+): Promise<DerivedCF> {
+  const { startISO, endISO } = monthWindow(year, month);
+  const sum = <T,>(rows: T[] | null | undefined, pick: (r: T) => number) =>
+    (rows ?? []).reduce((s, r) => s + (Number(pick(r)) || 0), 0);
+
+  const scoped = (q: any) => projectId ? q.eq("project_id", projectId) : q;
+
+  const arQ = scoped(supabase.from("accounts_receivable")
+    .select("amount_received,project_id,date,account_received")
+    .gte("date", startISO).lte("date", endISO)
+    .gt("amount_received", 0));
+  const apQ = scoped(supabase.from("accounts_payable")
+    .select("paid_amount,project_id,date_of_payment,receiving_account_code")
+    .gte("date_of_payment", startISO).lte("date_of_payment", endISO)
+    .gt("paid_amount", 0));
+
+  const [arRes, apRes] = await Promise.all([arQ, apQ]);
+
+  const arRows = (arRes.data ?? []) as { amount_received: number; account_received: string | null }[];
+  const apRows = (apRes.data ?? []) as { paid_amount: number; receiving_account_code: string | null }[];
+
+  const inflows  = sum(arRows, r => r.amount_received);
+  const outflows = sum(apRows, r => r.paid_amount);
+
+  const inflowCodes  = Array.from(new Set(arRows.map(r => r.account_received).filter(Boolean) as string[])).sort();
+  const outflowCodes = Array.from(new Set(apRows.map(r => r.receiving_account_code).filter(Boolean) as string[])).sort();
+
+  return { inflows, outflows, inflowCodes, outflowCodes };
+}
+
+const formatCFAccountCodes = (inflow: string[], outflow: string[]): string => {
+  const inPart  = inflow.length  ? `IN: ${inflow.join(", ")}`   : "";
+  const outPart = outflow.length ? `OUT: ${outflow.join(", ")}` : "";
+  return [inPart, outPart].filter(Boolean).join(" | ");
+};
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
@@ -279,6 +399,10 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
 }) {
   const [form, setForm] = useState<CFFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoError, setAutoError]     = useState<string | null>(null);
+  const [inflowCodes,  setInflowCodes]  = useState<string[]>([]);
+  const [outflowCodes, setOutflowCodes] = useState<string[]>([]);
 
   const setField = (k: keyof CFFormData, v: unknown) =>
     setForm((prev) => {
@@ -288,6 +412,29 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
     });
 
   const liveNet = (form.inflows || 0) - (form.outflows || 0);
+
+  // Auto-derive inflows / outflows / account_codes whenever year, month or
+  // project changes. These three fields are read-only in the UI.
+  useEffect(() => {
+    let cancelled = false;
+    setAutoLoading(true);
+    setAutoError(null);
+    deriveCFTotals(form.year, form.month, form.project_id ?? null)
+      .then(d => {
+        if (cancelled) return;
+        setInflowCodes(d.inflowCodes);
+        setOutflowCodes(d.outflowCodes);
+        setForm(p => ({
+          ...p,
+          inflows:       d.inflows,
+          outflows:      d.outflows,
+          account_codes: formatCFAccountCodes(d.inflowCodes, d.outflowCodes),
+        }));
+      })
+      .catch(err => { if (!cancelled) setAutoError(err instanceof Error ? err.message : "Auto-derive failed."); })
+      .finally(() => { if (!cancelled) setAutoLoading(false); });
+    return () => { cancelled = true; };
+  }, [form.year, form.month, form.project_id]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -326,7 +473,7 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
                   <select
                     value={form.project_id ?? ""}
                     onChange={(e) => setField("project_id", e.target.value || null)}
-                    className={inputCls + " appearance-none pr-10"}
+                    className={selectCls + " appearance-none pr-10"}
                   >
                     <option value="">— Standalone (no project) —</option>
                     {projects.map((p) => (
@@ -355,7 +502,7 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
               <select
                 value={form.month}
                 onChange={(e) => setField("month", e.target.value as CashFlowMonth)}
-                className={inputCls + " appearance-none pr-10"}
+                className={selectCls + " appearance-none pr-10"}
               >
                 {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
@@ -370,7 +517,7 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
               <select
                 value={form.quarter}
                 onChange={(e) => setField("quarter", e.target.value as CashFlowQuarter)}
-                className={inputCls + " appearance-none pr-10"}
+                className={selectCls + " appearance-none pr-10"}
               >
                 {QUARTERS.map((q) => <option key={q} value={q}>{q}</option>)}
               </select>
@@ -380,8 +527,30 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
             </div>
           </Field>
 
-          <NumericField label="Inflows (KES) *"        value={form.inflows}        onChange={(v) => setField("inflows", v)}        min="0" />
-          <NumericField label="Outflows (KES) *"       value={form.outflows}       onChange={(v) => setField("outflows", v)}       min="0" />
+          {/* Auto-derive banner */}
+          <div className="col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
+            <svg className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-emerald-300 mb-1 flex items-center gap-2">
+                Auto-derived from ERP
+                {autoLoading && <span className="w-3 h-3 border-2 border-emerald-300/30 border-t-emerald-300 rounded-full animate-spin" />}
+              </p>
+              <p className="text-[11px] text-emerald-200/70 leading-relaxed">
+                Inflows = Σ AR receipts (amount received) in {form.month} {form.year}. Outflows = Σ AP payments (paid amount) in the same window{form.project_id ? " (this project)" : " (firm-wide)"}.
+                Account codes are the COA codes those movements flowed through, split by direction. These three fields are read-only.
+              </p>
+              {autoError && <p className="text-[10px] mt-1.5 text-rose-300 italic">⚠ {autoError}</p>}
+            </div>
+          </div>
+
+          <Field label="Inflows (KES) *">
+            <ReadOnlyMoney value={form.inflows} hint="Σ AR amount received in window" />
+          </Field>
+          <Field label="Outflows (KES) *">
+            <ReadOnlyMoney value={form.outflows} hint="Σ AP paid amount in window" />
+          </Field>
           <NumericField label="Ending Balance (KES) *" value={form.ending_balance} onChange={(v) => setField("ending_balance", v)} />
 
           {/* Live net cash flow preview */}
@@ -396,14 +565,29 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
             </div>
           </div>
 
-          <COAAccountSelect
-            value={form.account_codes ?? null}
-            onChange={(v) => setField("account_codes", v || null)}
-            filter="all"
-            valueField="code"
-            label="Account Code"
-            hint="Select an account from the Chart of Accounts"
-          />
+          {/* Account Codes — split into Inflow / Outflow read-only chip lists */}
+          <div className="col-span-2">
+            <Field label="Account Codes (auto, from COA)">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CodeChips
+                  title="Inflow accounts"
+                  hint="AR.account_received used for receipts"
+                  codes={inflowCodes}
+                  accent="text-emerald-300"
+                  border="border-emerald-500/25"
+                  bg="bg-emerald-500/5"
+                />
+                <CodeChips
+                  title="Outflow accounts"
+                  hint="AP.receiving_account_code used for payments"
+                  codes={outflowCodes}
+                  accent="text-rose-300"
+                  border="border-rose-500/25"
+                  bg="bg-rose-500/5"
+                />
+              </div>
+            </Field>
+          </div>
           <Field label="eTIMS Codes">
             <input value={form.etims_codes ?? ""} onChange={(e) => setField("etims_codes", e.target.value || null)}
               placeholder="e.g. ETIMS-11111" className={inputCls} />
@@ -764,7 +948,7 @@ function GlobalCashFlowTable({ projects, canEdit }: { projects: Project[]; canEd
             <div className="relative">
               <select value={filterYear === "All" ? "All" : String(filterYear)}
                 onChange={(e) => setFilterYear(e.target.value === "All" ? "All" : Number(e.target.value))}
-                className={inputCls + " appearance-none pr-10 min-w-[7rem]"}>
+                className={selectCls + " appearance-none pr-10 min-w-[7rem]"}>
                 <option value="All">All Years</option>
                 {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -774,7 +958,7 @@ function GlobalCashFlowTable({ projects, canEdit }: { projects: Project[]; canEd
             </div>
             <div className="relative">
               <select value={filterQ} onChange={(e) => setFilterQ(e.target.value as CashFlowQuarter | "All")}
-                className={inputCls + " appearance-none pr-10 min-w-[7rem]"}>
+                className={selectCls + " appearance-none pr-10 min-w-[7rem]"}>
                 <option value="All">All Quarters</option>
                 {QUARTERS.map((q) => <option key={q} value={q}>{q}</option>)}
               </select>
@@ -784,7 +968,7 @@ function GlobalCashFlowTable({ projects, canEdit }: { projects: Project[]; canEd
             </div>
             <div className="relative">
               <select value={filterProj} onChange={(e) => setFilterProj(e.target.value)}
-                className={inputCls + " appearance-none pr-10 max-w-[180px]"}>
+                className={selectCls + " appearance-none pr-10 max-w-[180px]"}>
                 <option value="all">All Projects</option>
                 <option value="standalone">Standalone only</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.project_number} · {p.title}</option>)}
@@ -1185,7 +1369,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                   className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
               </div>
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all">
+                className="px-4 py-2.5 text-sm bg-background border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all [&>option]:bg-background">
                 {statuses.map((s) => (
                   <option key={s} value={s}>{s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</option>
                 ))}
@@ -1477,7 +1661,7 @@ function EntriesView({ project, canEdit, onBack }: {
               <div className="relative">
                 <select value={filterYear === "All" ? "All" : String(filterYear)}
                   onChange={(e) => setFilterYear(e.target.value === "All" ? "All" : Number(e.target.value))}
-                  className={inputCls + " appearance-none pr-10 min-w-[7.5rem]"}>
+                  className={selectCls + " appearance-none pr-10 min-w-[7.5rem]"}>
                   <option value="All">All Years</option>
                   {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
@@ -1487,7 +1671,7 @@ function EntriesView({ project, canEdit, onBack }: {
               </div>
               <div className="relative">
                 <select value={filterQ} onChange={(e) => setFilterQ(e.target.value as CashFlowQuarter | "All")}
-                  className={inputCls + " appearance-none pr-10 min-w-[7.5rem]"}>
+                  className={selectCls + " appearance-none pr-10 min-w-[7.5rem]"}>
                   <option value="All">All Quarters</option>
                   {QUARTERS.map((q) => <option key={q} value={q}>{q}</option>)}
                 </select>

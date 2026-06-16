@@ -779,6 +779,82 @@ function BalanceBar({
   );
 }
 
+// ─── ERP IMPORT SOURCES ───────────────────────────────────────────────────────
+// Pulls open AR / AP rows for a project so the user can drop one straight into
+// a Statement of Account entry. Each option, when picked, prefills description,
+// entry_type, charges/credits, reference_no and due_date.
+
+interface ErpSource {
+  key:           string;
+  label:         string;
+  description:   string;
+  entry_type:    EntryType;
+  charges:       number;
+  credits:       number;
+  reference_no:  string | null;
+  due_date:      string | null;
+  status:        EntryStatus;
+}
+
+const mapARStatusToEntryStatus = (s: string): EntryStatus => {
+  switch ((s ?? "").toLowerCase()) {
+    case "paid":    return "Paid";
+    case "overdue": return "Overdue";
+    case "partial": return "Partial";
+    default:        return "Outstanding";
+  }
+};
+
+const mapAPStatusToEntryStatus = (s: string): EntryStatus => {
+  switch ((s ?? "").toLowerCase()) {
+    case "paid":    return "Paid";
+    case "overdue": return "Overdue";
+    case "partial": return "Partial";
+    default:        return "Outstanding";
+  }
+};
+
+async function fetchErpSources(projectId: string | null): Promise<ErpSource[]> {
+  if (!projectId) return [];
+
+  const [arRes, apRes] = await Promise.all([
+    supabase.from("accounts_receivable")
+      .select("id,billing,purpose,client,amount_billed,amount_received,due_date,status,date")
+      .eq("project_id", projectId)
+      .order("date", { ascending: false }),
+    supabase.from("accounts_payable")
+      .select("id,vendor_name,invoice_number,total_amount,paid_amount,due_date,status,date")
+      .eq("project_id", projectId)
+      .order("date", { ascending: false }),
+  ]);
+
+  const ar: ErpSource[] = (arRes.data ?? []).map((r: any) => ({
+    key:          `ar:${r.id}`,
+    label:        `AR · ${r.billing ?? r.id} · ${r.client ?? r.purpose ?? ""} · ${fmt(r.amount_billed)}`,
+    description:  `Invoice ${r.billing ?? r.id}${r.purpose ? " — " + r.purpose : ""}${r.client ? " (" + r.client + ")" : ""}`,
+    entry_type:   "Invoice",
+    charges:      Number(r.amount_billed)   || 0,
+    credits:      Number(r.amount_received) || 0,
+    reference_no: r.billing ?? null,
+    due_date:     r.due_date ?? null,
+    status:       mapARStatusToEntryStatus(r.status),
+  }));
+
+  const ap: ErpSource[] = (apRes.data ?? []).map((r: any) => ({
+    key:          `ap:${r.id}`,
+    label:        `AP · ${r.invoice_number ?? r.id} · ${r.vendor_name ?? ""} · ${fmt(r.total_amount)}`,
+    description:  `Vendor bill ${r.invoice_number ?? r.id}${r.vendor_name ? " — " + r.vendor_name : ""}`,
+    entry_type:   "Debit Note",
+    charges:      Number(r.total_amount) || 0,
+    credits:      Number(r.paid_amount)  || 0,
+    reference_no: r.invoice_number ?? null,
+    due_date:     r.due_date ?? null,
+    status:       mapAPStatusToEntryStatus(r.status),
+  }));
+
+  return [...ar, ...ap];
+}
+
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
 function EntryModal({
   initial,
@@ -804,6 +880,39 @@ function EntryModal({
     // On create, always today. On edit, keep the existing entry_date from DB.
     entry_date: initial.entry_date ?? todayISO(),
   });
+
+  // ERP import: AR + AP rows the user can drop into this entry
+  const [erpSources, setErpSources] = useState<ErpSource[]>([]);
+  const [erpLoading, setErpLoading] = useState(false);
+  const [erpPick, setErpPick]       = useState<string>("");
+
+  useEffect(() => {
+    if (isEdit) return;
+    const pid = form.project_id;
+    if (!pid) { setErpSources([]); return; }
+    setErpLoading(true);
+    fetchErpSources(pid)
+      .then(setErpSources)
+      .catch(() => setErpSources([]))
+      .finally(() => setErpLoading(false));
+  }, [form.project_id, isEdit]);
+
+  const applyErpSource = (key: string) => {
+    setErpPick(key);
+    if (!key) return;
+    const src = erpSources.find(s => s.key === key);
+    if (!src) return;
+    setForm(p => ({
+      ...p,
+      description:  src.description,
+      entry_type:   src.entry_type,
+      charges:      src.charges,
+      credits:      src.credits,
+      reference_no: src.reference_no,
+      due_date:     src.due_date,
+      status:       src.status,
+    }));
+  };
 
   // Live "last updated" display — ticks every minute so the user sees it's auto
   const [nowDisplay, setNowDisplay] = useState(fmtDateTime(new Date().toISOString()));
@@ -943,6 +1052,27 @@ function EntryModal({
                 </span>
               </Field>
             </>
+          )}
+
+          {/* Import from ERP (AR / AP) — only on create */}
+          {!isEdit && form.project_id && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Import from ERP</p>
+                {erpLoading && <span className="text-[9px] text-emerald-200/70 italic">Loading AR / AP…</span>}
+              </div>
+              <Select
+                value={erpPick}
+                onChange={(v) => applyErpSource(v as string)}
+                options={[
+                  { value: "", label: erpSources.length === 0 ? (erpLoading ? "Loading…" : "— No AR / AP rows for this project —") : "— Pick an AR or AP record to import —" },
+                  ...erpSources.map(s => ({ value: s.key, label: s.label })),
+                ]}
+              />
+              <p className="text-[9px] text-emerald-200/60 mt-1.5 italic leading-relaxed">
+                Picks one Accounts Receivable invoice or Accounts Payable bill and pre-fills the description, type, charges, credits, reference and due date below.
+              </p>
+            </div>
           )}
 
           {/* Entry Details */}

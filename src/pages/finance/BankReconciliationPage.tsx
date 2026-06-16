@@ -119,6 +119,90 @@ const fmtDate = (d: string | null) =>
       })
     : "—";
 
+// ─── ERP IMPORT SOURCES ───────────────────────────────────────────────────────
+// Pulls ERP cash movements that flow through the selected bank account so the
+// user can import them straight into a reconciliation entry. Sources:
+//   - AR receipts        → Deposit
+//   - AP payments        → Withdrawal
+//   - Payroll net pay    → Withdrawal
+//   - Loan instalments   → Withdrawal
+//
+// Filtered to the selected bank_code (matching COA code on the source row) and,
+// when applicable, to a single project.
+
+interface BankErpSource {
+  key:              string;
+  label:            string;
+  description:      string;
+  transaction_type: TransactionType;
+  book_amount:      number;
+  transaction_date: string;
+  transaction_code: string | null;
+  reference_number: string | null;
+}
+
+async function fetchBankErpSources(bankCode: string, projectId: string | null): Promise<BankErpSource[]> {
+  if (!bankCode) return [];
+  const scoped = (q: any) => projectId ? q.eq("project_id", projectId) : q;
+
+  const arQ = scoped(supabase.from("accounts_receivable")
+    .select("id,client,billing,amount_received,account_received,date").eq("account_received", bankCode).gt("amount_received", 0));
+  const apQ = scoped(supabase.from("accounts_payable")
+    .select("id,vendor_name,invoice_number,paid_amount,receiving_account_code,date_of_payment").eq("receiving_account_code", bankCode).gt("paid_amount", 0));
+  const payQ = scoped(supabase.from("payroll_entries")
+    .select("id,employee_name,net_pay,bank_code,paid_date,payment_status").eq("bank_code", bankCode).eq("payment_status", "Paid"));
+  const loanQ = scoped(supabase.from("loans")
+    .select("id,facility_ref,lender_name,amount_paid,payment_date").gt("amount_paid", 0));
+
+  const [arRes, apRes, payRes, loanRes] = await Promise.all([arQ, apQ, payQ, loanQ]);
+
+  const ar: BankErpSource[] = (arRes.data ?? []).map((r: any) => ({
+    key:              `ar:${r.id}`,
+    label:            `AR Receipt · ${r.client ?? "—"} · ${fmt(Number(r.amount_received) || 0, "KES")}`,
+    description:      `AR receipt — ${r.client ?? ""}${r.billing ? " (Invoice " + r.billing + ")" : ""}`,
+    transaction_type: "Deposit",
+    book_amount:      Number(r.amount_received) || 0,
+    transaction_date: r.date ?? new Date().toISOString().split("T")[0],
+    transaction_code: null,
+    reference_number: r.billing ?? null,
+  }));
+
+  const ap: BankErpSource[] = (apRes.data ?? []).map((r: any) => ({
+    key:              `ap:${r.id}`,
+    label:            `AP Payment · ${r.vendor_name ?? "—"} · ${fmt(Number(r.paid_amount) || 0, "KES")}`,
+    description:      `AP payment — ${r.vendor_name ?? ""}${r.invoice_number ? " (Bill " + r.invoice_number + ")" : ""}`,
+    transaction_type: "Withdrawal",
+    book_amount:      Number(r.paid_amount) || 0,
+    transaction_date: r.date_of_payment ?? new Date().toISOString().split("T")[0],
+    transaction_code: null,
+    reference_number: r.invoice_number ?? null,
+  }));
+
+  const pay: BankErpSource[] = (payRes.data ?? []).map((r: any) => ({
+    key:              `pay:${r.id}`,
+    label:            `Payroll · ${r.employee_name ?? "—"} · ${fmt(Number(r.net_pay) || 0, "KES")}`,
+    description:      `Payroll net pay — ${r.employee_name ?? ""}`,
+    transaction_type: "Withdrawal",
+    book_amount:      Number(r.net_pay) || 0,
+    transaction_date: r.paid_date ?? new Date().toISOString().split("T")[0],
+    transaction_code: null,
+    reference_number: null,
+  }));
+
+  const loan: BankErpSource[] = (loanRes.data ?? []).map((r: any) => ({
+    key:              `loan:${r.id}`,
+    label:            `Loan · ${r.facility_ref ?? r.lender_name ?? "—"} · ${fmt(Number(r.amount_paid) || 0, "KES")}`,
+    description:      `Loan instalment — ${r.lender_name ?? ""}${r.facility_ref ? " (" + r.facility_ref + ")" : ""}`,
+    transaction_type: "Withdrawal",
+    book_amount:      Number(r.amount_paid) || 0,
+    transaction_date: r.payment_date ?? new Date().toISOString().split("T")[0],
+    transaction_code: null,
+    reference_number: r.facility_ref ?? null,
+  }));
+
+  return [...ar, ...ap, ...pay, ...loan].sort((a, b) => (a.transaction_date < b.transaction_date ? 1 : -1));
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 const api = {
@@ -494,6 +578,37 @@ function EntryModal({
   const set = (k: keyof BRFormData, v: unknown) =>
     setForm((prev) => ({ ...prev, [k]: v } as BRFormData));
 
+  // ERP import sources for the selected bank_code
+  const [erpSources, setErpSources] = useState<BankErpSource[]>([]);
+  const [erpLoading, setErpLoading] = useState(false);
+  const [erpPick, setErpPick]       = useState("");
+
+  useEffect(() => {
+    if (isEdit) return;
+    if (!form.bank_code) { setErpSources([]); return; }
+    setErpLoading(true);
+    fetchBankErpSources(form.bank_code, form.project_id ?? null)
+      .then(setErpSources)
+      .catch(() => setErpSources([]))
+      .finally(() => setErpLoading(false));
+  }, [form.bank_code, form.project_id, isEdit]);
+
+  const applyErpSource = (key: string) => {
+    setErpPick(key);
+    if (!key) return;
+    const src = erpSources.find(s => s.key === key);
+    if (!src) return;
+    setForm(p => ({
+      ...p,
+      transaction_type: src.transaction_type,
+      description:      src.description,
+      book_amount:      src.book_amount,
+      transaction_date: src.transaction_date,
+      transaction_code: src.transaction_code,
+      reference_number: src.reference_number,
+    }));
+  };
+
   const liveDiff = parseFloat(
     ((Number(form.book_amount) || 0) - (Number(form.bank_amount) || 0)).toFixed(2)
   );
@@ -593,6 +708,38 @@ function EntryModal({
               </select>
             </SelectWrapper>
           </Field>
+
+          {/* Import from ERP — only on create, requires bank code */}
+          {!isEdit && (
+            <div className="col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Import from ERP</p>
+                {erpLoading && <span className="text-[9px] text-emerald-200/70 italic">Loading…</span>}
+              </div>
+              <SelectWrapper>
+                <select
+                  value={erpPick}
+                  onChange={(e) => applyErpSource(e.target.value)}
+                  disabled={!form.bank_code || erpLoading}
+                  className={selectCls}
+                >
+                  <option value="">
+                    {!form.bank_code
+                      ? "— Select a Bank Code above to enable —"
+                      : erpSources.length === 0
+                        ? (erpLoading ? "Loading AR / AP / Payroll / Loans…" : "— No ERP movements on this bank account —")
+                        : "— Pick an ERP cash movement to import —"}
+                  </option>
+                  {erpSources.map(s => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+              </SelectWrapper>
+              <p className="text-[10px] text-emerald-200/60 mt-1.5 italic leading-relaxed">
+                Lists AR receipts, AP payments, payroll net pay, and loan instalments that flow through this bank account. Picking one pre-fills the book amount, date, type, description and reference below.
+              </p>
+            </div>
+          )}
 
           {/* Description — full width */}
           <div className="col-span-2">
