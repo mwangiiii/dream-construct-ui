@@ -102,10 +102,10 @@ const PROJECT_STATUS_STYLE: Record<string, string> = {
 };
 
 const inputCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all";
+  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all [color-scheme:dark]";
 
 const selectCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-background border border-white/10 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all [&>option]:bg-background";
+  "w-full px-3 py-2 rounded-xl text-sm bg-[hsl(var(--background))] border border-white/10 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all [&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -1369,7 +1369,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
                   className="w-full pl-9 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/40 transition-all" />
               </div>
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2.5 text-sm bg-background border border-white/10 rounded-xl text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all [&>option]:bg-background">
+                className={selectCls + " px-4 py-2.5 w-auto"}>
                 {statuses.map((s) => (
                   <option key={s} value={s}>{s === "all" ? "All Statuses" : s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</option>
                 ))}

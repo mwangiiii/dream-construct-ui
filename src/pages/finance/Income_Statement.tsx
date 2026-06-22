@@ -109,29 +109,29 @@ function toWritable(form: ISFormData): ISFormData {
 
 // ─── AUTO-DERIVE FROM ERP (read-only, Kenya tax law) ──────────────────────────
 //
-// Four of the five Income Statement input lines are derived automatically from
-// the rest of the ERP whenever the period + project changes. They are made
-// read-only in the form. The fifth — Income Tax Expense — is computed locally
-// using the Kenya resident corporate income-tax rate (Income Tax Act, Cap. 470).
-//
 // Derivation rules (per user spec):
 //
 //   Gross Revenue          = Σ accounts_receivable.amount_billed
 //                            scoped to the project, where AR.date is within
 //                            the period window [start_date, end_date].
+//                            (AP is NOT subtracted here.)
 //
-//   Returns & Allowances   = Σ accounts_payable.total_amount
-//                            scoped to the project, where AP.date is within
-//                            the period window.
+//   Returns & Allowances   = 0 (not used; AP belongs in operating cost).
 //
 //   Cost of Goods Sold     = Σ material_items[].amount across invoices
 //                            scoped to the project, where invoices.invoice_date
 //                            is within the period window.
 //
-//   Operating Expenses     = Σ accounts_payable.total_amount for the project
-//                          + Σ accounts_payable.total_amount where project_id
-//                            IS NULL (firm-wide AP),
+//   Operating Expenses     = Σ accounts_payable.total_amount linked to the
+//                            project (project_id = this project)
+//                          + Σ accounts_payable.total_amount with no project
+//                            link (project_id IS NULL),
 //                            both within the period window.
+//
+//   Other Income           = Σ accounts_receivable.amount_billed with no
+//                            project link (project_id IS NULL).
+//
+//   Other Expenses         = 0 (firm-wide AP is already counted in OpEx).
 //
 //   Income Tax Expense     = max(0, income_before_tax × KENYA_CORPORATE_TAX_RATE)
 //                            where income_before_tax = operating_income
@@ -139,29 +139,16 @@ function toWritable(form: ISFormData): ISFormData {
 
 const KENYA_CORPORATE_TAX_RATE = 0.30; // Resident company rate per ITA Cap. 470
 
-// ─── DE-DUPLICATED CONSOLIDATION (global income statements table) ─────────────
-// Each per-project income statement bakes in the firm-wide AR / AP for its
-// period as Other Income and Other Expenses (and adds firm-wide AP into
-// Operating Expenses). If we naively SUM(s.operating_expenses) and
-// SUM(s.other_income) / SUM(s.other_expenses) across N project statements in
-// the same period, the firm-wide portion gets multiplied N times.
+// ─── CONSOLIDATION (global income statements table) ─────────────────────────
+// Each per-project statement now stores:
+//   operating_expenses = AP linked to that project + AP with no project link
+//   other_income       = AR with no project link
+//   other_expenses     = 0
 //
-// This helper groups statements by (start_date, end_date) and counts the
-// firm-wide portion **once per period**:
-//
-//   Per period:
-//     project_OpEx_period = Σ (s.operating_expenses − s.other_expenses)
-//     period_OpEx         = project_OpEx_period + firm_wide_AP_for_period
-//     period_other_income = firm_wide_AR_for_period         (once)
-//     period_other_exp    = firm_wide_AP_for_period         (once)
-//
-//   firm_wide_AR_for_period and firm_wide_AP_for_period are read from any
-//   single row in the period (they're identical across all project rows
-//   sharing the same period, because they're sourced from the same firm-wide
-//   query).
-//
-// Income tax is RECOMPUTED from the corrected income-before-tax so the global
-// total reflects the real Kenya 30% on the de-duplicated figures.
+// Summing OpEx across multiple project rows in the same period will repeat
+// the "AP with no project link" portion N times. We mitigate by counting
+// Other Income (AR-no-project) only once per (start_date, end_date) period,
+// since it is identical across rows sharing the same period.
 
 interface ConsolidatedTotals {
   gross_revenue:          number;
@@ -195,29 +182,24 @@ function computeConsolidatedTotals(statements: IncomeStatement[]): ConsolidatedT
     const periodGross   = rows.reduce((a, s) => a + Number(s.gross_revenue),          0);
     const periodReturns = rows.reduce((a, s) => a + Number(s.returns_and_allowances), 0);
     const periodCOGS    = rows.reduce((a, s) => a + Number(s.cost_of_goods_sold),     0);
-    const periodProjectOpEx = rows.reduce(
-      (a, s) => a + (Number(s.operating_expenses) - Number(s.other_expenses)),
-      0,
-    );
+    const periodOpEx    = rows.reduce((a, s) => a + Number(s.operating_expenses),     0);
 
-    // Firm-wide portion — identical across rows sharing this period.
-    const firmAR = Number(rows[0].other_income)   || 0;
-    const firmAP = Number(rows[0].other_expenses) || 0;
-
-    const periodOpEx = periodProjectOpEx + firmAP; // count firm-wide once
+    // AR with no project link — identical across rows sharing this period
+    const periodOtherIncome = Number(rows[0].other_income)   || 0;
+    const periodOtherExp    = Number(rows[0].other_expenses) || 0;
 
     const periodNetRev      = periodGross - periodReturns;
     const periodGrossProfit = periodNetRev - periodCOGS;
     const periodOpIncome    = periodGrossProfit - periodOpEx;
-    const periodBeforeTax   = periodOpIncome + firmAR - firmAP;
+    const periodBeforeTax   = periodOpIncome + periodOtherIncome - periodOtherExp;
     const periodTax         = Math.max(0, periodBeforeTax * KENYA_CORPORATE_TAX_RATE);
 
     gross_revenue          += periodGross;
     returns_and_allowances += periodReturns;
     cost_of_goods_sold     += periodCOGS;
     operating_expenses     += periodOpEx;
-    other_income           += firmAR;
-    other_expenses         += firmAP;
+    other_income           += periodOtherIncome;
+    other_expenses         += periodOtherExp;
     income_tax_expense     += periodTax;
   });
 
@@ -292,8 +274,9 @@ async function deriveISTotals(
     arQ, apProjectQ, invQ, arGlobalQ, apGlobalQ,
   ]);
 
-  const gross_revenue          = sum(arRes.data as { amount_billed: number }[], r => r.amount_billed);
-  const returns_and_allowances = sum(apProjectRes.data as { total_amount: number }[], r => r.total_amount);
+  const gross_revenue   = sum(arRes.data as { amount_billed: number }[], r => r.amount_billed);
+  const apProjectTotal  = sum(apProjectRes.data as { total_amount: number }[], r => r.total_amount);
+  const apNoProjectTotal = sum(apGlobalRes.data as { total_amount: number }[], r => r.total_amount);
 
   // COGS — sum nested material_items[].amount across all matching invoices
   const cost_of_goods_sold = (invRes.data ?? []).reduce((acc: number, row: any) => {
@@ -301,16 +284,19 @@ async function deriveISTotals(
     return acc + items.reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0);
   }, 0);
 
-  // Firm-wide AR / AP — feed Other Income / Other Expenses AND OpEx
-  const other_income   = sum(arGlobalRes.data as { amount_billed: number }[], r => r.amount_billed);
-  const other_expenses = sum(apGlobalRes.data as { total_amount: number }[], r => r.total_amount);
+  // Other Income — AR with no project link (kept as a separate income source)
+  const other_income = sum(arGlobalRes.data as { amount_billed: number }[], r => r.amount_billed);
 
-  // OpEx — project AP + firm-wide AP, both within the same window
-  const operating_expenses = returns_and_allowances + other_expenses;
+  // OpEx — AP linked to project + AP not linked to any project (in window)
+  const operating_expenses = apProjectTotal + apNoProjectTotal;
 
   return {
-    gross_revenue, returns_and_allowances, cost_of_goods_sold,
-    operating_expenses, other_income, other_expenses,
+    gross_revenue,
+    returns_and_allowances: 0,  // AP no longer reduces gross revenue
+    cost_of_goods_sold,
+    operating_expenses,
+    other_income,
+    other_expenses: 0,          // AP-no-project already counted in OpEx
   };
 }
 
@@ -374,7 +360,13 @@ function useToast() {
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 const inputCls =
-  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all appearance-none";
+  "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all appearance-none [color-scheme:dark]";
+
+const selectCls =
+  "w-full px-3 py-2 rounded-xl text-sm border text-foreground focus:outline-none " +
+  "focus:ring-1 focus:ring-primary/60 focus:border-primary/40 transition-all " +
+  "appearance-none pr-10 cursor-pointer bg-[hsl(var(--background))] border-white/10 " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -433,6 +425,15 @@ function StatementModal({
 
   const set = <K extends keyof ISFormData>(k: K, v: ISFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
+
+  // ── Auto-populate the period label from the date range if the user hasn't
+  //    typed one yet. Keeps the Save button enabled on a fresh form.
+  useEffect(() => {
+    if (form.period_label.trim() || !form.start_date || !form.end_date) return;
+    const fmtShort = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" });
+    setForm(p => ({ ...p, period_label: `${fmtShort(form.start_date)} – ${fmtShort(form.end_date)}` }));
+  }, [form.start_date, form.end_date, form.period_label]);
 
   // ── Auto-derive Gross Revenue / Returns / COGS / OpEx from the ERP whenever
   //    the period or the linked project changes. The five derived fields are
@@ -512,7 +513,7 @@ function StatementModal({
                   <select
                     value={form.project_id ?? ""}
                     onChange={(e) => set("project_id", e.target.value || null)}
-                    className={inputCls + " pr-10"}
+                    className={selectCls}
                   >
                     <option value="">— No project (standalone) —</option>
                     {projects.map((p) => (
@@ -553,7 +554,7 @@ function StatementModal({
               <select
                 value={form.status}
                 onChange={(e) => set("status", e.target.value as StatementStatus)}
-                className={inputCls + " pr-10"}
+                className={selectCls}
               >
                 {STATEMENT_STATUSES.map((s) => (
                   <option key={s} value={s}>{s}</option>
@@ -586,8 +587,8 @@ function StatementModal({
                 {autoLoading && <span className="w-3 h-3 border-2 border-emerald-300/30 border-t-emerald-300 rounded-full animate-spin" />}
               </p>
               <p className="text-[11px] text-emerald-200/70 leading-relaxed">
-                Revenue, Returns & Allowances, COGS, OpEx, Other Income, Other Expenses and Income Tax are all computed live from AR / AP / Invoices for the selected period{form.project_id ? " (this project; Other Income / Expenses still come from the firm-wide AR / AP)" : " (firm-wide)"}.
-                Income tax uses the Kenya resident corporate rate ({(KENYA_CORPORATE_TAX_RATE * 100).toFixed(0)}%, ITA Cap. 470). All seven fields are read-only.
+                Gross Revenue (AR), COGS (invoice materials), OpEx (AP linked to project + AP with no project link), Other Income (AR with no project link) and Income Tax are all computed live from the ERP for the selected period{form.project_id ? " (scoped to this project)" : ""}.
+                Income tax uses the Kenya resident corporate rate ({(KENYA_CORPORATE_TAX_RATE * 100).toFixed(0)}%, ITA Cap. 470). All derived fields are read-only.
               </p>
               {autoError && (
                 <p className="text-[10px] mt-1.5 text-rose-300 italic">⚠ {autoError}</p>
@@ -604,7 +605,7 @@ function StatementModal({
             <ReadOnlyMoney value={form.gross_revenue} hint="Σ AR billed in period (project)" />
           </Field>
           <Field label="Returns & Allowances (KES)">
-            <ReadOnlyMoney value={form.returns_and_allowances} hint="Σ AP totals in period (project)" />
+            <ReadOnlyMoney value={form.returns_and_allowances} hint="Not used — AP now belongs in OpEx" />
           </Field>
 
           {/* COGS */}
@@ -619,17 +620,17 @@ function StatementModal({
           <SectionDivider label="Operating Expenses" dotColor="bg-orange-400" textColor="text-orange-400" />
           <div className="col-span-2">
             <Field label="Total Operating Expenses (KES)">
-              <ReadOnlyMoney value={form.operating_expenses} hint="Σ AP project-linked + AP firm-wide in period" />
+              <ReadOnlyMoney value={form.operating_expenses} hint="Σ AP linked to this project + Σ AP with no project link, in period" />
             </Field>
           </div>
 
           {/* Other Income / Expenses */}
           <SectionDivider label="Other Income / Expenses" dotColor="bg-emerald-400" textColor="text-emerald-400" />
           <Field label="Other Income (KES)">
-            <ReadOnlyMoney value={form.other_income} hint="Σ AR firm-wide (project_id IS NULL) in period" />
+            <ReadOnlyMoney value={form.other_income} hint="Σ AR with no project link, in period" />
           </Field>
           <Field label="Other Expenses (KES)">
-            <ReadOnlyMoney value={form.other_expenses} hint="Σ AP firm-wide (project_id IS NULL) in period" />
+            <ReadOnlyMoney value={form.other_expenses} hint="0 — AP with no project link is counted in OpEx" />
           </Field>
 
           {/* Tax */}
@@ -1085,7 +1086,7 @@ function GlobalIncomeStatementsTable({
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as StatementStatus | "All")}
-              className={inputCls + " px-4 py-2.5 w-auto"}
+              className={selectCls + " w-auto"}
             >
               <option value="All">All Statuses</option>
               {STATEMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1093,7 +1094,7 @@ function GlobalIncomeStatementsTable({
             <select
               value={filterProject}
               onChange={(e) => setFilterProject(e.target.value)}
-              className={inputCls + " px-4 py-2.5 w-auto max-w-[200px]"}
+              className={selectCls + " w-auto max-w-[200px]"}
             >
               <option value="all">All Projects</option>
               <option value="standalone">Standalone only</option>
@@ -1568,7 +1569,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className={inputCls + " px-4 py-2.5 w-auto"}
+                className={selectCls + " w-auto"}
               >
                 {statuses.map((s) => (
                   <option key={s} value={s}>
@@ -1917,7 +1918,7 @@ function StatementsView({ project, canEdit, onBack }: { project: Project; canEdi
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value as StatementStatus | "All")}
-                className={inputCls + " px-4 py-2.5 w-auto"}
+                className={selectCls + " w-auto"}
               >
                 <option value="All">All Statuses</option>
                 {STATEMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}

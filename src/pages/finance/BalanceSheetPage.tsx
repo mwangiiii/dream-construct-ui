@@ -264,7 +264,7 @@ const selectCls =
   "bg-white/5 border border-white/10 " +
   "text-foreground " +
   "focus:outline-none focus:ring-1 focus:ring-primary/60 focus:border-primary/40 " +
-  "transition-all " +
+  "transition-all [color-scheme:dark] " +
   // Dark-theme option list (honoured in Chrome/Edge/Firefox on Windows)
   "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground";
 

@@ -532,13 +532,13 @@ function Select({
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; isHeader?: boolean }[];
   className?: string;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
-  const selected = options.find((o) => o.value === value);
+  const selected = options.find((o) => o.value === value && !o.isHeader);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -588,6 +588,16 @@ function Select({
           >
             <div className="py-1 max-h-64 overflow-y-auto">
               {options.map((opt) => {
+                if (opt.isHeader) {
+                  return (
+                    <div
+                      key={opt.value}
+                      className="px-3.5 pt-3 pb-1 text-[9px] font-black uppercase tracking-[0.18em] text-muted-foreground/50 select-none"
+                    >
+                      {opt.label}
+                    </div>
+                  );
+                }
                 const isActive = opt.value === value;
                 return (
                   <button
@@ -742,7 +752,7 @@ function BalanceBar({
       <div className="px-5 py-4 space-y-3">
         <div>
           <div className="flex justify-between text-[10px] mb-1">
-            <span className="text-rose-400 font-semibold">Total Charges</span>
+            <span className="text-rose-400 font-semibold">Total Debits</span>
             <span className="font-mono font-bold text-rose-400">
               {fmt(totalCharges)}
             </span>
@@ -826,26 +836,27 @@ async function fetchInvoiceSources(projectId: string | null): Promise<ErpSource[
 
   return (data ?? []).map((r: any) => ({
     key:          `inv:${r.id}`,
-    label:        `Invoice · ${r.invoice_number ?? r.id} · ${r.client_company_name ?? "—"} · ${fmt(r.total)}`,
+    label:        `${r.invoice_number ?? r.id}${r.client_company_name ? " · " + r.client_company_name : ""} — ${fmt(r.total)}`,
     description:  `Invoice ${r.invoice_number ?? r.id}${r.client_company_name ? " — " + r.client_company_name : ""}`,
     entry_type:   "Invoice",
     charges:      Number(r.total) || 0,
     credits:      0,
     reference_no: r.invoice_number ?? null,
-    due_date:     r.due_date ?? null,
+    due_date:     null,
     status:       (r.status === "paid" ? "Paid" : r.status === "overdue" ? "Overdue" : r.status === "partial" ? "Partial" : "Outstanding") as EntryStatus,
   }));
 }
 
-// Payment-type entries (Payment / Credit Note) → list PM vendors and project
-// workers; auto-fill the CREDITS side from what we'd pay them.
+// Payment-type entries (Payment / Credit Note) → list PM vendors, project
+// workers, and WIP costs; auto-fill the CREDITS side from what we'd pay them.
 //
 //   Vendor amount  = Σ project_financials.total_price billed by that vendor
 //   Worker amount  = most recent payroll_checklist.net_pay for that worker
+//   WIP cost       = vw_project_cost_incurred.total_cost (AP + JC + Tax + Loan)
 async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[]> {
   if (!projectId) return [];
 
-  const [pmRes, wkRes] = await Promise.all([
+  const [pmRes, wkRes, wipRes] = await Promise.all([
     supabase.from("project_financials")
       .select("id,tender_company_id,total_price,tender_company:tender_companies(id,name)")
       .eq("project_id", projectId)
@@ -853,6 +864,10 @@ async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[
     supabase.from("workers")
       .select("id,full_name,role,worker_assignments!inner(project_id)")
       .eq("worker_assignments.project_id", projectId),
+    supabase.from("vw_project_cost_incurred")
+      .select("total_cost")
+      .eq("project_id", projectId)
+      .single(),
   ]);
 
   // Roll up PM vendors by tender_company_id
@@ -888,7 +903,7 @@ async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[
   const out: ErpSource[] = [];
   vendorMap.forEach((v, id) => out.push({
     key:          `vendor:${id}`,
-    label:        `Vendor · ${v.name} · PM total ${fmt(v.total)}`,
+    label:        `${v.name} — ${fmt(v.total)}`,
     description:  `Payment to vendor ${v.name}`,
     entry_type:   "Payment",
     charges:      0,
@@ -899,7 +914,7 @@ async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[
   }));
   workers.forEach(w => out.push({
     key:          `worker:${w.id}`,
-    label:        `Worker · ${w.full_name}${w.role ? " · " + w.role.replace(/_/g, " ") : ""} · Net pay ${fmt(netPayByWorker[w.id] || 0)}`,
+    label:        `${w.full_name}${w.role ? " (" + w.role.replace(/_/g, " ") + ")" : ""} — ${fmt(netPayByWorker[w.id] || 0)}`,
     description:  `Payment to worker ${w.full_name}${w.role ? " (" + w.role.replace(/_/g, " ") + ")" : ""}`,
     entry_type:   "Payment",
     charges:      0,
@@ -908,6 +923,22 @@ async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[
     due_date:     null,
     status:       "Outstanding",
   }));
+
+  // Add WIP cost incurred as a separate line item (if any)
+  const wipTotal = Number(wipRes.data?.total_cost ?? 0) || 0;
+  if (wipTotal > 0) {
+    out.push({
+      key:          "wip:cost_incurred",
+      label:        `Project Costs (WIP) — ${fmt(wipTotal)}`,
+      description:  "Project costs incurred (AP, Job Costs, Taxes, Loan Financing)",
+      entry_type:   "Payment",
+      charges:      0,
+      credits:      wipTotal,
+      reference_no: null,
+      due_date:     null,
+      status:       "Outstanding",
+    });
+  }
 
   return out;
 }
@@ -965,7 +996,7 @@ function EntryModal({
 
   const applyErpSource = (key: string) => {
     setErpPick(key);
-    if (!key) return;
+    if (!key || key.startsWith("__hdr_")) return;
     const src = erpSources.find(s => s.key === key);
     if (!src) return;
     setForm(p => ({
@@ -1120,43 +1151,6 @@ function EntryModal({
             </>
           )}
 
-          {/* Import from ERP — type-aware: invoices for DR side, vendors/workers for CR side */}
-          {!isEdit && form.project_id && importKind && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">
-                  {importKind === "invoice" ? "Pick an invoice (DR)" : "Pick a vendor or worker (CR)"}
-                </p>
-                {erpLoading && <span className="text-[9px] text-emerald-200/70 italic">Loading…</span>}
-              </div>
-              <Select
-                value={erpPick}
-                onChange={(v) => applyErpSource(v as string)}
-                options={[
-                  {
-                    value: "",
-                    label: erpSources.length === 0
-                      ? (erpLoading
-                          ? "Loading…"
-                          : importKind === "invoice"
-                            ? "— No invoices on this project —"
-                            : "— No PM vendors or workers on this project —")
-                      : (importKind === "invoice"
-                          ? "— Pick an invoice to import —"
-                          : "— Pick a vendor or worker to pay —"),
-                  },
-                  ...erpSources.map(s => ({ value: s.key, label: s.label })),
-                ]}
-              />
-              <p className="text-[9px] text-emerald-200/60 mt-1.5 italic leading-relaxed">
-                {importKind === "invoice"
-                  ? "Lists invoices raised under this project. Picking one auto-fills the description, reference, due date and Debit amount below."
-                  : "Lists PM vendors (project_financials → tender_companies) and workers assigned to this project. Picking one auto-fills the description and Credits amount."
-                }
-              </p>
-            </div>
-          )}
-
           {/* Entry Details */}
           <SectionLabel
             label="Entry Details"
@@ -1186,6 +1180,84 @@ function EntryModal({
                 options={ENTRY_STATUSES.map((s) => ({ value: s, label: s }))}
               />
             </Field>
+
+            {/* Invoice / Debit Note — inline invoice picker */}
+            {!isEdit && (form.entry_type === "Invoice" || form.entry_type === "Debit Note") && (
+              <Field
+                label={erpLoading ? "Invoice — Loading…" : "Select Invoice"}
+                className="sm:col-span-2"
+                hint="Fills in the debit amount, description, reference and due date automatically."
+              >
+                {form.project_id ? (
+                  <Select
+                    value={erpPick}
+                    onChange={(v) => applyErpSource(v as string)}
+                    options={[
+                      {
+                        value: "",
+                        label: erpLoading
+                          ? "Loading invoices…"
+                          : erpSources.length === 0
+                          ? "— No invoices found for this project —"
+                          : "— Select an invoice —",
+                      },
+                      ...erpSources.map((s) => ({ value: s.key, label: s.label })),
+                    ]}
+                  />
+                ) : (
+                  <div className={readonlyCls + " text-[11px]"}>
+                    Select a project first to see its invoices
+                  </div>
+                )}
+              </Field>
+            )}
+
+            {/* Payment / Credit Note — inline vendor & worker picker (grouped) */}
+            {!isEdit && (form.entry_type === "Payment" || form.entry_type === "Credit Note") && (
+              <Field
+                label={erpLoading ? "Loading…" : "Select Vendor, Worker, or Project Costs"}
+                className="sm:col-span-2"
+                hint="Fills in the credits amount and description automatically."
+              >
+                {form.project_id ? (() => {
+                  const vendors = erpSources.filter(s => s.key.startsWith("vendor:"));
+                  const workers = erpSources.filter(s => s.key.startsWith("worker:"));
+                  const wipCosts = erpSources.filter(s => s.key.startsWith("wip:"));
+                  return (
+                    <Select
+                      value={erpPick}
+                      onChange={(v) => applyErpSource(v as string)}
+                      options={[
+                        {
+                          value: "",
+                          label: erpLoading
+                            ? "Loading…"
+                            : erpSources.length === 0
+                            ? "— No vendors, workers, or costs on this project —"
+                            : "— Select an item —",
+                        },
+                        ...(vendors.length > 0 ? [
+                          { value: "__hdr_vendors__", label: "PM Vendors", isHeader: true },
+                          ...vendors.map(s => ({ value: s.key, label: s.label })),
+                        ] : []),
+                        ...(workers.length > 0 ? [
+                          { value: "__hdr_workers__", label: "Project Workers", isHeader: true },
+                          ...workers.map(s => ({ value: s.key, label: s.label })),
+                        ] : []),
+                        ...(wipCosts.length > 0 ? [
+                          { value: "__hdr_wip__", label: "Project Costs", isHeader: true },
+                          ...wipCosts.map(s => ({ value: s.key, label: s.label })),
+                        ] : []),
+                      ]}
+                    />
+                  );
+                })() : (
+                  <div className={readonlyCls + " text-[11px]"}>
+                    Select a project first to see vendors, workers & costs
+                  </div>
+                )}
+              </Field>
+            )}
           </div>
 
           {/* Amounts */}
@@ -1733,7 +1805,7 @@ function StatementRow({
                   { label: "Due Date", value: fmtDate(entry.due_date) },
                   { label: "Account Code", value: entry.account_code || "—" },
                   { label: "Reference No.", value: entry.reference_no || "—" },
-                  { label: "Charges (DR)", value: fmt(entry.charges) },
+                  { label: "Debit (DR)", value: fmt(entry.charges) },
                   { label: "Credits (CR)", value: fmt(entry.credits) },
                   {
                     label: "Net Movement",
@@ -1821,7 +1893,7 @@ function StatementTable({
     "Type",
     "Acc. Code",
     ...(showProjectCol ? ["Scope"] : []),
-    "Charges (DR)",
+    "Debit (DR)",
     "Credits (CR)",
     "Balance",
     "Due Date",
@@ -1927,7 +1999,7 @@ function StatementTable({
                 </div>
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   {[
-                    { l: "Charges", v: fmt(n0(entry.charges)), c: "text-rose-400" },
+                    { l: "Debit", v: fmt(n0(entry.charges)), c: "text-rose-400" },
                     { l: "Credits", v: fmt(n0(entry.credits)), c: "text-emerald-400" },
                     { l: "Balance", v: fmt(rb),                c: rb > 0 ? "text-rose-400" : rb < 0 ? "text-emerald-400" : "text-muted-foreground" },
                   ].map(a => (
@@ -2030,7 +2102,7 @@ function SummaryFooter({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             {
-              label: "Total Charges",
+              label: "Total Debits",
               value: totalCharges,
               color: "text-rose-400",
               sub: "DR",
@@ -2311,7 +2383,7 @@ function GlobalStatementView({
             isNum: true,
           },
           {
-            label: "Total Charges",
+            label: "Total Debits",
             value: allEntries.reduce((a, e) => a + n0(e.charges), 0),
             sub: "DR",
             color: "text-rose-400",

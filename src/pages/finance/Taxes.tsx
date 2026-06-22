@@ -381,7 +381,11 @@ function Toasts({ toasts }: { toasts: { id: number; msg: string; type: "success"
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
 const inputCls =
-  "w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all";
+  "w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all [color-scheme:dark] [&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground";
+
+const selectCls =
+  "px-4 py-2.5 rounded-xl text-sm border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/40 transition-all appearance-none pr-10 cursor-pointer " +
+  "bg-[hsl(var(--background))] border-white/10 [&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground [color-scheme:dark]";
 
 function Field({ label, children, className = "", hint }: {
   label: string; children: React.ReactNode; className?: string; hint?: string;
@@ -1101,12 +1105,12 @@ function TaxTable({
             className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all" />
         </div>
         <select value={filterType} onChange={(e) => setFilterType(e.target.value as TransactionType | "All")}
-          className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40">
+          className={selectCls}>
           <option value="All">All Types</option>
           {TRANSACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <select value={filterPeriod} onChange={(e) => setFilterPeriod(e.target.value)}
-          className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40">
+          className={selectCls}>
           <option value="All">All Periods</option>
           {periods.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
@@ -1621,7 +1625,7 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
               className="w-full pl-10 pr-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all" />
           </div>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 text-sm bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40">
+            className={selectCls}>
             <option value="all">All Statuses</option>
             {Array.from(new Set(projects.map((p) => p.status ?? "planning"))).map((s) => (
               <option key={s} value={s}>{s.replace(/_/g, " ").toUpperCase()}</option>

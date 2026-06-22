@@ -354,6 +354,7 @@ function NumericInput({ value, onChange, step = "0.01", min = "0", max, placehol
       type="number" step={step} min={min} max={max}
       value={display} placeholder={placeholder ?? "0"} disabled={disabled}
       className={inputCls}
+      onWheel={e => (e.target as HTMLInputElement).blur()}
       onChange={e => {
         setDisplay(e.target.value);
         const p = e.target.value === "" ? 0 : parseFloat(e.target.value);
@@ -431,12 +432,9 @@ function APModal({
   }, [form.project_id, projects]);
 
   const handleProjectChange = (projectId: string) => {
-    const proj = projects.find(p => p.id === projectId);
     setForm(p => deriveAP({
       ...p,
       project_id: projectId,
-      // Always sync due_date from the project's expected completion date
-      due_date: proj?.expected_completion_date ?? p.due_date,
     }));
   };
 
@@ -652,13 +650,13 @@ function APModal({
                   <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
                 </div>
               </Field>
-              <Field label="Due Date" hint="Auto-set from project completion date">
-                <div className={inputCls + " cursor-not-allowed bg-white/3 text-foreground/80 flex items-center justify-between"}>
-                  <span className={`font-mono text-sm ${form.due_date ? "" : "text-muted-foreground/50 italic text-xs"}`}>
-                    {form.due_date ? fmtDate(form.due_date) : "Select a project to auto-fill"}
-                  </span>
-                  <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
-                </div>
+              <Field label="Due Date *">
+                <input
+                  type="date"
+                  value={form.due_date}
+                  onChange={e => set("due_date", e.target.value)}
+                  className={inputCls + " [color-scheme:dark]"}
+                />
               </Field>
               <Field label="Total Amount (KES) *">
                 <NumericInput value={form.total_amount}

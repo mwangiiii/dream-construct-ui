@@ -285,7 +285,8 @@ function useToast() {
 const inputCls =
   "w-full px-3 py-2 rounded-xl text-sm bg-white/5 border border-white/10 text-foreground " +
   "placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60 " +
-  "focus:border-primary/40 transition-all";
+  "focus:border-primary/40 transition-all [color-scheme:dark] " +
+  "[&>option]:bg-[hsl(var(--background))] [&>option]:text-foreground";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
