@@ -917,7 +917,8 @@ function InvoiceModal({
   useEffect(() => {
     const pid = form.project_id;
 
-    // Un-linked → reset the auto-filled project info + due_date to defaults (create only).
+    // Un-linked → reset the auto-filled project info to defaults (create only).
+    // Due date is user-entered, so we leave it alone here.
     if (!pid) {
       if (loadedProjectRef.current && !isEdit) {
         setForm(p => ({
@@ -926,7 +927,6 @@ function InvoiceModal({
           project_end_date:   null,
           project_location:   null,
           project_client_ref: null,
-          due_date:           defaultDueDate(p.invoice_date),
         }));
         setPMMaterials([]);
       }
@@ -936,9 +936,13 @@ function InvoiceModal({
 
     if (pid === loadedProjectRef.current) return;
     loadedProjectRef.current = pid;
-
-    const proj = projects.find(p => p.id === pid);
     setPMLoading(true);
+
+    // Project info source of truth: try the in-memory `projects` prop first,
+    // fall back to a direct fetch. This avoids silently failing when the
+    // parent didn't pass the projects list (per-project view) or when the
+    // maybeSingle() returns null for any reason.
+    const projFromProp = projects.find(p => p.id === pid) ?? null;
 
     Promise.all([
       // Workers for this project
@@ -948,8 +952,24 @@ function InvoiceModal({
         .select("id,material_name,material_quantity,material_unit,price_per_unit")
         .eq("project_id", pid)
         .not("material_name", "is", null),
-    ]).then(async ([workersRes, matsRes]) => {
+      // Canonical project info source for invoice auto-fill — only fetched
+      // when we don't already have the project object in memory.
+      projFromProp
+        ? Promise.resolve({ data: projFromProp, error: null })
+        : supabase
+            .from("projects")
+            .select("project_number,start_date,expected_completion_date,site_city,site_country")
+            .eq("id", pid)
+            .maybeSingle(),
+    ]).then(async ([workersRes, matsRes, projectRes]) => {
+      // Ignore stale responses if user switched to another project before this resolved.
+      if (loadedProjectRef.current !== pid) return;
+
       const workers = (workersRes.data ?? []) as { id: string; full_name: string; role: string | null }[];
+      if ((projectRes as any).error) {
+        console.error("Invoice project-info fetch failed:", (projectRes as any).error);
+      }
+      const projectInfo = ((projectRes as any).data ?? null) as Pick<Project, "project_number" | "start_date" | "expected_completion_date" | "site_city" | "site_country"> | null;
 
       // Fetch attendance to compute hours
       let hoursMap: Record<string, number> = {};
@@ -993,17 +1013,21 @@ function InvoiceModal({
         unitPrice: Number(m.price_per_unit) || 0,
       })));
 
-      // Auto-fill project info fields + due date (read-only in the UI).
-      if (proj && !isEdit) {
+      // Auto-fill project info fields. On create, populate all four fields.
+      // On edit, only fill fields that are currently blank so we don't clobber
+      // whatever the user had captured at the time of invoice creation.
+      // Due date is user-entered so we do NOT overwrite it when a project is
+      // linked.
+      if (projectInfo) {
+        const locationFromProject = projectInfo.site_city
+          ? `${projectInfo.site_city}${projectInfo.site_country ? ", " + projectInfo.site_country : ""}`
+          : null;
         setForm(p => ({
           ...p,
-          project_start_date: proj.start_date ?? null,
-          project_end_date:   proj.expected_completion_date ?? null,
-          project_location:   proj.site_city
-            ? `${proj.site_city}${proj.site_country ? ", " + proj.site_country : ""}`
-            : null,
-          project_client_ref: proj.project_number ?? null,
-          due_date:           proj.expected_completion_date ?? defaultDueDate(p.invoice_date),
+          project_start_date: isEdit ? (p.project_start_date ?? projectInfo.start_date ?? null) : (projectInfo.start_date ?? null),
+          project_end_date:   isEdit ? (p.project_end_date   ?? projectInfo.expected_completion_date ?? null) : (projectInfo.expected_completion_date ?? null),
+          project_location:   isEdit ? (p.project_location   ?? locationFromProject) : locationFromProject,
+          project_client_ref: isEdit ? (p.project_client_ref ?? projectInfo.project_number ?? null) : (projectInfo.project_number ?? null),
         }));
       }
 
@@ -1066,11 +1090,13 @@ function InvoiceModal({
                 <Field label="Invoice Date *" hint="Auto-set to today's date">
                   <ReadOnlyField value={fmtDate(form.invoice_date)} />
                 </Field>
-                <Field
-                  label="Due Date *"
-                  hint={form.project_id ? "Auto: linked project's expected completion date" : "Auto: 30 days from invoice date"}
-                >
-                  <ReadOnlyField value={fmtDate(form.due_date)} />
+                <Field label="Due Date *" hint="Enter the invoice due date">
+                  <input
+                    type="date"
+                    value={form.due_date}
+                    onChange={(e) => set("due_date", e.target.value)}
+                    className={inputCls}
+                  />
                 </Field>
               </div>
               <div>
@@ -1808,12 +1834,12 @@ function ProjectInvoiceView({ project, canEdit, onBack }: { project: Project; ca
         {modal === "create" && (
           <InvoiceModal initial={makeEmpty(project.id)}
             onSave={form => handleCreate({ ...form, project_id: project.id }, inv => setInvoices(p => [inv, ...p]), () => setModal(null))}
-            onClose={() => setModal(null)} loading={saving} showProjectSelector={false} />
+            onClose={() => setModal(null)} loading={saving} showProjectSelector={false} projects={[project]} />
         )}
         {modal === "edit" && editing && (
           <InvoiceModal initial={toForm(editing)}
             onSave={form => handleUpdate(editing.id, form, inv => setInvoices(p => p.map(i => i.id === editing.id ? inv : i)), () => { setModal(null); setEditing(null); }, editing)}
-            onClose={() => { setModal(null); setEditing(null); }} loading={saving} showProjectSelector={false} />
+            onClose={() => { setModal(null); setEditing(null); }} loading={saving} showProjectSelector={false} projects={[project]} />
         )}
         {deleting && (
           <DeleteConfirm invoice={deleting}
@@ -2237,7 +2263,7 @@ export default function InvoicePage({ projectId, canEdit = true }: Props) {
   useEffect(() => {
     if (!projectId) return;
     supabase.from("projects")
-      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,start_date,expected_completion_date,created_at")
       .eq("id", projectId).single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); });
   }, [projectId]);

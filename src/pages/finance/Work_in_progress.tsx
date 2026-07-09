@@ -236,45 +236,88 @@ const api = {
   },
 
   // Auto-fill source: cost from all expense modules + payroll + AR + budget view.
+  //
+  // cost_incurred = AP invoices + Job Costs + Taxes cash-out + Loan financing
+  //                 cost + Payroll gross pay.
+  //
+  // Each source is queried directly against its base table so the calculation
+  // still works even if `vw_project_cost_incurred` is missing or stale. A
+  // failure on any single source is non-fatal — that bucket falls back to 0
+  // and the others still contribute, so the user sees partial data rather
+  // than a hard error.
   async projectFinancials(projectId: string): Promise<ProjectFinancials> {
-    const [costRes, arRes, budgetRes, payrollRes] = await Promise.all([
-      supabase
-        .from("vw_project_cost_incurred")
-        .select("ap_cost,job_cost,tax_cost,loan_cost,total_cost")
-        .eq("project_id", projectId)
-        .maybeSingle(),
-      supabase
-        .from("vw_project_ar_summary")
-        .select("total_billed")
-        .eq("project_id", projectId)
-        .maybeSingle(),
-      supabase
-        .from("vw_project_budget")
-        .select("original_budget,approved_changes,revised_budget")
-        .eq("project_id", projectId)
-        .maybeSingle(),
-      supabase
-        .from("payroll_checklist")
-        .select("gross_pay")
-        .eq("project_id", projectId),
-    ]);
-    if (costRes.error)   throw new Error(`Cost view: ${costRes.error.message}`);
+    // Round to 2 dp to avoid accumulated floating-point drift (numeric(15,2)
+    // columns can round-trip through JS floats and end up as e.g. 12.7299999).
+    const round2 = (v: number): number => Math.round(v * 100) / 100;
+    const sumCol = <T,>(
+      rows: T[] | null | undefined,
+      pick: (r: T) => number | string | null,
+    ): number =>
+      round2((rows ?? []).reduce((s, r) => s + n0(Number(pick(r))), 0));
+
+    const [apRes, jcRes, taxRes, loanRes, payrollRes, arRes, budgetRes] =
+      await Promise.all([
+        supabase
+          .from("accounts_payable")
+          .select("total_amount")
+          .eq("project_id", projectId),
+        supabase
+          .from("job_postings")
+          .select("actual_amount_used")
+          .eq("project_id", projectId),
+        supabase
+          .from("tax_transactions")
+          .select("cash_out")
+          .eq("project_id", projectId),
+        supabase
+          .from("loans")
+          .select("interest_portion,fees_and_charges")
+          .eq("project_id", projectId),
+        supabase
+          .from("payroll_checklist")
+          .select("gross_pay")
+          .eq("project_id", projectId),
+        supabase
+          .from("vw_project_ar_summary")
+          .select("total_billed")
+          .eq("project_id", projectId)
+          .maybeSingle(),
+        supabase
+          .from("vw_project_budget")
+          .select("original_budget,approved_changes,revised_budget")
+          .eq("project_id", projectId)
+          .maybeSingle(),
+      ]);
+
+    // AR + budget views are required — surface their errors. Individual cost
+    // sources are non-fatal so a missing table (e.g. payroll not deployed
+    // yet) doesn't zero out the whole cost figure.
     if (arRes.error)     throw new Error(`AR view: ${arRes.error.message}`);
     if (budgetRes.error) throw new Error(`Budget view: ${budgetRes.error.message}`);
-    // payroll errors are non-fatal — fall back to 0
-    const c = costRes.data;
-    const b = budgetRes.data;
-    const payrollCost = (payrollRes.data ?? []).reduce(
-      (sum, row) => sum + n0(Number((row as any).gross_pay)), 0
+    if (apRes.error)      console.error("AP cost fetch failed:", apRes.error);
+    if (jcRes.error)      console.error("Job cost fetch failed:", jcRes.error);
+    if (taxRes.error)     console.error("Tax cost fetch failed:", taxRes.error);
+    if (loanRes.error)    console.error("Loan cost fetch failed:", loanRes.error);
+    if (payrollRes.error) console.error("Payroll cost fetch failed:", payrollRes.error);
+
+    const ap_cost      = sumCol(apRes.data,      r => (r as any).total_amount);
+    const job_cost     = sumCol(jcRes.data,      r => (r as any).actual_amount_used);
+    const tax_cost     = sumCol(taxRes.data,     r => (r as any).cash_out);
+    const loan_cost    = sumCol(loanRes.data,    r =>
+      n0(Number((r as any).interest_portion)) +
+      n0(Number((r as any).fees_and_charges))
     );
-    const viewTotal = n0(Number(c?.total_cost));
+    const payroll_cost = sumCol(payrollRes.data, r => (r as any).gross_pay);
+    const cost_incurred = round2(ap_cost + job_cost + tax_cost + loan_cost + payroll_cost);
+
+    const b = budgetRes.data;
     return {
-      ap_cost:          n0(Number(c?.ap_cost)),
-      job_cost:         n0(Number(c?.job_cost)),
-      tax_cost:         n0(Number(c?.tax_cost)),
-      loan_cost:        n0(Number(c?.loan_cost)),
-      payroll_cost:     payrollCost,
-      cost_incurred:    viewTotal + payrollCost,
+      ap_cost,
+      job_cost,
+      tax_cost,
+      loan_cost,
+      payroll_cost,
+      cost_incurred,
       billed_to_date:   n0(Number(arRes.data?.total_billed)),
       original_budget:  n0(Number(b?.original_budget)),
       approved_changes: n0(Number(b?.approved_changes)),
@@ -822,7 +865,7 @@ function WIPModal({
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">%</span>
               </div>
             </Field>
-            <Field label="Cost Incurred (KES)" hint="Auto-summed from AP, Job Costs, Taxes & Loans — editable">
+            <Field label="Cost Incurred (KES)" hint="Auto-summed from AP, Job Costs, Taxes, Loans & Payroll — editable">
               <input
                 type="number"
                 step="0.01"
@@ -908,14 +951,15 @@ function WIPModal({
               label="Account Code"
               hint="Select an account from the Chart of Accounts"
             />
-            <COAAccountSelect
-              value={form.code_receivable ?? null}
-              onChange={(v) => set("code_receivable", v || null)}
-              filter="receivable"
-              valueField="code"
-              label="Code Receivable"
-              hint="Select a receivable account for billing"
-            />
+            <Field label="Code Receivable" hint="Enter the receivable account code (must exist in Chart of Accounts)">
+              <input
+                type="text"
+                value={form.code_receivable ?? ""}
+                onChange={(e) => set("code_receivable", e.target.value || null)}
+                placeholder="e.g. 1200"
+                className={inputCls}
+              />
+            </Field>
             <Field label="Last Update Date *">
               <input
                 type="date"

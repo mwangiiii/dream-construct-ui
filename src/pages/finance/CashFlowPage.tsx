@@ -86,6 +86,9 @@ const QUARTER_OF_MONTH: Record<CashFlowMonth, CashFlowQuarter> = {
   October: "Q4", November: "Q4", December:  "Q4",
 };
 
+const CURRENT_MONTH: CashFlowMonth   = MONTHS[new Date().getMonth()];
+const CURRENT_QUARTER: CashFlowQuarter = QUARTER_OF_MONTH[CURRENT_MONTH];
+
 const QUARTER_STYLE: Record<CashFlowQuarter, { accent: string; badge: string; dot: string; row: string }> = {
   Q1: { accent: "text-sky-400",     badge: "bg-sky-500/10     border-sky-500/30     text-sky-300",     dot: "bg-sky-400",     row: "hover:bg-sky-950/30"     },
   Q2: { accent: "text-violet-400",  badge: "bg-violet-500/10  border-violet-500/30  text-violet-300",  dot: "bg-violet-400",  row: "hover:bg-violet-950/30"  },
@@ -112,8 +115,8 @@ const selectCls =
 const makeEmptyForm = (projectId: string | null = null): CFFormData => ({
   project_id:     projectId,
   year:           CURRENT_YEAR,
-  quarter:        "Q1",
-  month:          "January",
+  quarter:        CURRENT_QUARTER,
+  month:          CURRENT_MONTH,
   inflows:        0,
   outflows:       0,
   account_codes:  "",
@@ -390,13 +393,34 @@ function useToast() {
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
 
-function EntryModal({ initial, projects, onSave, onClose, loading }: {
+function EntryModal({ initial, projects, entries, onSave, onClose, loading }: {
   initial:   CFFormData & { id?: number };
   projects?: Project[];
+  entries:   CashFlowEntry[];
   onSave:    (d: CFFormData) => void;
   onClose:   () => void;
   loading:   boolean;
 }) {
+  // Prefetched running balance for the currently-selected (project, year, month).
+  // Computed synchronously from the parent's already-loaded entries so the form
+  // opens with the ending balance already embedded — no async fetch, no flash.
+  const computePrevRunningBalance = useCallback((
+    projectId: string | null,
+    year: number,
+    month: CashFlowMonth,
+    excludeId?: number,
+  ): number => {
+    const currentIdx = year * 100 + MONTH_INDEX[month];
+    return entries
+      .filter((e) => {
+        if (excludeId && e.id === excludeId) return false;
+        if (projectId ? e.project_id !== projectId : e.project_id !== null) return false;
+        const idx = Number(e.year) * 100 + MONTH_INDEX[e.month];
+        return idx < currentIdx;
+      })
+      .reduce((s, e) => s + (Number(e.inflows) || 0) - (Number(e.outflows) || 0), 0);
+  }, [entries]);
+
   const [form, setForm] = useState<CFFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
   const [autoLoading, setAutoLoading] = useState(false);
@@ -411,10 +435,21 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
       return next;
     });
 
-  const liveNet = (form.inflows || 0) - (form.outflows || 0);
+  // Balance A = net for this record (inflows − outflows).
+  const balanceA = (form.inflows || 0) - (form.outflows || 0);
+  // Prior running balance — recomputed instantly from in-memory entries as the
+  // user changes project / year / month.
+  const prevEndingBalance = useMemo(
+    () => computePrevRunningBalance(form.project_id, form.year, form.month, initial.id),
+    [computePrevRunningBalance, form.project_id, form.year, form.month, initial.id],
+  );
+  // Running ending balance = prior running balance + this record's net.
+  const computedEnding = prevEndingBalance + balanceA;
+  const liveNet = balanceA;
 
-  // Auto-derive inflows / outflows / account_codes whenever year, month or
-  // project changes. These three fields are read-only in the UI.
+  // Look up the COA codes that had AR/AP activity in the current window so we
+  // can surface them as a reference. Inflow / outflow totals themselves are
+  // user-entered — we deliberately do NOT overwrite them here.
   useEffect(() => {
     let cancelled = false;
     setAutoLoading(true);
@@ -426,15 +461,19 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
         setOutflowCodes(d.outflowCodes);
         setForm(p => ({
           ...p,
-          inflows:       d.inflows,
-          outflows:      d.outflows,
           account_codes: formatCFAccountCodes(d.inflowCodes, d.outflowCodes),
         }));
       })
-      .catch(err => { if (!cancelled) setAutoError(err instanceof Error ? err.message : "Auto-derive failed."); })
+      .catch(err => { if (!cancelled) setAutoError(err instanceof Error ? err.message : "Code lookup failed."); })
       .finally(() => { if (!cancelled) setAutoLoading(false); });
     return () => { cancelled = true; };
   }, [form.year, form.month, form.project_id]);
+
+  // Keep the persisted ending_balance in sync with the derived value so save
+  // uses the auto-computed running balance.
+  useEffect(() => {
+    setForm(p => (p.ending_balance === computedEnding ? p : { ...p, ending_balance: computedEnding }));
+  }, [computedEnding]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -527,31 +566,46 @@ function EntryModal({ initial, projects, onSave, onClose, loading }: {
             </div>
           </Field>
 
-          {/* Auto-derive banner */}
+          {/* Reference banner */}
           <div className="col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
             <svg className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-emerald-300 mb-1 flex items-center gap-2">
-                Auto-derived from ERP
+                How the fields below are filled
                 {autoLoading && <span className="w-3 h-3 border-2 border-emerald-300/30 border-t-emerald-300 rounded-full animate-spin" />}
               </p>
               <p className="text-[11px] text-emerald-200/70 leading-relaxed">
-                Inflows = Σ AR receipts (amount received) in {form.month} {form.year}. Outflows = Σ AP payments (paid amount) in the same window{form.project_id ? " (this project)" : " (firm-wide)"}.
-                Account codes are the COA codes those movements flowed through, split by direction. These three fields are read-only.
+                Inflows and Outflows are entered manually. Balance A = Inflows − Outflows (auto).
+                Ending Balance = running total of prior net cash flows for this {form.project_id ? "project" : "standalone chain"} + Balance A (auto).
+                Account codes below are pulled from AR/AP activity in {form.month} {form.year} as a reference.
               </p>
               {autoError && <p className="text-[10px] mt-1.5 text-rose-300 italic">⚠ {autoError}</p>}
             </div>
           </div>
 
-          <Field label="Inflows (KES) *">
-            <ReadOnlyMoney value={form.inflows} hint="Σ AR amount received in window" />
+          <NumericField
+            label="Inflows (KES) *"
+            value={form.inflows}
+            onChange={(v) => setField("inflows", v)}
+            min="0"
+          />
+          <NumericField
+            label="Outflows (KES) *"
+            value={form.outflows}
+            onChange={(v) => setField("outflows", v)}
+            min="0"
+          />
+          <Field label="Balance A · Net this record (KES)">
+            <ReadOnlyMoney value={balanceA} hint="Inflows − Outflows" />
           </Field>
-          <Field label="Outflows (KES) *">
-            <ReadOnlyMoney value={form.outflows} hint="Σ AP paid amount in window" />
+          <Field label="Ending Balance (KES)">
+            <ReadOnlyMoney
+              value={computedEnding}
+              hint={`Prior running balance ${fmt(prevEndingBalance)} + Balance A${form.project_id ? "" : " · standalone chain"}`}
+            />
           </Field>
-          <NumericField label="Ending Balance (KES) *" value={form.ending_balance} onChange={(v) => setField("ending_balance", v)} />
 
           {/* Live net cash flow preview */}
           <div className="col-span-2">
@@ -884,10 +938,10 @@ function GlobalCashFlowTable({ projects, canEdit }: { projects: Project[]; canEd
       {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal initial={makeEmptyForm()} projects={projects} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
+          <EntryModal initial={makeEmptyForm()} projects={projects} entries={entries} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
         )}
         {modal === "edit" && editing && (
-          <EntryModal initial={{ ...editing }} projects={projects} onSave={handleUpdate}
+          <EntryModal initial={{ ...editing }} projects={projects} entries={entries} onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
         )}
         {deleting && (
@@ -1562,10 +1616,10 @@ function EntriesView({ project, canEdit, onBack }: {
       {/* Modals */}
       <AnimatePresence>
         {modal === "create" && (
-          <EntryModal initial={makeEmptyForm(project.id)} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
+          <EntryModal initial={makeEmptyForm(project.id)} entries={entries} onSave={handleCreate} onClose={() => setModal(null)} loading={saving} />
         )}
         {modal === "edit" && editing && (
-          <EntryModal initial={{ ...editing }} onSave={handleUpdate}
+          <EntryModal initial={{ ...editing }} entries={entries} onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }} loading={saving} />
         )}
         {deleting && (

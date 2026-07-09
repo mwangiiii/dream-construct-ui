@@ -129,13 +129,15 @@ export default function OverviewTab({
     : null;
 
   // ── Date validation ────────────────────────────────────────────────────────
+  // Start date is intentionally unconstrained relative to created_at — projects
+  // can be logged retroactively, so a start date earlier than the DB row's
+  // creation timestamp is a valid, real-world case.
   const validateDates = (start: string, expected: string, actual: string): string | null => {
     const s = start    ? new Date(start)    : null;
     const e = expected ? new Date(expected) : null;
     const a = actual   ? new Date(actual)   : null;
     const c = projectCreatedDate ? new Date(projectCreatedDate) : null;
 
-    if (s && c && s < c) return "Start date cannot be before the project was created";
     if (s && e && e < s) return "Expected completion date cannot be before start date";
     if (a && c && a < c) return "Actual completion date cannot be before the project was created";
     if (s && a && a < s) return "Actual completion date cannot be before start date";
@@ -352,10 +354,9 @@ export default function OverviewTab({
                 <input
                   type="date"
                   value={startDate}
-                  min={projectCreatedDate || undefined}
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className="w-full px-4 py-3 backdrop-blur-xl bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-                    [&::-webkit-calendar-picker-indicator]:cursor-pointer 
+                    [&::-webkit-calendar-picker-indicator]:cursor-pointer
                     [&::-webkit-calendar-picker-indicator]:opacity-70
                     [&::-webkit-calendar-picker-indicator]:hover:opacity-100
                     [&::-webkit-calendar-picker-indicator]:transition-opacity
@@ -363,11 +364,6 @@ export default function OverviewTab({
                     [&::-webkit-datetime-edit-fields-wrapper]:text-foreground
                     [&::-webkit-datetime-edit-text]:text-muted-foreground"
                 />
-                {projectCreatedDate && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Cannot be before {format(new Date(projectCreatedDate), "dd MMM yyyy")}
-                  </p>
-                )}
               </div>
 
               <div>
