@@ -151,8 +151,20 @@ export default function OverviewTab({
     setDeleteBusy(true);
     setDangerError(null);
     try {
-      const { error } = await supabase.rpc("permanent_delete_project", { pid: project.id });
+      // Route through the Edge Function so uploaded files under
+      // <projectId>/ in the documents-and-images bucket are actually
+      // removed via the Storage API (SQL alone drops storage.objects
+      // rows but leaves the physical S3 objects to be GC'd later).
+      // The function verifies admin, purges storage, then calls the
+      // permanent_delete_project RPC for the DB cascade.
+      const { data, error } = await supabase.functions.invoke(
+        "permanent-delete-project",
+        { body: { project_id: project.id } },
+      );
       if (error) throw error;
+      if (data?.success === false) {
+        throw new Error(data?.error ?? "Permanent delete failed");
+      }
       // After delete the project row is gone — bounce back to the previous
       // page (usually the project list). Detail page can't render a deleted
       // project, so we can't stay here.
