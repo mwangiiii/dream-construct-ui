@@ -597,6 +597,7 @@ export default function ProjectDetailPage() {
                 documents={documents}
                 canEdit={canEdit}
                 isClient={isClient}
+                isAdmin={isAdmin}
                 onProjectUpdate={fetchProjectAndData}
               />
             )}

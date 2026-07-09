@@ -149,6 +149,12 @@ export default function ProjectManagementDashboard() {
         query = query.eq("manager_id", currentUser.profile.id);
       }
 
+      // Hide archived projects from every dashboard EXCEPT the admin/manager
+      // view — admins need discoverability to restore or permanently delete.
+      if (userRole !== "admin" && userRole !== "manager") {
+        query = query.is("archived_at", null);
+      }
+
       const { data, error } = await query;
 
       if (error) {

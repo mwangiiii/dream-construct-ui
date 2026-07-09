@@ -625,6 +625,7 @@ export default function ProjectDetailPage() {
                 documents={documents}
                 canEdit={canEdit}
                 isClient={isClient}
+                isAdmin={isAdmin}
                 onProjectUpdate={fetchProjectAndData}
                 // ── Auto-computed progress — read-only for all users ──────
                 // Sourced from MilestonesTab via onProgressChange below.

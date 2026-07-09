@@ -59,6 +59,8 @@ export default function ClientProjects() {
       .from("projects")
       .select(`*, manager:profiles!manager_id(id, full_name)`)
       .eq("client_id", clientId)
+      // Clients never see archived projects.
+      .is("archived_at", null)
       .order("created_at", { ascending: false });
     if (error) {
       setLoading(false);

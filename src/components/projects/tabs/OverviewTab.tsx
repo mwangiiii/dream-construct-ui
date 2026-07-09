@@ -1,7 +1,8 @@
 // src/components/projects/tabs/OverviewTab.tsx
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar,
   DollarSign,
@@ -14,6 +15,10 @@ import {
   Clock,
   TrendingUp,
   AlertCircle,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  ShieldAlert,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -37,20 +42,26 @@ interface OverviewTabProps {
    * Source: MilestonesTab → onProgressChange → ProjectDetailPage state.
    * No user — including admin — can manually change this value.
    */
-  projectProgress: number;
+  projectProgress?: number;
 
   /**
    * Auto-counted from the documents array in ProjectDetailPage.
    * Replaces documents.length used in Quick Stats so the count is
    * always in sync with the real fetched data.
    */
-  documentsCount: number;
+  documentsCount?: number;
 
   /**
    * Auto-counted from the active updates array in ProjectDetailPage.
    * Replaces updates.length used in Quick Stats.
    */
-  updatesCount: number;
+  updatesCount?: number;
+
+  /**
+   * Gates the archive / permanent-delete admin panel. Only admins may
+   * archive, restore or permanently delete a project.
+   */
+  isAdmin?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,15 +96,72 @@ export default function OverviewTab({
   canEdit,
   isClient,
   onProjectUpdate,
-  projectProgress,
-  documentsCount,
-  updatesCount,
+  projectProgress = 0,
+  documentsCount = 0,
+  updatesCount = 0,
+  isAdmin = false,
 }: OverviewTabProps) {
+  const navigate = useNavigate();
 
   // ── Edit state — progress editing intentionally removed ───────────────────
   const [isEditingStatus, setIsEditingStatus] = useState(false);
   const [isEditingDates,  setIsEditingDates]  = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ── Archive / delete state ─────────────────────────────────────────────────
+  const [archiveBusy,       setArchiveBusy]       = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteBusy,        setDeleteBusy]        = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [dangerError,       setDangerError]       = useState<string | null>(null);
+  const isArchived = Boolean(project?.archived_at);
+
+  const handleArchive = async () => {
+    if (!project?.id) return;
+    setArchiveBusy(true);
+    setDangerError(null);
+    try {
+      const { error } = await supabase.rpc("archive_project", { pid: project.id });
+      if (error) throw error;
+      onProjectUpdate();
+    } catch (err: any) {
+      setDangerError(err?.message ?? "Failed to archive project.");
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!project?.id) return;
+    setArchiveBusy(true);
+    setDangerError(null);
+    try {
+      const { error } = await supabase.rpc("restore_project", { pid: project.id });
+      if (error) throw error;
+      onProjectUpdate();
+    } catch (err: any) {
+      setDangerError(err?.message ?? "Failed to restore project.");
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!project?.id) return;
+    setDeleteBusy(true);
+    setDangerError(null);
+    try {
+      const { error } = await supabase.rpc("permanent_delete_project", { pid: project.id });
+      if (error) throw error;
+      // After delete the project row is gone — bounce back to the previous
+      // page (usually the project list). Detail page can't render a deleted
+      // project, so we can't stay here.
+      navigate(-1);
+    } catch (err: any) {
+      setDangerError(err?.message ?? "Permanent delete failed.");
+      setDeleteBusy(false);
+    }
+  };
 
   // ── Revised budget from approved change orders ────────────────────────────
   const [budgetData, setBudgetData] = useState<{
@@ -220,6 +288,7 @@ export default function OverviewTab({
   // Render
   // ─────────────────────────────────────────────────────────────────────────
   return (
+    <>
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
 
       {/* ── LEFT COLUMN ── */}
@@ -581,5 +650,158 @@ export default function OverviewTab({
         </GlassCard>
       </div>
     </div>
+
+    {/* ═════════════════════════════════════════════════════════════════════
+        Danger Zone — Admin only
+        ═════════════════════════════════════════════════════════════════════
+        Two-tier deletion:
+          • Archive:  hides the project from dashboards but preserves every
+                      record. Reversible via Restore.
+          • Permanent delete: nothing survives — invoices, contracts,
+                      payroll and every project-scoped record are dropped in
+                      one transaction, plus workers left with zero
+                      assignments. Irreversible. */}
+    {isAdmin && (
+      <GlassCard className="mt-4 sm:mt-8 border border-red-500/25 bg-red-500/[0.03]">
+        <div className="flex items-center gap-2 mb-4">
+          <ShieldAlert className="w-5 h-5 text-red-400" />
+          <h3 className="text-base sm:text-lg md:text-xl font-bold text-red-300">
+            Danger Zone
+          </h3>
+          <span className="text-[10px] uppercase tracking-widest text-red-400/70 border border-red-400/30 rounded-full px-2 py-0.5 ml-1">
+            Admin
+          </span>
+        </div>
+
+        {dangerError && (
+          <div className="mb-4 p-3 rounded-xl border border-red-500/40 bg-red-500/15 text-sm text-red-200 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>{dangerError}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Archive / Restore */}
+          <div className="p-4 rounded-xl border border-white/10 bg-white/5">
+            <p className="text-sm font-semibold text-foreground mb-1">
+              {isArchived ? "Restore Project" : "Archive Project"}
+            </p>
+            <p className="text-xs text-muted-foreground mb-3">
+              {isArchived
+                ? `Archived ${project.archived_at ? format(new Date(project.archived_at), "dd MMM yyyy") : ""}. Restoring makes it visible on dashboards again. No records are affected.`
+                : "Hides this project from every dashboard. All records are preserved and the project can be restored at any time."}
+            </p>
+            <button
+              onClick={isArchived ? handleRestore : handleArchive}
+              disabled={archiveBusy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-sm font-medium transition-all disabled:opacity-50"
+            >
+              {isArchived
+                ? <ArchiveRestore className="w-4 h-4" />
+                : <Archive        className="w-4 h-4" />}
+              {archiveBusy
+                ? "Working…"
+                : isArchived ? "Restore" : "Archive"}
+            </button>
+          </div>
+
+          {/* Permanent delete */}
+          <div className="p-4 rounded-xl border border-red-500/30 bg-red-500/[0.04]">
+            <p className="text-sm font-semibold text-red-200 mb-1">
+              Permanent Delete
+            </p>
+            <p className="text-xs text-red-200/70 mb-3">
+              Irreversibly removes this project and <strong>every</strong> record it produced —
+              milestones, tasks, updates, documents, worker assignments,
+              AP / AR / cash flow / WIP / invoices / contracts / payroll and
+              inventory. Workers with no remaining assignments are removed too.
+            </p>
+            <button
+              onClick={() => { setDeleteConfirmText(""); setShowDeleteConfirm(true); }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/40 bg-red-500/15 hover:bg-red-500/25 text-red-200 text-sm font-medium transition-all"
+            >
+              <Trash2 className="w-4 h-4" />
+              Permanent Delete…
+            </button>
+          </div>
+        </div>
+      </GlassCard>
+    )}
+
+    {/* Permanent delete confirmation modal */}
+    <AnimatePresence>
+      {showDeleteConfirm && isAdmin && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => !deleteBusy && setShowDeleteConfirm(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 8 }}
+            transition={{ duration: 0.18 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border border-red-500/40 bg-[#150707]/95 backdrop-blur-xl p-6 shadow-2xl"
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2 rounded-xl bg-red-500/20 border border-red-500/40">
+                <ShieldAlert className="w-6 h-6 text-red-300" />
+              </div>
+              <div>
+                <h4 className="text-lg font-bold text-red-100">
+                  Permanently delete this project?
+                </h4>
+                <p className="text-xs text-red-200/70 mt-1">
+                  This action cannot be undone. Every record scoped to
+                  <span className="font-semibold text-red-100"> {project.title || "this project"} </span>
+                  will be removed.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-red-500/30 bg-red-500/[0.08] p-3 mb-4 text-xs text-red-200/85 space-y-1">
+              <p>• Milestones, tasks, updates, documents</p>
+              <p>• Worker assignments (+ workers with zero remaining assignments)</p>
+              <p>• AP, AR, cash flow, WIP, job postings, inventory</p>
+              <p>• Invoices, contracts, payroll entries linked to this project</p>
+              <p>• Change orders, loans, taxes, statements of account</p>
+              <p className="text-red-100 font-semibold pt-1">
+                User accounts and shared vendors are NOT removed.
+              </p>
+            </div>
+
+            <label className="block text-xs text-red-200 mb-1.5">
+              Type <span className="font-mono font-bold text-red-100">DELETE</span> to confirm:
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              disabled={deleteBusy}
+              placeholder="DELETE"
+              className="w-full px-3 py-2 rounded-xl bg-black/40 border border-red-500/30 text-red-100 placeholder-red-400/40 focus:outline-none focus:ring-2 focus:ring-red-500/40 transition-all mb-4"
+            />
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleteBusy}
+                className="px-4 py-2 rounded-xl text-sm text-red-200/80 hover:text-red-100 hover:bg-white/5 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePermanentDelete}
+                disabled={deleteBusy || deleteConfirmText !== "DELETE"}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:bg-red-600/40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all inline-flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deleteBusy ? "Deleting…" : "Delete Permanently"}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }
