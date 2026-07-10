@@ -116,61 +116,55 @@ export default function OverviewTab({
   const [dangerError,       setDangerError]       = useState<string | null>(null);
   const isArchived = Boolean(project?.archived_at);
 
+  // All three admin actions (archive / restore / permanent delete) go
+  // through the same Edge Function `project-lifecycle`. Centralising here
+  // keeps admin gating and storage cleanup in one place — the SQL RPCs
+  // still exist and enforce their own admin check, but the frontend
+  // never calls them directly.
+  const invokeLifecycle = async (
+    action: "archive" | "restore" | "permanent_delete",
+  ): Promise<{ ok: true; data: any } | { ok: false; message: string }> => {
+    const { data, error } = await supabase.functions.invoke("project-lifecycle", {
+      body: { action, project_id: project.id },
+    });
+    if (error) return { ok: false, message: error.message };
+    if (data?.success === false) {
+      return { ok: false, message: data?.error ?? `${action} failed` };
+    }
+    return { ok: true, data };
+  };
+
   const handleArchive = async () => {
     if (!project?.id) return;
     setArchiveBusy(true);
     setDangerError(null);
-    try {
-      const { error } = await supabase.rpc("archive_project", { pid: project.id });
-      if (error) throw error;
-      onProjectUpdate();
-    } catch (err: any) {
-      setDangerError(err?.message ?? "Failed to archive project.");
-    } finally {
-      setArchiveBusy(false);
-    }
+    const res = await invokeLifecycle("archive");
+    if (res.ok) onProjectUpdate();
+    else setDangerError(res.message);
+    setArchiveBusy(false);
   };
 
   const handleRestore = async () => {
     if (!project?.id) return;
     setArchiveBusy(true);
     setDangerError(null);
-    try {
-      const { error } = await supabase.rpc("restore_project", { pid: project.id });
-      if (error) throw error;
-      onProjectUpdate();
-    } catch (err: any) {
-      setDangerError(err?.message ?? "Failed to restore project.");
-    } finally {
-      setArchiveBusy(false);
-    }
+    const res = await invokeLifecycle("restore");
+    if (res.ok) onProjectUpdate();
+    else setDangerError(res.message);
+    setArchiveBusy(false);
   };
 
   const handlePermanentDelete = async () => {
     if (!project?.id) return;
     setDeleteBusy(true);
     setDangerError(null);
-    try {
-      // Route through the Edge Function so uploaded files under
-      // <projectId>/ in the documents-and-images bucket are actually
-      // removed via the Storage API (SQL alone drops storage.objects
-      // rows but leaves the physical S3 objects to be GC'd later).
-      // The function verifies admin, purges storage, then calls the
-      // permanent_delete_project RPC for the DB cascade.
-      const { data, error } = await supabase.functions.invoke(
-        "permanent-delete-project",
-        { body: { project_id: project.id } },
-      );
-      if (error) throw error;
-      if (data?.success === false) {
-        throw new Error(data?.error ?? "Permanent delete failed");
-      }
-      // After delete the project row is gone — bounce back to the previous
-      // page (usually the project list). Detail page can't render a deleted
-      // project, so we can't stay here.
+    const res = await invokeLifecycle("permanent_delete");
+    if (res.ok) {
+      // Project row is gone — bounce back so the detail page doesn't try
+      // to render a deleted project.
       navigate(-1);
-    } catch (err: any) {
-      setDangerError(err?.message ?? "Permanent delete failed.");
+    } else {
+      setDangerError(res.message);
       setDeleteBusy(false);
     }
   };
