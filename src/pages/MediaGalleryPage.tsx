@@ -1,15 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, X, Loader2, Eye, Share2, ExternalLink,
-  AlertCircle, MapPin, Calendar, Home, Building2,
-  Wrench, Camera, MessageSquare, Image as ImageIcon,
-  Video as VideoIcon, PlayCircle, ChevronLeft, ChevronRight,
-  DollarSign, Maximize2, Award,
+  Search, X, Loader2, Share2, ExternalLink, AlertCircle,
+  Image as ImageIcon, PlayCircle, ChevronLeft, ChevronRight,
+  ArrowUpRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MediaMetadata {
   completion_time?: string;
@@ -49,41 +45,40 @@ interface MediaPost {
   deleted_at: string | null;
 }
 
-// ─── Categories ───────────────────────────────────────────────────────────────
-
 const CATEGORIES = [
-  { value: "Luxury Villa",       icon: Home,          label: "Luxury Villa"       },
-  { value: "Apartments",         icon: Building2,     label: "Apartments"         },
-  { value: "Commercial",         icon: Building2,     label: "Commercial"         },
-  { value: "Renovations",        icon: Wrench,        label: "Renovations"        },
-  { value: "Before & After",     icon: Camera,        label: "Before & After"     },
-  { value: "Client Testimonial", icon: MessageSquare, label: "Client Testimonial" },
-  { value: "Completed 2025",     icon: Calendar,      label: "Completed 2025"     },
-  { value: "Drone Shots",        icon: Camera,        label: "Drone Shots"        },
+  "Luxury Villa",
+  "Apartments",
+  "Commercial",
+  "Renovations",
+  "Before & After",
+  "Client Testimonial",
+  "Completed 2025",
+  "Drone Shots",
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Restrained motion. Long, easeOut cubic-bezier — the same shape Apple uses.
+const EASE = [0.22, 1, 0.36, 1] as const;
 
 const formatNumber = (n: number) =>
   n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+const two = (n: number) => String(n).padStart(2, "0");
 
 const MediaGalleryPage = () => {
-  const [media, setMedia]               = useState<MediaPost[]>([]);
-  const [pinnedMedia, setPinnedMedia]   = useState<MediaPost[]>([]);
-  const [searchQuery, setSearchQuery]   = useState("");
+  const [media, setMedia]                     = useState<MediaPost[]>([]);
+  const [pinnedMedia, setPinnedMedia]         = useState<MediaPost[]>([]);
+  const [searchQuery, setSearchQuery]         = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [selectedCats, setSelectedCats] = useState<string[]>([]);
-  const [activeFilter, setActiveFilter] = useState("All");
-  const [isLoading, setIsLoading]       = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [error, setError]               = useState<string | null>(null);
-  const [hasMore, setHasMore]           = useState(true);
-  const [page, setPage]                 = useState(0);
-  const [lightbox, setLightbox]         = useState<MediaPost | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  const [initialMediaId, setInitialMediaId] = useState<string | null>(null);
+  const [selectedCats, setSelectedCats]       = useState<string[]>([]);
+  const [activeFilter, setActiveFilter]       = useState("All");
+  const [isLoading, setIsLoading]             = useState(true);
+  const [isLoadingMore, setIsLoadingMore]     = useState(false);
+  const [error, setError]                     = useState<string | null>(null);
+  const [hasMore, setHasMore]                 = useState(true);
+  const [page, setPage]                       = useState(0);
+  const [lightbox, setLightbox]               = useState<MediaPost | null>(null);
+  const [lightboxIndex, setLightboxIndex]     = useState(0);
+  const [initialMediaId, setInitialMediaId]   = useState<string | null>(null);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   const observerRef    = useRef<IntersectionObserver | null>(null);
@@ -91,16 +86,15 @@ const MediaGalleryPage = () => {
   const viewTrackedRef = useRef<Set<string>>(new Set());
   const ITEMS_PER_PAGE = 18;
 
-  // All media combined for lightbox navigation
   const allMedia = [...pinnedMedia, ...media];
 
-  // ── Debounce search ──────────────────────────────────────────────────────────
+  // ── Debounce ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // ── Analytics ────────────────────────────────────────────────────────────────
+  // ── Analytics ─────────────────────────────────────────────────────────────
   const trackView = useCallback(async (id: string) => {
     if (viewTrackedRef.current.has(id)) return;
     viewTrackedRef.current.add(id);
@@ -130,7 +124,7 @@ const MediaGalleryPage = () => {
     } catch {}
   }, []);
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────────
+  // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchMedia = async (pageNum = 0, append = false) => {
     try {
       const offset = pageNum * ITEMS_PER_PAGE;
@@ -154,9 +148,8 @@ const MediaGalleryPage = () => {
       const pinned  = data?.filter(i => i.is_pinned) || [];
       const regular = data?.filter(i => !i.is_pinned) || [];
 
-      if (append) {
-        setMedia(prev => [...prev, ...regular]);
-      } else {
+      if (append) setMedia(prev => [...prev, ...regular]);
+      else {
         setPinnedMedia(pinned);
         setMedia(regular);
       }
@@ -169,12 +162,12 @@ const MediaGalleryPage = () => {
     }
   };
 
-  // ── Effects ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("media");
     if (id) setInitialMediaId(id);
     fetchMedia(0, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -189,12 +182,14 @@ const MediaGalleryPage = () => {
         setInitialMediaId(null);
       })();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMediaId, media, pinnedMedia, isLoading, error]);
 
   useEffect(() => {
     setError(null); setIsLoading(true); setPage(0);
     viewTrackedRef.current.clear();
     fetchMedia(0, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCats, debouncedSearch]);
 
   useEffect(() => {
@@ -212,37 +207,35 @@ const MediaGalleryPage = () => {
     );
     if (loadMoreRef.current) observerRef.current.observe(loadMoreRef.current);
     return () => observerRef.current?.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMore, isLoading, isLoadingMore, page, selectedCats, debouncedSearch]);
 
-  // Close lightbox on Escape; arrow navigation
   useEffect(() => {
     if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape")      closeLightbox();
-      if (e.key === "ArrowRight")  navigateLightbox(1);
-      if (e.key === "ArrowLeft")   navigateLightbox(-1);
+      if (e.key === "Escape")     closeLightbox();
+      if (e.key === "ArrowRight") navigateLightbox(1);
+      if (e.key === "ArrowLeft")  navigateLightbox(-1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightbox, lightboxIndex]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const openLightbox = (item: MediaPost) => {
     const idx = allMedia.findIndex(m => m.id === item.id);
     setLightbox(item);
     setLightboxIndex(idx >= 0 ? idx : 0);
     trackClick(item.id);
   };
-
   const closeLightbox = () => setLightbox(null);
-
   const navigateLightbox = (dir: 1 | -1) => {
     const next = lightboxIndex + dir;
     if (next < 0 || next >= allMedia.length) return;
     setLightbox(allMedia[next]);
     setLightboxIndex(next);
   };
-
   const handleShare = async (item: MediaPost) => {
     await trackShare(item.id);
     const url = `${window.location.origin}${window.location.pathname}?media=${item.id}`;
@@ -252,19 +245,32 @@ const MediaGalleryPage = () => {
       try { await navigator.clipboard.writeText(url); } catch {}
     }
   };
-
   const setFilter = (cat: string) => {
     setActiveFilter(cat);
     setSelectedCats(cat === "All" ? [] : [cat]);
   };
-
   const clearSearch = () => { setSearchQuery(""); setDebouncedSearch(""); };
 
-  // ── Media thumbnail ───────────────────────────────────────────────────────────
+  // ── View tracking hook — attach once per card ─────────────────────────────
+  const useViewTracker = (id: string) => {
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      if (!ref.current) return;
+      const obs = new IntersectionObserver(
+        ([e]) => { if (e.isIntersecting) trackView(id); },
+        { threshold: 0.4 }
+      );
+      obs.observe(ref.current);
+      return () => obs.disconnect();
+    }, [id]);
+    return ref;
+  };
+
+  // ── Media thumb — clean, no overlays, no badges ───────────────────────────
   const MediaThumb = ({
-    item, className = "", showPlay = true
-  }: { item: MediaPost; className?: string; showPlay?: boolean }) => (
-    <div className={`relative overflow-hidden bg-zinc-900 ${className}`}>
+    item, className = ""
+  }: { item: MediaPost; className?: string }) => (
+    <div className={`relative overflow-hidden bg-zinc-950 ${className}`}>
       {item.media_type === "video" ? (
         <>
           <video
@@ -274,13 +280,11 @@ const MediaGalleryPage = () => {
             onMouseEnter={e => e.currentTarget.play()}
             onMouseLeave={e => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
           />
-          {showPlay && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30">
-                <PlayCircle className="w-7 h-7 text-white" />
-              </div>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-14 h-14 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
+              <PlayCircle className="w-7 h-7 text-white" strokeWidth={1} />
             </div>
-          )}
+          </div>
         </>
       ) : (
         <img
@@ -293,186 +297,131 @@ const MediaGalleryPage = () => {
     </div>
   );
 
-  // ─── Spotlight card (first pinned item) ───────────────────────────────────────
-  const SpotlightCard = ({ item }: { item: MediaPost }) => {
-    const cardRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      const obs = new IntersectionObserver(
-        ([e]) => { if (e.isIntersecting) trackView(item.id); }, { threshold: 0.4 }
-      );
-      if (cardRef.current) obs.observe(cardRef.current);
-      return () => obs.disconnect();
-    }, [item.id]);
-
-    return (
-      <motion.div
-        ref={cardRef}
-        initial={{ opacity: 0, y: 24 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.5 }}
-        className="relative rounded-2xl overflow-hidden cursor-pointer group h-[260px] sm:h-[380px] md:h-[460px] lg:h-[520px]"
-        onClick={() => openLightbox(item)}
-      >
-        <MediaThumb item={item} className="w-full h-full group-hover:scale-105 transition-transform duration-700" showPlay={item.media_type === "video"} />
-
-        {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-
-        {/* Featured badge */}
-        <div className="absolute top-3 sm:top-5 left-3 sm:left-5 flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-primary text-background text-[10px] sm:text-xs font-bold tracking-wider uppercase">
-          <Award className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-          <span className="hidden sm:inline">Featured Project</span>
-          <span className="sm:hidden">Featured</span>
-        </div>
-
-        {/* Expand icon — desktop hover only */}
-        <div className="absolute top-3 sm:top-5 right-3 sm:right-5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
-        </div>
-
-        {/* Bottom info */}
-        <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-5 lg:p-6">
-          <div className="flex flex-wrap gap-1 sm:gap-1.5 mb-2 sm:mb-3">
-            {item.categories.slice(0, 2).map(cat => (
-              <span key={cat} className="px-2 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-white/15 backdrop-blur-sm text-white border border-white/20">
-                {cat}
-              </span>
-            ))}
-          </div>
-          <h3 className="text-base sm:text-xl lg:text-2xl font-bold text-white mb-2 sm:mb-3 leading-snug">{item.caption}</h3>
-          <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm text-white/70">
-            {item.metadata.location && (
-              <span className="flex items-center gap-1 sm:gap-1.5"><MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /><span className="truncate max-w-[120px] sm:max-w-none">{item.metadata.location}</span></span>
-            )}
-            {item.metadata.area && (
-              <span className="flex items-center gap-1 sm:gap-1.5 hidden sm:flex"><Home className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{item.metadata.area}</span>
-            )}
-            {item.metadata.project_cost && (
-              <span className="flex items-center gap-1 sm:gap-1.5"><DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{item.metadata.project_cost}</span>
-            )}
-            {item.metadata.completion_time && (
-              <span className="flex items-center gap-1 sm:gap-1.5 hidden sm:flex"><Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{item.metadata.completion_time}</span>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    );
-  };
-
-  // ─── Secondary pinned card ────────────────────────────────────────────────────
-  const PinnedCard = ({ item, delay = 0 }: { item: MediaPost; delay?: number }) => {
-    const cardRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      const obs = new IntersectionObserver(
-        ([e]) => { if (e.isIntersecting) trackView(item.id); }, { threshold: 0.4 }
-      );
-      if (cardRef.current) obs.observe(cardRef.current);
-      return () => obs.disconnect();
-    }, [item.id]);
-
-    return (
-      <motion.div
-        ref={cardRef}
-        initial={{ opacity: 0, y: 20 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.45, delay }}
-        className="relative rounded-xl overflow-hidden cursor-pointer group h-[180px] sm:h-[210px] md:h-[220px] lg:h-[248px]"
-        onClick={() => openLightbox(item)}
-      >
-        <MediaThumb item={item} className="w-full h-full group-hover:scale-105 transition-transform duration-700" showPlay={item.media_type === "video"} />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
-        <div className="absolute top-2.5 left-2.5 sm:top-3 sm:left-3 px-2 sm:px-2.5 py-0.5 rounded-full bg-primary/90 text-background text-[10px] sm:text-xs font-bold">Featured</div>
-        <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4">
-          {item.categories[0] && (
-            <span className="text-[10px] sm:text-[11px] font-semibold text-white/60 uppercase tracking-wider">{item.categories[0]}</span>
-          )}
-          <p className="text-xs sm:text-sm font-semibold text-white mt-0.5 line-clamp-2 leading-snug">{item.caption}</p>
-          {item.metadata.location && (
-            <p className="flex items-center gap-1 text-[10px] sm:text-xs text-white/55 mt-1 sm:mt-1.5">
-              <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" /><span className="truncate">{item.metadata.location}</span>
-            </p>
-          )}
-        </div>
-        <div className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white/70" />
-        </div>
-      </motion.div>
-    );
-  };
-
-  // ─── Regular grid card ────────────────────────────────────────────────────────
-  const GridCard = ({ item, delay = 0 }: { item: MediaPost; delay?: number }) => {
-    const cardRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      const obs = new IntersectionObserver(
-        ([e]) => { if (e.isIntersecting) trackView(item.id); }, { threshold: 0.4 }
-      );
-      if (cardRef.current) obs.observe(cardRef.current);
-      return () => obs.disconnect();
-    }, [item.id]);
-
+  // ── Editorial featured hero — image on top, caption below ─────────────────
+  const FeaturedHero = ({ item }: { item: MediaPost }) => {
+    const ref = useViewTracker(item.id);
     return (
       <motion.article
-        ref={cardRef}
-        initial={{ opacity: 0, y: 20 }}
+        ref={ref}
+        initial={{ opacity: 0, y: 32 }}
         whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.4, delay }}
-        className="group cursor-pointer bg-card border border-border rounded-xl overflow-hidden hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300"
+        viewport={{ once: true, margin: "-10%" }}
+        transition={{ duration: 0.9, ease: EASE }}
+        className="cursor-pointer group"
         onClick={() => openLightbox(item)}
       >
-        {/* Image — fixed 16:9 */}
-        <div className="relative overflow-hidden aspect-video bg-zinc-900">
-          <MediaThumb item={item} className="w-full h-full group-hover:scale-105 transition-transform duration-500" showPlay={item.media_type === "video"} />
-          {/* Hover overlay */}
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors duration-300 flex items-center justify-center">
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center">
-              <Maximize2 className="w-4.5 h-4.5 text-white" style={{ width: "18px", height: "18px" }} />
-            </div>
-          </div>
-          {/* View count badge */}
-          {item.view_count > 0 && (
-            <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-sm text-white text-xs">
-              <Eye className="w-3 h-3" />
-              {formatNumber(item.view_count)}
-            </div>
-          )}
+        <div className="relative overflow-hidden rounded-[2px] mb-6 lg:mb-10">
+          <MediaThumb
+            item={item}
+            className="aspect-[16/9] w-full transition-[filter] duration-[900ms] ease-out group-hover:brightness-[1.03]"
+          />
         </div>
-
-        {/* Card body */}
-        <div className="p-4">
-          {/* Category */}
-          {item.categories[0] && (
-            <span className="inline-block text-[11px] font-semibold text-primary uppercase tracking-wider mb-2">
-              {item.categories[0]}
-            </span>
-          )}
-          {/* Title */}
-          <h3 className="text-sm font-semibold text-foreground line-clamp-2 leading-snug mb-3">
-            {item.caption}
-          </h3>
-          {/* Meta row */}
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground border-t border-border/50 pt-3">
-            {item.metadata.location && (
-              <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{item.metadata.location}</span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-16">
+          <div className="lg:col-span-8">
+            {item.categories[0] && (
+              <p className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground mb-3">
+                {item.categories[0]}
+              </p>
             )}
-            {item.metadata.area && (
-              <span className="flex items-center gap-1"><Home className="w-3 h-3" />{item.metadata.area}</span>
-            )}
-            {item.metadata.project_cost && (
-              <span className="flex items-center gap-1 ml-auto font-medium text-foreground/80">
-                <DollarSign className="w-3 h-3" />{item.metadata.project_cost}
-              </span>
-            )}
+            <h3 className="text-2xl sm:text-3xl lg:text-4xl xl:text-5xl font-medium tracking-[-0.02em] leading-[1.05] text-foreground">
+              {item.caption}
+            </h3>
+          </div>
+          <div className="lg:col-span-4 lg:pt-2 flex flex-col justify-end">
+            <dl className="space-y-3 text-sm">
+              {item.metadata.location && <MetaLine label="Location" value={item.metadata.location} />}
+              {item.metadata.area && <MetaLine label="Area" value={item.metadata.area} />}
+              {item.metadata.project_cost && <MetaLine label="Value" value={item.metadata.project_cost} />}
+              {item.metadata.completion_time && <MetaLine label="Timeline" value={item.metadata.completion_time} />}
+            </dl>
+            <div className="mt-6 inline-flex items-center gap-2 text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+              View project <ArrowUpRight className="w-3.5 h-3.5" strokeWidth={1.5} />
+            </div>
           </div>
         </div>
       </motion.article>
     );
   };
 
-  // ─── Lightbox ─────────────────────────────────────────────────────────────────
+  // ── Featured secondary — magazine spread pair ─────────────────────────────
+  const FeaturedSecondary = ({ item }: { item: MediaPost }) => {
+    const ref = useViewTracker(item.id);
+    return (
+      <motion.article
+        ref={ref}
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-10%" }}
+        transition={{ duration: 0.7, ease: EASE }}
+        className="cursor-pointer group"
+        onClick={() => openLightbox(item)}
+      >
+        <div className="relative overflow-hidden mb-5 lg:mb-6">
+          <MediaThumb
+            item={item}
+            className="aspect-[4/5] w-full transition-[filter] duration-[900ms] ease-out group-hover:brightness-[1.03]"
+          />
+        </div>
+        <div>
+          {item.categories[0] && (
+            <p className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground mb-2">
+              {item.categories[0]}
+            </p>
+          )}
+          <h3 className="text-lg lg:text-xl font-medium tracking-[-0.01em] leading-snug text-foreground mb-3 line-clamp-2">
+            {item.caption}
+          </h3>
+          {item.metadata.location && (
+            <p className="text-sm text-muted-foreground">{item.metadata.location}</p>
+          )}
+        </div>
+      </motion.article>
+    );
+  };
+
+  // ── Grid card — quiet, typography-led ─────────────────────────────────────
+  const GridCard = ({ item }: { item: MediaPost }) => {
+    const ref = useViewTracker(item.id);
+    return (
+      <motion.article
+        ref={ref}
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-10%" }}
+        transition={{ duration: 0.6, ease: EASE }}
+        className="cursor-pointer group"
+        onClick={() => openLightbox(item)}
+      >
+        <div className="relative overflow-hidden mb-4">
+          <MediaThumb
+            item={item}
+            className="aspect-[4/5] w-full transition-[filter] duration-[700ms] ease-out group-hover:brightness-[1.04]"
+          />
+        </div>
+        {item.categories[0] && (
+          <p className="text-[10px] tracking-[0.25em] uppercase text-muted-foreground mb-2">
+            {item.categories[0]}
+          </p>
+        )}
+        <h3 className="text-base font-medium tracking-[-0.005em] leading-snug text-foreground line-clamp-2 mb-1">
+          {item.caption}
+        </h3>
+        {item.metadata.location && (
+          <p className="text-sm text-muted-foreground">{item.metadata.location}</p>
+        )}
+      </motion.article>
+    );
+  };
+
+  // ── Meta line: label / value with hairline ─────────────────────────────────
+  const MetaLine = ({ label, value }: { label: string; value: string }) => (
+    <div className="flex items-baseline justify-between gap-4 border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
+      <dt className="text-[10px] tracking-[0.2em] uppercase text-muted-foreground/70">{label}</dt>
+      <dd className="text-sm text-foreground text-right truncate max-w-[65%]">{value}</dd>
+    </div>
+  );
+
+  // ── Lightbox — refined ─────────────────────────────────────────────────────
   const LightboxModal = () => {
     if (!lightbox) return null;
     const hasPrev = lightboxIndex > 0;
@@ -481,37 +430,31 @@ const MediaGalleryPage = () => {
     return (
       <AnimatePresence>
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.3, ease: EASE }}
           className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-md flex flex-col lg:items-center lg:justify-center"
           onClick={closeLightbox}
         >
-          {/* ── Close button — always visible top-right of overlay ── */}
           <button
             onClick={closeLightbox}
-            className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/15 flex items-center justify-center text-white transition-all"
+            className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20 w-10 h-10 rounded-full bg-white/8 hover:bg-white/15 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition"
           >
-            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+            <X className="w-4 h-4" strokeWidth={1.5} />
           </button>
-
-          {/* ── Counter — top-centre ── */}
-          <div className="absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-20 px-3 py-1 rounded-full bg-black/60 text-white/60 text-xs pointer-events-none">
-            {lightboxIndex + 1} / {allMedia.length}
+          <div className="absolute top-4 sm:top-6 left-1/2 -translate-x-1/2 z-20 text-[11px] tracking-[0.2em] uppercase text-white/40 tabular-nums pointer-events-none">
+            {two(lightboxIndex + 1)} / {two(allMedia.length)}
           </div>
 
-          {/* ── Inner container ── */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.22 }}
-            className="w-full h-full lg:h-auto lg:max-h-[92vh] lg:max-w-6xl flex flex-col lg:flex-row lg:rounded-2xl overflow-hidden shadow-2xl"
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.35, ease: EASE }}
+            className="w-full h-full lg:h-auto lg:max-h-[92vh] lg:max-w-6xl flex flex-col lg:flex-row lg:rounded-sm overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
-            {/* ── Media panel ── */}
             <div className="relative bg-black flex items-center justify-center flex-shrink-0
-                            h-[44vh] sm:h-[50vh] lg:h-auto lg:flex-1 min-h-0">
+                            h-[46vh] sm:h-[52vh] lg:h-auto lg:flex-1 min-h-0">
               {lightbox.media_type === "video" ? (
                 <video
                   key={lightbox.id}
@@ -528,107 +471,64 @@ const MediaGalleryPage = () => {
                 />
               )}
 
-              {/* Nav arrows */}
               {hasPrev && (
                 <button
                   onClick={e => { e.stopPropagation(); navigateLightbox(-1); }}
-                  className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 hover:bg-white/25 active:bg-white/30 backdrop-blur-sm border border-white/15 flex items-center justify-center text-white transition-all"
+                  className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/8 hover:bg-white/15 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition"
                 >
-                  <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
                 </button>
               )}
               {hasNext && (
                 <button
                   onClick={e => { e.stopPropagation(); navigateLightbox(1); }}
-                  className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 hover:bg-white/25 active:bg-white/30 backdrop-blur-sm border border-white/15 flex items-center justify-center text-white transition-all"
+                  className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/8 hover:bg-white/15 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition"
                 >
-                  <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
                 </button>
               )}
             </div>
 
-            {/* ── Details panel ── */}
-            <div className="flex-1 lg:flex-none lg:w-[320px] xl:w-[360px] bg-zinc-950 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 lg:flex-none lg:w-[380px] xl:w-[420px] bg-zinc-950 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-6 sm:px-8 py-6 sm:py-10 space-y-8" style={{ WebkitOverflowScrolling: "touch" }}>
+                {lightbox.categories[0] && (
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-white/45">
+                    {lightbox.categories.slice(0, 2).join(" · ")}
+                  </p>
+                )}
+                <h2 className="text-xl sm:text-2xl font-medium tracking-[-0.01em] leading-snug text-white">
+                  {lightbox.caption}
+                </h2>
 
-              {/* Categories row */}
-              <div className="flex items-center gap-2 flex-wrap px-4 sm:px-5 py-3 sm:py-4 border-b border-white/10 flex-shrink-0">
-                {lightbox.categories.slice(0, 3).map(cat => (
-                  <span key={cat} className="px-2 sm:px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] sm:text-xs font-semibold border border-primary/30 whitespace-nowrap">
-                    {cat}
-                  </span>
-                ))}
-              </div>
-
-              {/* Scrollable body */}
-              <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 py-3 sm:py-4 space-y-4" style={{ WebkitOverflowScrolling: "touch" }}>
-                <h2 className="text-sm sm:text-base font-bold text-white leading-snug">{lightbox.caption}</h2>
-
-                {/* Project stats grid */}
                 {Object.values(lightbox.metadata).some(Boolean) && (
-                  <div className="grid grid-cols-2 gap-2 sm:gap-3">
-                    {lightbox.metadata.location && (
-                      <div className="bg-white/5 rounded-lg p-2.5 sm:p-3 border border-white/8">
-                        <p className="text-[9px] sm:text-[10px] text-white/40 uppercase tracking-wider mb-1">Location</p>
-                        <p className="text-xs sm:text-sm font-semibold text-white flex items-center gap-1 sm:gap-1.5">
-                          <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary flex-shrink-0" />
-                          <span className="truncate">{lightbox.metadata.location}</span>
-                        </p>
-                      </div>
-                    )}
-                    {lightbox.metadata.area && (
-                      <div className="bg-white/5 rounded-lg p-2.5 sm:p-3 border border-white/8">
-                        <p className="text-[9px] sm:text-[10px] text-white/40 uppercase tracking-wider mb-1">Area</p>
-                        <p className="text-xs sm:text-sm font-semibold text-white flex items-center gap-1 sm:gap-1.5">
-                          <Home className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary flex-shrink-0" />{lightbox.metadata.area}
-                        </p>
-                      </div>
-                    )}
-                    {lightbox.metadata.project_cost && (
-                      <div className="bg-white/5 rounded-lg p-2.5 sm:p-3 border border-white/8">
-                        <p className="text-[9px] sm:text-[10px] text-white/40 uppercase tracking-wider mb-1">Project Value</p>
-                        <p className="text-xs sm:text-sm font-semibold text-white flex items-center gap-1 sm:gap-1.5">
-                          <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary flex-shrink-0" />{lightbox.metadata.project_cost}
-                        </p>
-                      </div>
-                    )}
-                    {lightbox.metadata.completion_time && (
-                      <div className="bg-white/5 rounded-lg p-2.5 sm:p-3 border border-white/8">
-                        <p className="text-[9px] sm:text-[10px] text-white/40 uppercase tracking-wider mb-1">Timeline</p>
-                        <p className="text-xs sm:text-sm font-semibold text-white flex items-center gap-1 sm:gap-1.5">
-                          <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary flex-shrink-0" />{lightbox.metadata.completion_time}
-                        </p>
-                      </div>
-                    )}
-                    {lightbox.metadata.client_satisfaction && (
-                      <div className="col-span-2 bg-white/5 rounded-lg p-2.5 sm:p-3 border border-white/8">
-                        <p className="text-[9px] sm:text-[10px] text-white/40 uppercase tracking-wider mb-1">Client Satisfaction</p>
-                        <p className="text-xs sm:text-sm font-semibold text-white">{lightbox.metadata.client_satisfaction}</p>
-                      </div>
-                    )}
-                  </div>
+                  <dl className="space-y-4">
+                    {lightbox.metadata.location && <LightboxMeta label="Location" value={lightbox.metadata.location} />}
+                    {lightbox.metadata.area && <LightboxMeta label="Area" value={lightbox.metadata.area} />}
+                    {lightbox.metadata.project_cost && <LightboxMeta label="Value" value={lightbox.metadata.project_cost} />}
+                    {lightbox.metadata.completion_time && <LightboxMeta label="Timeline" value={lightbox.metadata.completion_time} />}
+                    {lightbox.metadata.client_satisfaction && <LightboxMeta label="Client" value={lightbox.metadata.client_satisfaction} />}
+                  </dl>
                 )}
 
-                {/* Engagement */}
-                <div className="flex items-center gap-3 sm:gap-4 text-xs text-white/40 border-t border-white/8 pt-3">
-                  <span className="flex items-center gap-1 sm:gap-1.5"><Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{formatNumber(lightbox.view_count)} views</span>
-                  <span className="flex items-center gap-1 sm:gap-1.5"><Share2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />{lightbox.share_count} shares</span>
+                <div className="flex items-center gap-6 text-[11px] tracking-[0.15em] uppercase text-white/40 tabular-nums">
+                  <span>{formatNumber(lightbox.view_count)} views</span>
+                  <span>{lightbox.share_count} shares</span>
                 </div>
               </div>
 
-              {/* Action footer */}
-              <div className="px-4 sm:px-5 py-3 sm:py-4 border-t border-white/10 flex gap-2 flex-shrink-0">
+              <div className="px-6 sm:px-8 py-5 border-t border-white/10 flex gap-3 flex-shrink-0">
                 <button
                   onClick={() => handleShare(lightbox)}
-                  className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2 sm:py-2.5 rounded-lg bg-white/8 hover:bg-white/12 active:bg-white/15 text-white text-xs sm:text-sm font-medium border border-white/10 transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-sm bg-white/8 hover:bg-white/12 text-white text-sm font-medium border border-white/10 transition"
                 >
-                  <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Share
+                  <Share2 className="w-4 h-4" strokeWidth={1.5} /> Share
                 </button>
                 {lightbox.project_link && (
                   <button
                     onClick={() => window.open(lightbox.project_link!, "_blank")}
-                    className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2 sm:py-2.5 rounded-lg bg-primary text-background text-xs sm:text-sm font-semibold hover:bg-primary/90 active:bg-primary/80 transition-all"
+                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-sm bg-white text-black text-sm font-medium hover:bg-white/90 transition"
                   >
-                    <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> View Project
+                    <ExternalLink className="w-4 h-4" strokeWidth={1.5} /> View project
                   </button>
                 )}
               </div>
@@ -639,75 +539,64 @@ const MediaGalleryPage = () => {
     );
   };
 
-  // ── Derived state ─────────────────────────────────────────────────────────────
+  const LightboxMeta = ({ label, value }: { label: string; value: string }) => (
+    <div className="flex items-baseline justify-between gap-4 border-b border-white/8 pb-3">
+      <dt className="text-[10px] tracking-[0.25em] uppercase text-white/40">{label}</dt>
+      <dd className="text-sm text-white text-right truncate max-w-[60%]">{value}</dd>
+    </div>
+  );
+
+  // ── Derived ───────────────────────────────────────────────────────────────
   const totalItems = media.length + pinnedMedia.length;
-  const hasFilters = activeFilter !== "All" || searchQuery;
+  const hasFilters = activeFilter !== "All" || !!searchQuery;
 
-  // ─── RENDER ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
 
-      {/* ── Hero header ──────────────────────────────────────────────────────────── */}
-      <div className="border-b border-border bg-background/80 backdrop-blur-sm pt-20 sm:pt-24 lg:pt-28 pb-8 sm:pb-10 lg:pb-12">
-        <div className="container mx-auto px-4 sm:px-6">
+      {/* ── Editorial hero ────────────────────────────────────────────────── */}
+      <section className="relative pt-28 pb-16 sm:pt-36 sm:pb-24 lg:pt-44 lg:pb-32">
+        <div className="container mx-auto px-6 lg:px-12">
           <motion.div
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 32 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="max-w-2xl"
+            transition={{ duration: 0.9, ease: EASE }}
           >
-            <p className="text-[10px] sm:text-xs font-semibold text-primary uppercase tracking-[0.2em] mb-2 sm:mb-3">Project Portfolio</p>
-            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight text-foreground mb-3 sm:mb-4 leading-tight">
-              Our Work in<br className="hidden sm:block" /> Every Detail
+            <div className="flex items-center gap-3 mb-6 sm:mb-8">
+              <span className="h-px w-8 bg-foreground/30" />
+              <p className="text-[10px] sm:text-xs tracking-[0.3em] uppercase text-muted-foreground">
+                Portfolio
+              </p>
+            </div>
+            <h1 className="text-5xl sm:text-7xl lg:text-8xl xl:text-9xl font-medium tracking-[-0.04em] leading-[0.92] text-foreground max-w-5xl">
+              The work,<br className="hidden sm:block" />{" "}
+              <span className="text-muted-foreground">not the words.</span>
             </h1>
-            <p className="text-sm sm:text-base text-muted-foreground leading-relaxed max-w-xl">
-              A curated showcase of completed projects — residential builds, commercial spaces,
-              and precision renovations across Kenya.
+            <p className="text-base sm:text-lg text-muted-foreground max-w-xl mt-8 sm:mt-10 leading-relaxed">
+              Selected projects in residential, commercial and renovation.
+              Every image below is a real build we've delivered.
             </p>
           </motion.div>
-
-          {/* Stats bar */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-8 mt-6 sm:mt-10 pt-6 sm:pt-8 border-t border-border"
-          >
-            {[
-              { value: "150+", label: "Projects Completed" },
-              { value: "12+",  label: "Years of Excellence" },
-              { value: "98%",  label: "Client Satisfaction" },
-              { value: "40+",  label: "Expert Team Members" },
-            ].map(s => (
-              <div key={s.label}>
-                <p className="text-xl sm:text-2xl font-bold text-foreground">{s.value}</p>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{s.label}</p>
-              </div>
-            ))}
-          </motion.div>
         </div>
-      </div>
+      </section>
 
-      {/* ── Filter bar (sticky) ───────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border shadow-sm">
-        <div className="container mx-auto px-4 sm:px-6">
-          {/* Row 1: tabs + desktop search + mobile search toggle */}
-          <div className="flex items-center gap-2 sm:gap-3 py-2.5 sm:py-3">
-            {/* Category tabs */}
+      {/* ── Sticky filter — hairline underlines, no chrome ────────────────── */}
+      <div className="sticky top-0 z-40 border-y border-border bg-background/85 backdrop-blur-xl">
+        <div className="container mx-auto px-6 lg:px-12">
+          <div className="flex items-center gap-4 sm:gap-8 py-3 sm:py-4">
             <div
-              className="flex gap-1 sm:gap-1.5 flex-1 min-w-0 overflow-x-auto"
+              className="flex-1 flex gap-5 sm:gap-7 overflow-x-auto"
               style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
             >
-              {["All", ...CATEGORIES.map(c => c.value)].map(cat => {
-                const isActive = activeFilter === cat;
+              {["All", ...CATEGORIES].map(cat => {
+                const active = activeFilter === cat;
                 return (
                   <button
                     key={cat}
                     onClick={() => setFilter(cat)}
-                    className={`flex-shrink-0 px-3 sm:px-3.5 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold transition-all whitespace-nowrap border ${
-                      isActive
-                        ? "bg-primary text-background border-primary shadow-sm"
-                        : "text-muted-foreground border-transparent hover:border-border hover:text-foreground hover:bg-muted/50"
+                    className={`flex-shrink-0 text-xs sm:text-sm tracking-tight whitespace-nowrap transition-colors py-2 border-b border-transparent ${
+                      active
+                        ? "text-foreground border-foreground"
+                        : "text-muted-foreground/70 hover:text-foreground"
                     }`}
                   >
                     {cat}
@@ -716,61 +605,59 @@ const MediaGalleryPage = () => {
               })}
             </div>
 
-            {/* Desktop search — always visible sm+ */}
-            <div className="relative flex-shrink-0 w-44 sm:w-52 hidden sm:block">
-              <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3 h-3 sm:w-3.5 sm:h-3.5 text-muted-foreground" />
+            {/* Desktop search */}
+            <div className="relative w-40 sm:w-48 hidden sm:block flex-shrink-0">
+              <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/60" strokeWidth={1.5} />
               <input
                 type="text"
-                placeholder="Search projects..."
+                placeholder="Search"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-7 sm:pl-8 pr-6 sm:pr-7 py-1.5 text-xs sm:text-sm bg-muted/50 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition"
+                className="w-full pl-6 pr-5 py-2 bg-transparent border-0 border-b border-border/60 focus:border-foreground/70 focus:outline-none text-sm placeholder:text-muted-foreground/50 transition-colors"
               />
               {searchQuery && (
-                <button onClick={clearSearch} className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  <X className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <button onClick={clearSearch} className="absolute right-0 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground transition-colors">
+                  <X className="w-3.5 h-3.5" strokeWidth={1.5} />
                 </button>
               )}
             </div>
 
-            {/* Mobile search toggle button */}
+            {/* Mobile search toggle */}
             <button
               onClick={() => setMobileSearchOpen(v => !v)}
-              className={`sm:hidden flex-shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center transition-all ${
-                mobileSearchOpen || searchQuery
-                  ? "bg-primary text-background border-primary"
-                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              className={`sm:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center transition-colors ${
+                mobileSearchOpen || searchQuery ? "text-foreground" : "text-muted-foreground/60 hover:text-foreground"
               }`}
               aria-label="Toggle search"
             >
-              {mobileSearchOpen ? <X className="w-3.5 h-3.5" /> : <Search className="w-3.5 h-3.5" />}
+              {mobileSearchOpen ? <X className="w-4 h-4" strokeWidth={1.5} /> : <Search className="w-4 h-4" strokeWidth={1.5} />}
             </button>
           </div>
 
-          {/* Mobile search row — expands below filter bar */}
+          {/* Mobile search row */}
           <AnimatePresence>
             {mobileSearchOpen && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.18 }}
+                transition={{ duration: 0.25, ease: EASE }}
                 className="sm:hidden overflow-hidden"
               >
-                <div className="pb-2.5">
+                <div className="pb-3">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/60" strokeWidth={1.5} />
                     <input
                       type="text"
-                      placeholder="Search projects by name or location..."
+                      placeholder="Search projects by name or location"
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
                       autoFocus
-                      className="w-full pl-9 pr-8 py-2 text-sm bg-muted/50 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition"
+                      className="w-full pl-6 pr-6 py-2 bg-transparent border-0 border-b border-border/60 focus:border-foreground/70 focus:outline-none text-sm placeholder:text-muted-foreground/50"
                     />
                     {searchQuery && (
-                      <button onClick={clearSearch} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                        <X className="w-3.5 h-3.5" />
+                      <button onClick={clearSearch} className="absolute right-0 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground">
+                        <X className="w-4 h-4" strokeWidth={1.5} />
                       </button>
                     )}
                   </div>
@@ -779,63 +666,61 @@ const MediaGalleryPage = () => {
             )}
           </AnimatePresence>
 
-          {/* Active filter / result count strip */}
+          {/* Result summary — hairline row */}
           {hasFilters && !isLoading && (
-            <div className="flex items-center justify-between py-1.5 sm:py-2 border-t border-border/50">
-              <p className="text-[11px] sm:text-xs text-muted-foreground truncate mr-2">
-                {totalItems} result{totalItems !== 1 ? "s" : ""}
-                {activeFilter !== "All" && <> in <span className="font-semibold text-foreground">{activeFilter}</span></>}
-                {searchQuery && <> for "<span className="font-semibold text-foreground">{searchQuery}</span>"</>}
+            <div className="flex items-center justify-between py-2 border-t border-border/50 text-[11px] text-muted-foreground">
+              <p className="truncate mr-3">
+                <span className="tabular-nums">{two(totalItems)}</span> result{totalItems !== 1 ? "s" : ""}
+                {activeFilter !== "All" && <> · <span className="text-foreground">{activeFilter}</span></>}
+                {searchQuery && <> · <span className="text-foreground">"{searchQuery}"</span></>}
               </p>
               <button
                 onClick={() => { setFilter("All"); clearSearch(); setMobileSearchOpen(false); }}
-                className="text-[11px] sm:text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 flex-shrink-0 transition-colors"
+                className="flex items-center gap-1 hover:text-foreground transition-colors flex-shrink-0"
               >
-                <X className="w-3 h-3" /> Clear
+                Clear <X className="w-3 h-3" strokeWidth={1.5} />
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Main content ─────────────────────────────────────────────────────────── */}
-      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-10 lg:py-12">
+      {/* ── Content ───────────────────────────────────────────────────────── */}
+      <div className="container mx-auto px-6 lg:px-12 py-16 sm:py-24 lg:py-32">
 
-        {/* Loading */}
         {isLoading && !error && (
-          <div className="flex flex-col items-center justify-center py-32 gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-primary/50" />
-            <p className="text-sm text-muted-foreground">Loading portfolio...</p>
+          <div className="flex items-center justify-center py-40">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/40" strokeWidth={1.5} />
           </div>
         )}
 
-        {/* Error */}
         {error && (
-          <div className="flex flex-col items-center justify-center py-24 max-w-sm mx-auto text-center gap-4">
-            <AlertCircle className="w-10 h-10 text-destructive/60" />
+          <div className="max-w-sm mx-auto py-32 text-center space-y-6">
+            <AlertCircle className="w-8 h-8 text-muted-foreground/50 mx-auto" strokeWidth={1.5} />
             <div>
-              <p className="font-semibold">Failed to load media</p>
-              <p className="text-sm text-muted-foreground mt-1">{error}</p>
+              <p className="text-base font-medium mb-2">Something didn't load</p>
+              <p className="text-sm text-muted-foreground">{error}</p>
             </div>
             <button
               onClick={() => { setError(null); setIsLoading(true); fetchMedia(0, false); }}
-              className="px-5 py-2 rounded-lg bg-primary text-background text-sm font-semibold hover:bg-primary/90 transition"
+              className="text-sm text-foreground border-b border-foreground/40 hover:border-foreground pb-0.5 transition-colors"
             >
-              Try Again
+              Try again
             </button>
           </div>
         )}
 
-        {/* Empty */}
         {!isLoading && !error && totalItems === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 max-w-sm mx-auto text-center gap-3">
-            <ImageIcon className="w-10 h-10 text-muted-foreground/30" />
-            <p className="font-semibold">No projects found</p>
-            <p className="text-sm text-muted-foreground">Try adjusting your filters or search.</p>
+          <div className="max-w-sm mx-auto py-32 text-center space-y-5">
+            <ImageIcon className="w-8 h-8 text-muted-foreground/30 mx-auto" strokeWidth={1} />
+            <div>
+              <p className="text-base font-medium mb-1.5">Nothing here yet</p>
+              <p className="text-sm text-muted-foreground">Try adjusting the filter or search.</p>
+            </div>
             {hasFilters && (
               <button
                 onClick={() => { setFilter("All"); clearSearch(); }}
-                className="mt-1 px-4 py-1.5 rounded-lg border border-border text-sm hover:bg-muted/50 transition"
+                className="text-sm text-foreground border-b border-foreground/40 hover:border-foreground pb-0.5 transition-colors"
               >
                 Clear filters
               </button>
@@ -845,73 +730,71 @@ const MediaGalleryPage = () => {
 
         {!isLoading && !error && totalItems > 0 && (
           <>
-            {/* ── Featured / Pinned section ───────────────────────────────────── */}
+            {/* ── Featured ────────────────────────────────────────────────── */}
             {pinnedMedia.length > 0 && (
-              <section className="mb-10 sm:mb-14">
-                <div className="flex items-center justify-between mb-4 sm:mb-6">
-                  <div>
-                    <h2 className="text-base sm:text-lg font-bold">Featured Projects</h2>
-                    <p className="text-xs sm:text-sm text-muted-foreground">Handpicked highlights from our portfolio</p>
+              <section className="mb-24 sm:mb-32 lg:mb-40">
+                <div className="flex items-baseline justify-between mb-10 sm:mb-14 lg:mb-16">
+                  <div className="flex items-center gap-3">
+                    <span className="h-px w-8 bg-foreground/30" />
+                    <p className="text-[10px] sm:text-xs tracking-[0.3em] uppercase text-muted-foreground">Featured</p>
                   </div>
-                  <div className="h-px flex-1 bg-border mx-4 sm:mx-6 hidden sm:block" />
-                  <span className="text-xs text-muted-foreground flex-shrink-0">{pinnedMedia.length} featured</span>
+                  <p className="text-[10px] sm:text-xs tracking-[0.25em] uppercase text-muted-foreground/60 tabular-nums">
+                    {two(pinnedMedia.length)}
+                  </p>
                 </div>
 
                 {pinnedMedia.length === 1 ? (
-                  <SpotlightCard item={pinnedMedia[0]} />
+                  <FeaturedHero item={pinnedMedia[0]} />
                 ) : (
-                  /* Mobile: stack all. md: spotlight + side column. */
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[1fr_300px] gap-3 sm:gap-4">
-                    <SpotlightCard item={pinnedMedia[0]} />
-                    <div className="grid grid-cols-2 md:grid-cols-1 gap-3 sm:gap-4">
-                      {pinnedMedia.slice(1, 3).map((item, i) => (
-                        <PinnedCard key={item.id} item={item} delay={i * 0.06} />
-                      ))}
-                    </div>
+                  <div className="space-y-24 sm:space-y-32">
+                    <FeaturedHero item={pinnedMedia[0]} />
+                    {pinnedMedia.length > 1 && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-10 sm:gap-14 lg:gap-20">
+                        {pinnedMedia.slice(1, 3).map(item => (
+                          <FeaturedSecondary key={item.id} item={item} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
             )}
 
-            {/* ── Regular grid ────────────────────────────────────────────────── */}
+            {/* ── Portfolio grid ─────────────────────────────────────────── */}
             {media.length > 0 && (
               <section>
-                {pinnedMedia.length > 0 && (
-                  <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
-                    <h2 className="text-base sm:text-lg font-bold flex-shrink-0">All Projects</h2>
-                    <div className="h-px flex-1 bg-border" />
-                    <span className="text-xs text-muted-foreground flex-shrink-0">{media.length} items</span>
+                <div className="flex items-baseline justify-between mb-10 sm:mb-14 lg:mb-16">
+                  <div className="flex items-center gap-3">
+                    <span className="h-px w-8 bg-foreground/30" />
+                    <p className="text-[10px] sm:text-xs tracking-[0.3em] uppercase text-muted-foreground">
+                      {pinnedMedia.length > 0 ? "Portfolio" : "Work"}
+                    </p>
                   </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                  {media.map((item, idx) => (
-                    <GridCard key={item.id} item={item} delay={Math.min(idx % 6, 5) * 0.05} />
-                  ))}
+                  <p className="text-[10px] sm:text-xs tracking-[0.25em] uppercase text-muted-foreground/60 tabular-nums">
+                    {two(media.length)}
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10 sm:gap-12 lg:gap-16">
+                  {media.map(item => <GridCard key={item.id} item={item} />)}
                 </div>
               </section>
             )}
 
-            {/* ── Load more trigger ────────────────────────────────────────────── */}
-            <div ref={loadMoreRef} className="py-8 sm:py-12 flex justify-center">
+            <div ref={loadMoreRef} className="py-16 sm:py-24 flex justify-center">
               {isLoadingMore && (
-                <div className="flex items-center gap-2 sm:gap-3 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Loading more projects...
-                </div>
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground/40" strokeWidth={1.5} />
               )}
             </div>
 
-            {/* End of list */}
             {!hasMore && totalItems > 0 && (
-              <div className="text-center py-6 sm:py-8 border-t border-border">
-                <p className="text-xs text-muted-foreground uppercase tracking-widest">End of Portfolio</p>
+              <div className="text-center py-16 border-t border-border">
+                <p className="text-[10px] tracking-[0.3em] uppercase text-muted-foreground/50">End</p>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* ── Lightbox ────────────────────────────────────────────────────────────── */}
       {lightbox && <LightboxModal />}
     </div>
   );
