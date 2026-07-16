@@ -1463,16 +1463,21 @@ async function fetchDerivedTotals(): Promise<DerivedTotals> {
   ) => (rows ?? []).reduce((s, r) => s + (Number(pick(r)) || 0), 0);
 
   const [
-    arRes, apRes, invRes, wipRes, loansRes, cashRes,
+    arRes, apRes, invRes, wipRes, loansRes, cashRes, activeProjRes,
   ] = await Promise.all([
     supabase.from("accounts_receivable").select("balance,status")
       .in("status", ["outstanding", "overdue", "partial"]),
     supabase.from("accounts_payable").select("balance,status")
       .in("status", ["open", "overdue", "partial"]),
-    supabase.from("inventory").select("total_value,total_value_used"),
+    supabase.from("inventory").select("project_id,total_value,total_value_used"),
     supabase.from("work_in_progress").select("amount,billed_status"),
     supabase.from("loans").select("facility_ref,closing_balance,due_date"),
     supabase.from("cash_flow").select("project_id,year,quarter,month,ending_balance"),
+    // Active (non-archived) project IDs — used to filter out orphaned or
+    // archived-project inventory rows that would otherwise inflate the
+    // firm-wide "Inventory on Hand" figure even when the user sees the
+    // Inventory register as empty.
+    supabase.from("projects").select("id").is("archived_at", null),
   ]);
 
   // AR: sum of unpaid balances
@@ -1482,7 +1487,19 @@ async function fetchDerivedTotals(): Promise<DerivedTotals> {
   const ap = safeSum(apRes.data as { balance: number }[] | null, (r) => r.balance);
 
   // Inventory on hand = total_value − total_value_used (per row, floor 0)
-  const inventoryOnHand = (invRes.data as { total_value: number; total_value_used: number }[] | null ?? [])
+  // We only count rows tied to an active, non-archived project. Rows with a
+  // NULL project_id (never linked) or whose project is archived / deleted
+  // are ignored — they'd contribute a phantom balance that the Inventory
+  // UI cannot show or edit.
+  const activeProjectIds = new Set(
+    (activeProjRes.data as { id: string }[] | null ?? []).map((p) => p.id),
+  );
+  const inventoryOnHand = (invRes.data as {
+    project_id: string | null;
+    total_value: number;
+    total_value_used: number;
+  }[] | null ?? [])
+    .filter((r) => r.project_id && activeProjectIds.has(r.project_id))
     .reduce((s, r) => s + Math.max(0, (Number(r.total_value) || 0) - (Number(r.total_value_used) || 0)), 0);
 
   // WIP: underbilled rows = current-asset CIP; overbilled rows = current liability
