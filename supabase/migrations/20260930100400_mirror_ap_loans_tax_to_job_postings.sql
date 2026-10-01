@@ -98,7 +98,7 @@ BEGIN
       source, cost_category, loan_id
     ) VALUES (
       NEW.project_id, NULL, 'Loan Servicing', desc_text,
-      '', '',
+      NULL, '',
       0, cost_amt, 0, cost_amt,
       'loan', 'financing', NEW.id
     );
@@ -112,7 +112,7 @@ BEGIN
       source, cost_category, loan_id
     ) VALUES (
       NEW.project_id, NULL, 'Loan Servicing', desc_text,
-      '', '',
+      NULL, '',
       0, cost_amt, 0, cost_amt,
       'loan', 'financing', NEW.id
     )
@@ -156,7 +156,7 @@ BEGIN
       source, cost_category, tax_id
     ) VALUES (
       NEW.project_id, NULL, 'Tax', desc_text,
-      '', '',
+      NULL, '',
       0, COALESCE(NEW.cash_out, 0), 0, COALESCE(NEW.cash_out, 0),
       'tax', 'tax', NEW.id
     );
@@ -170,7 +170,7 @@ BEGIN
       source, cost_category, tax_id
     ) VALUES (
       NEW.project_id, NULL, 'Tax', desc_text,
-      '', '',
+      NULL, '',
       0, COALESCE(NEW.cash_out, 0), 0, COALESCE(NEW.cash_out, 0),
       'tax', 'tax', NEW.id
     )
@@ -228,7 +228,7 @@ SELECT
   'Loan: ' || COALESCE(ln.lender_name, '')
     || CASE WHEN COALESCE(ln.facility_ref, '') <> ''
             THEN ' — ' || ln.facility_ref ELSE '' END,
-  '', '',
+  NULL, '',
   0,
   COALESCE(ln.interest_portion, 0) + COALESCE(ln.fees_and_charges, 0),
   0,

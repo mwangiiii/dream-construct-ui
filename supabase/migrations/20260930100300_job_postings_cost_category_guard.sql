@@ -57,7 +57,7 @@ BEGIN
         source, cost_category, payroll_id
       ) VALUES (
         NEW.project_id, NULL, 'Payroll', 'Payroll: ' || NEW.employee_name,
-        '', COALESCE(NEW.etims_code, ''),
+        NULL, COALESCE(NEW.etims_code, ''),
         0, NEW.gross_pay, 0, NEW.gross_pay,
         'payroll', 'labour', NEW.id
       );
@@ -78,7 +78,7 @@ BEGIN
         source, cost_category, payroll_id
       ) VALUES (
         NEW.project_id, NULL, 'Payroll', 'Payroll: ' || NEW.employee_name,
-        '', COALESCE(NEW.etims_code, ''),
+        NULL, COALESCE(NEW.etims_code, ''),
         0, NEW.gross_pay, 0, NEW.gross_pay,
         'payroll', 'labour', NEW.id
       )

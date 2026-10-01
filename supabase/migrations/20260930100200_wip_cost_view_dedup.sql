@@ -16,7 +16,12 @@
 --    total_cost   = ap + manual_jc + tax + loan + payroll
 -- =============================================================================
 
-CREATE OR REPLACE VIEW public.vw_project_cost_incurred AS
+-- Postgres refuses `CREATE OR REPLACE VIEW` when adding a column in a
+-- position that shifts an existing column name (we're adding `payroll_cost`
+-- between `loan_cost` and `total_cost`). Drop the old view first.
+DROP VIEW IF EXISTS public.vw_project_cost_incurred;
+
+CREATE VIEW public.vw_project_cost_incurred AS
 WITH ap AS (
   SELECT project_id, COALESCE(SUM(total_amount), 0) AS ap_cost
   FROM public.accounts_payable

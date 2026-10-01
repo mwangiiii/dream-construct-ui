@@ -30,7 +30,7 @@ BEGIN
         source, payroll_id
       ) VALUES (
         NEW.project_id, NULL, 'Payroll', 'Payroll: ' || NEW.employee_name,
-        '', COALESCE(NEW.etims_code, ''),
+        NULL, COALESCE(NEW.etims_code, ''),
         0, NEW.gross_pay, 0, NEW.gross_pay,
         'payroll', NEW.id
       );
@@ -53,7 +53,7 @@ BEGIN
         source, payroll_id
       ) VALUES (
         NEW.project_id, NULL, 'Payroll', 'Payroll: ' || NEW.employee_name,
-        '', COALESCE(NEW.etims_code, ''),
+        NULL, COALESCE(NEW.etims_code, ''),
         0, NEW.gross_pay, 0, NEW.gross_pay,
         'payroll', NEW.id
       )
@@ -87,7 +87,7 @@ INSERT INTO public.job_postings (
 )
 SELECT
   p.project_id, NULL, 'Payroll', 'Payroll: ' || p.employee_name,
-  '', COALESCE(p.etims_code, ''),
+  NULL, COALESCE(p.etims_code, ''),
   0, p.gross_pay, 0, p.gross_pay,
   'payroll', p.id
 FROM public.payroll_checklist p

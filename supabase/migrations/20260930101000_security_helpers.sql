@@ -33,7 +33,7 @@ BEGIN
     FROM public.user_roles ur
     JOIN public.profiles  p  ON p.id = ur.user_id
     LEFT JOIN public.user_statuses us ON us.status_id = p.status_id
-    WHERE ur.role_name = 'admin'
+    WHERE ur.role_name::text = 'admin'
       AND COALESCE(us.is_active, TRUE) = TRUE
   ) THEN
     RAISE EXCEPTION
@@ -52,6 +52,9 @@ GRANT USAGE ON SCHEMA security TO authenticated;
 -- ── 2. Identity + role checks ───────────────────────────────────────────────
 
 -- Fast: does the current auth user hold a given role name?
+-- `user_roles.role_name` is the `app_role` enum type in production. Cast it
+-- to text so we can compare to arbitrary string input without worrying about
+-- which enum values currently exist.
 CREATE OR REPLACE FUNCTION security.has_role(role_check text)
 RETURNS boolean
 LANGUAGE sql
@@ -62,7 +65,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.user_roles
     WHERE user_id = auth.uid()
-      AND role_name = role_check
+      AND role_name::text = role_check
   );
 $$;
 
@@ -77,7 +80,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.user_roles
     WHERE user_id  = auth.uid()
-      AND role_name = ANY (roles_check)
+      AND role_name::text = ANY (roles_check)
   );
 $$;
 
@@ -214,7 +217,7 @@ SET search_path = pg_catalog, public, pg_temp
 STABLE
 AS $$
   WITH r AS (
-    SELECT ARRAY_AGG(role_name ORDER BY role_name) AS role_names
+    SELECT ARRAY_AGG(role_name::text ORDER BY role_name::text) AS role_names
     FROM public.user_roles WHERE user_id = target_user
   ),
   p AS (
