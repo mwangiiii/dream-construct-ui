@@ -130,8 +130,7 @@ I would like to discuss the following:
         setQueryParams({ subService: "", category: "", stage: "" });
       }, 3000);
 
-    } catch (error) {
-      console.error("EmailJS error:", error);
+    } catch {
       toast({
         title: "Error Sending Message",
         description: "Please try again or contact us directly via phone or email.",

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
+import { getDashboardRoute, type UserRole } from "@/lib/auth";
 
 const Login = () => {
   const { toast } = useToast();
@@ -65,14 +66,10 @@ const Login = () => {
 
           // Alternative: Try to check using RPC or direct auth table query
           // Let's use a simpler approach - check profiles by email
-          const { count, error: countError } = await supabase
+          const { count } = await supabase
             .from("profiles")
             .select("*", { count: "exact", head: true })
             .ilike("email", formData.email.trim());
-
-          if (countError) {
-            console.error("Error checking email:", countError);
-          }
 
           // If count is 0 or null, email doesn't exist
           if (count === 0) {
@@ -142,30 +139,16 @@ const Login = () => {
         .eq("user_id", data.user.id);
 
       if (rolesError) {
-        console.error("Error fetching user roles:", rolesError);
         navigate("/client/dashboard", { replace: true }); // fallback
         return;
       }
 
-      // userRoles is an array of roles
-      const roleNames = userRoles?.map((r: any) => r.role_name) || [];
-      let redirectPath = "/client/dashboard"; // default
-      if (roleNames.includes("finance")) {
-        redirectPath = "/finance/dashboard";
-      } else if (roleNames.includes("project_manager")) {
-        redirectPath = "/pm/dashboard";
-      } else if (roleNames.includes("manager")) {
-        redirectPath = "/manager";
-      } else if (roleNames.includes("admin")) {
-        redirectPath = "/admin";
-      } else if (roleNames.includes("client")) {
-        redirectPath = "/client/dashboard";
-      }
-      navigate(redirectPath, { replace: true });
+      const rolesForRouting = (userRoles || []).map(
+        (r: any) => ({ role_name: r.role_name, description: null, assigned_at: '' })
+      ) as UserRole[];
+      navigate(getDashboardRoute(rolesForRouting), { replace: true });
 
     } catch (error: any) {
-      console.error("Login error:", error);
-
       let message = "An unexpected error occurred.";
 
       if (!navigator.onLine) {

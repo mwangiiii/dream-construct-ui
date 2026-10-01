@@ -852,7 +852,9 @@ async function fetchInvoiceSources(projectId: string | null): Promise<ErpSource[
 //
 //   Vendor amount  = Σ project_financials.total_price billed by that vendor
 //   Worker amount  = most recent payroll_checklist.net_pay for that worker
-//   WIP cost       = vw_project_cost_incurred.total_cost (AP + JC + Tax + Loan)
+//   WIP cost       = vw_project_cost_incurred.total_cost
+//                    (AP + manual Job Costing + Tax + Loan + Payroll,
+//                     de-duplicated — see 20260930100200_wip_cost_view_dedup.sql)
 async function fetchPaymentSources(projectId: string | null): Promise<ErpSource[]> {
   if (!projectId) return [];
 

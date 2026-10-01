@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import { toast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Trash2, GripVertical, CheckCircle, XCircle } from 'lucide-react';
 
@@ -43,7 +44,6 @@ const ReviewsManagement = () => {
         .maybeSingle();
 
       if (roleError) {
-        console.error('Error checking user role:', roleError);
         setAuthError('Unable to verify administrator privileges.');
         setIsAuthorized(false);
         setLoading(false);
@@ -59,8 +59,7 @@ const ReviewsManagement = () => {
 
       setIsAuthorized(true);
       setLoading(false);
-    } catch (err) {
-      console.error('Authorization error:', err);
+    } catch {
       setAuthError('An error occurred while verifying permissions.');
       setIsAuthorized(false);
       setLoading(false);
@@ -85,7 +84,6 @@ const ReviewsManagement = () => {
       const { data, error } = await query;
       
       if (error) {
-        console.error('Error fetching reviews:', error);
         if (error.code === 'PGRST301' || error.message?.includes('policy')) {
           setAuthError('Authorization error: Unable to fetch reviews. Please verify your admin status.');
           setIsAuthorized(false);
@@ -93,8 +91,8 @@ const ReviewsManagement = () => {
       } else if (data) {
         setReviews(data);
       }
-    } catch (err) {
-      console.error('Error in fetchAllReviews:', err);
+    } catch {
+      /* fetch is best-effort */
     } finally {
       setLoading(false);
     }
@@ -108,19 +106,17 @@ const ReviewsManagement = () => {
         .eq('id', id);
 
       if (error) {
-        console.error('Error updating review:', error);
         if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-          alert('Authorization error: You do not have permission to update reviews.');
+          toast({ title: 'Authorization error: You do not have permission to update reviews.', variant: 'destructive' });
           checkAuthorization();
         } else {
-          alert('Error updating review status');
+          toast({ title: 'Error updating review status', variant: 'destructive' });
         }
       } else {
         fetchAllReviews();
       }
-    } catch (err) {
-      console.error('Error in toggleDisplay:', err);
-      alert('An error occurred while updating the review');
+    } catch {
+      toast({ title: 'An error occurred while updating the review', variant: 'destructive' });
     }
   }
 
@@ -134,20 +130,18 @@ const ReviewsManagement = () => {
         .eq('id', id);
 
       if (error) {
-        console.error('Error updating order:', error);
         if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-          alert('Authorization error: You do not have permission to update reviews.');
+          toast({ title: 'Authorization error: You do not have permission to update reviews.', variant: 'destructive' });
           checkAuthorization();
         } else {
-          alert('Error updating review order');
+          toast({ title: 'Error updating review order', variant: 'destructive' });
         }
       } else {
         setEditingOrder({ ...editingOrder, [id]: false });
         fetchAllReviews();
       }
-    } catch (err) {
-      console.error('Error in updateOrder:', err);
-      alert('An error occurred while updating the order');
+    } catch {
+      toast({ title: 'An error occurred while updating the order', variant: 'destructive' });
     }
   }
 
@@ -159,20 +153,18 @@ const ReviewsManagement = () => {
         .eq('id', id);
 
       if (error) {
-        console.error('Error deleting review:', error);
         if (error.code === 'PGRST301' || error.message?.includes('policy')) {
-          alert('Authorization error: You do not have permission to delete reviews.');
+          toast({ title: 'Authorization error: You do not have permission to delete reviews.', variant: 'destructive' });
           checkAuthorization();
         } else {
-          alert('Error deleting review');
+          toast({ title: 'Error deleting review', variant: 'destructive' });
         }
       } else {
         setDeleteConfirm(null);
         fetchAllReviews();
       }
-    } catch (err) {
-      console.error('Error in deleteReview:', err);
-      alert('An error occurred while deleting the review');
+    } catch {
+      toast({ title: 'An error occurred while deleting the review', variant: 'destructive' });
     }
   }
 

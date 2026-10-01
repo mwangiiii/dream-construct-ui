@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabaseClient';
+import { toast } from '@/hooks/use-toast';
 import {
   Select,
   SelectTrigger,
@@ -17,9 +18,6 @@ import {
 import { Label } from '@/components/ui/label';
 
 function PMWorkers() {
-  console.log('[PMWorkers] Render start');
-  // Error boundary state
-  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('attendance');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [showAddWorker, setShowAddWorker] = useState(false);
@@ -70,59 +68,43 @@ function PMWorkers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch dashboard stats
   const fetchStats = async () => {
-    console.log('[PMWorkers] fetchStats called');
     try {
       const { data, error: funcError } = await supabase.functions.invoke('get-dashboard-stats');
-      console.log('[PMWorkers] fetchStats result', { data, funcError });
-      if (funcError) {
-        console.error('Stats function error:', funcError);
-        return;
-      }
+      if (funcError) return;
       if (data) setStats(data);
-    } catch (err: any) {
-      console.error('[PMWorkers] Stats error:', err);
+    } catch {
+      /* stats are best-effort */
     }
   };
 
-  // Fetch all workers
   const fetchWorkers = async () => {
-    console.log('[PMWorkers] fetchWorkers called');
     setError(null);
     try {
       const { data, error: funcError } = await supabase.functions.invoke('get-workers', { method: 'GET' });
       if (funcError) {
-        console.error('Workers function error:', funcError);
         setWorkers([]);
         setError('Failed to fetch workers: ' + funcError.message);
         return;
       }
       setWorkers(data?.workers || []);
-    } catch (err: any) {
-      console.error('[PMWorkers] Workers fetch error:', err);
+    } catch {
       setWorkers([]);
       setError('Failed to fetch workers. Please check your connection.');
     }
   };
 
-  // Fetch attendance for selected date
   const fetchAttendance = async (date: string) => {
-    console.log('[PMWorkers] fetchAttendance called', { date });
     try {
       const { data, error: funcError } = await supabase.functions.invoke('get-daily-attendance', {
         body: { date }
       });
-      console.log('[PMWorkers] fetchAttendance result', { data, funcError });
       if (funcError) {
-        console.error('Attendance function error:', funcError);
         setAttendance([]);
         return;
       }
-      if (data?.attendance) setAttendance(data.attendance);
-      else setAttendance([]);
-    } catch (err: any) {
-      console.error('[PMWorkers] Attendance fetch error:', err);
+      setAttendance(data?.attendance || []);
+    } catch {
       setAttendance([]);
     }
   };
@@ -141,17 +123,13 @@ function PMWorkers() {
     }
   };
 
-  // Initial load
   useEffect(() => {
-    console.log('[PMWorkers] useEffect initial load');
     const loadInitialData = async () => {
       setLoading(true);
       setError(null);
       try {
         await Promise.all([fetchStats(), fetchWorkers(), fetchAssignments()]);
         await fetchAttendance(selectedDate);
-      } catch (err) {
-        console.error('[PMWorkers] Initial load error:', err);
       } finally {
         setLoading(false);
       }
@@ -159,22 +137,19 @@ function PMWorkers() {
     loadInitialData();
   }, []);
 
-  // Reload attendance when date or tab changes
   useEffect(() => {
-    console.log('[PMWorkers] useEffect selectedDate/activeTab', { selectedDate, activeTab });
     if (activeTab === 'attendance') {
       fetchAttendance(selectedDate);
     }
   }, [selectedDate, activeTab]);
 
-  // Add Worker
   const handleAddWorker = async () => {
     if (!workerForm.name.trim() || !workerForm.role) {
-      alert('Full name and role are required');
+      toast({ title: 'Full name and role are required', variant: 'destructive' });
       return;
     }
     try {
-      const { data, error: funcError } = await supabase.functions.invoke('add-worker', {
+      const { error: funcError } = await supabase.functions.invoke('add-worker', {
         body: {
           name: workerForm.name.trim(),
           role: workerForm.role,
@@ -183,17 +158,17 @@ function PMWorkers() {
           address: workerForm.address || null
         }
       });
-      
+
       if (funcError) {
-        alert(funcError.message || 'Failed to add worker');
+        toast({ title: funcError.message || 'Failed to add worker', variant: 'destructive' });
         return;
       }
-      
+
       setShowAddWorker(false);
       setWorkerForm({ name: '', role: '', phone: '', id_number: '', address: '' });
       await Promise.all([fetchWorkers(), fetchStats()]);
     } catch (err: any) {
-      alert('Failed to add worker: ' + (err.message || 'Unknown error'));
+      toast({ title: 'Failed to add worker', description: err.message || 'Unknown error', variant: 'destructive' });
     }
   };
 
@@ -218,56 +193,49 @@ function PMWorkers() {
       }));
     
     if (records.length === 0) {
-      alert('No changes to save');
+      toast({ title: 'No changes to save' });
       return;
     }
-    
+
     try {
-      console.log('[Attendance] Saving records:', { date: selectedDate, records });
-      
-      const { data, error: funcError } = await supabase.functions.invoke('worker_attendance', {
+      const { error: funcError } = await supabase.functions.invoke('worker_attendance', {
         body: { date: selectedDate, records }
       });
-      
-      console.log('[Attendance] Save result', { data, funcError });
-      
+
       if (funcError) {
-        console.error('[Attendance] Save failed:', funcError);
-        alert(funcError.message || 'Failed to save attendance');
+        toast({ title: funcError.message || 'Failed to save attendance', variant: 'destructive' });
         return;
       }
-      
-      alert('Attendance saved successfully!');
+
+      toast({ title: 'Attendance saved successfully!' });
       setShowMarkAttendance(false);
       setAttendanceRecords({});
       await Promise.all([fetchAttendance(selectedDate), fetchStats()]);
     } catch (err: any) {
-      console.error('[Attendance] Save error:', err);
-      alert('Failed to save attendance: ' + (err.message || 'Unknown error'));
+      toast({ title: 'Failed to save attendance', description: err.message || 'Unknown error', variant: 'destructive' });
     }
   };
 
-  // Assignment creation
   const handleAssignTask = async () => {
     if (!assignmentForm.worker_id || !assignmentForm.task.trim()) {
-      alert('Worker and task are required');
+      toast({ title: 'Worker and task are required', variant: 'destructive' });
       return;
     }
     try {
-      const { data, error: funcError } = await supabase.functions.invoke('assign-task', {
+      const { error: funcError } = await supabase.functions.invoke('assign-task', {
         body: assignmentForm
       });
-      
+
       if (funcError) {
-        alert(funcError.message || 'Failed to assign task');
+        toast({ title: funcError.message || 'Failed to assign task', variant: 'destructive' });
         return;
       }
-      
+
       setShowAssignTask(false);
       setAssignmentForm({ worker_id: '', task: '', due_date: '', status: 'pending', notes: '' });
       await fetchAssignments();
     } catch (err: any) {
-      alert('Failed to assign task: ' + (err.message || 'Unknown error'));
+      toast({ title: 'Failed to assign task', description: err.message || 'Unknown error', variant: 'destructive' });
     }
   };
 
@@ -347,19 +315,6 @@ function PMWorkers() {
       )}
     </motion.div>
   );
-
-  console.log('[PMWorkers] Render state', { loading, error, runtimeError, workers, attendance, stats });
-  
-  if (runtimeError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <div className="text-center max-w-md p-8 bg-red-950/50 border-2 border-red-500 rounded-2xl">
-          <p className="font-bold mb-4 text-2xl text-red-400">Runtime Error</p>
-          <p className="text-red-300">{runtimeError}</p>
-        </div>
-      </div>
-    );
-  }
 
   if (loading) {
     return (

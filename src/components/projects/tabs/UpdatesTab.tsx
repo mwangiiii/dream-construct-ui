@@ -257,7 +257,6 @@ export default function UpdatesTab({
       setShowCreateModal(false);
       onUpdate();
     } catch (error: any) {
-      console.error("[UpdatesTab] Create failed:", error);
       showToast(error.message || "Failed to create update", "error");
     } finally {
       setLoading(null);
@@ -301,7 +300,6 @@ export default function UpdatesTab({
       setShowCreateModal(false);
       onUpdate();
     } catch (error: any) {
-      console.error("Update error:", error);
       showToast(error.message || "Failed to update", "error");
     } finally {
       setLoading(null);
@@ -366,9 +364,7 @@ export default function UpdatesTab({
     if (!path) return "";
     const bucket = "project_updates_media";
     const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-    const url = data.publicUrl;
-    console.log("[getMediaUrl] bucket:", bucket, "path:", path, "url:", url);
-    return url;
+    return data.publicUrl;
   };
 
   const getFileIcon = (path: string) => {

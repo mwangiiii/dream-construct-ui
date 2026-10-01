@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "@/hooks/use-toast";
 import {
   X,
   Building2,
@@ -182,9 +183,6 @@ export default function NewProjectModal({
 
   const fetchClientsAndManagers = async () => {
     try {
-      console.log("[NewProjectModal] Fetching clients and managers...");
-
-      // Fetch clients - start from user_roles and join to profiles
       const { data: clientData, error: clientError } = await supabase
         .from("user_roles")
         .select(`
@@ -200,22 +198,18 @@ export default function NewProjectModal({
         .eq("role_name", "client")
         .eq("profiles.status_id", 1);
 
-      if (clientError) {
-        console.error("[NewProjectModal] Error fetching clients:", clientError);
-      } else {
+      if (!clientError) {
         const transformedClients = clientData?.map((item: any) => ({
           id: item.profiles.id,
           full_name: item.profiles.full_name,
           company_id: item.profiles.company_id,
           companies: item.profiles.companies,
         })) || [];
-        
-        // Sort by full_name
-        transformedClients.sort((a, b) => 
+
+        transformedClients.sort((a, b) =>
           (a.full_name || "").localeCompare(b.full_name || "")
         );
-        
-        console.log("[NewProjectModal] Found clients:", transformedClients);
+
         setClients(transformedClients);
       }
 
@@ -233,15 +227,12 @@ export default function NewProjectModal({
         .eq("role_name", "project_manager")
         .eq("profiles.status_id", 1);
 
-      if (managerError) {
-        console.error("[NewProjectModal] Error fetching managers:", managerError);
-      } else {
+      if (!managerError) {
         const transformedManagers = managerData?.map((item: any) => ({
           id: item.profiles.id,
           full_name: item.profiles.full_name,
         })) || [];
 
-        // Remove duplicates and sort
         const uniqueManagers = transformedManagers.reduce((acc: Manager[], current) => {
           const exists = acc.find((item) => item.id === current.id);
           if (!exists) {
@@ -250,15 +241,14 @@ export default function NewProjectModal({
           return acc;
         }, []);
 
-        uniqueManagers.sort((a, b) => 
+        uniqueManagers.sort((a, b) =>
           (a.full_name || "").localeCompare(b.full_name || "")
         );
 
-        console.log("[NewProjectModal] Found managers:", uniqueManagers);
         setManagers(uniqueManagers);
       }
-    } catch (error) {
-      console.error("[NewProjectModal] Unexpected error:", error);
+    } catch {
+      /* fetch is best-effort; UI stays empty */
     }
   };
 
@@ -286,16 +276,15 @@ export default function NewProjectModal({
 
       const padded = String(nextNum).padStart(3, "0");
       setNextProjectNumber(`PRJ-${currentYear}-${padded}`);
-    } catch (error) {
-      console.error("[NewProjectModal] Error generating project number:", error);
+    } catch {
       setNextProjectNumber("PRJ-2026-001");
     }
   };
 
   const handleSubmit = async () => {
-    if (!formData.client_id) return alert("Please select a client");
-    if (!formData.title.trim()) return alert("Please enter a project title");
-    if (dateError) return alert(dateError);
+    if (!formData.client_id) { toast({ title: "Please select a client", variant: "destructive" }); return; }
+    if (!formData.title.trim()) { toast({ title: "Please enter a project title", variant: "destructive" }); return; }
+    if (dateError) { toast({ title: dateError, variant: "destructive" }); return; }
 
     setLoading(true);
     try {
@@ -325,8 +314,7 @@ export default function NewProjectModal({
       onSuccess();
       handleClose();
     } catch (error: any) {
-      console.error("[NewProjectModal] Error creating project:", error);
-      alert("Error creating project: " + (error?.message || String(error)));
+      toast({ title: "Error creating project", description: error?.message || String(error), variant: "destructive" });
     } finally {
       setLoading(false);
     }

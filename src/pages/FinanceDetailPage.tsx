@@ -254,8 +254,7 @@ export default function FinanceDetailPage() {
         }
 
         setProject(proj);
-      } catch (err) {
-        console.error("[FinanceDetailPage] Init error:", err);
+      } catch {
         if (mounted) {
           showToast("Error loading finance module.", "error");
           setTimeout(() => navigate("/projects"), 2000);

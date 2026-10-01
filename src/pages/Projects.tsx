@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "@/hooks/use-toast";
 import { 
   ArrowRight, 
   CheckCircle, 
@@ -162,7 +163,6 @@ export default function CompletedProjects() {
           });
       }
     } catch (err: any) {
-      console.error("Error fetching completed projects:", err);
       setError(err.message || "Failed to load completed projects");
       setLoading(false);
     }
@@ -206,50 +206,38 @@ export default function CompletedProjects() {
           full_name: managersMap[project.manager_id] || "Project Manager"
         }
       })));
-    } catch (err) {
-      console.error("Error enriching projects:", err);
+    } catch {
+      /* enrichment is best-effort */
     }
   }
 
   async function fetchProjectDetails(projectId: string) {
     if (!supabase) {
-      alert("Database not configured");
+      toast({ title: "Database not configured", variant: "destructive" });
       return;
     }
 
-    console.log("=== FETCH PROJECT DETAILS START ===");
-    console.log("Project ID:", projectId);
-    
     setLoadingDetails(true);
-    setShowModal(true); // Show modal immediately
-    setSelectedProject(null); // Clear previous data
-    
+    setShowModal(true);
+    setSelectedProject(null);
+
     try {
       const project = projects.find((p) => p.id === projectId);
       if (!project) {
-        console.error("Project not found in projects array");
-        alert("Project not found");
+        toast({ title: "Project not found", variant: "destructive" });
         setShowModal(false);
         setLoadingDetails(false);
         return;
       }
 
-      console.log("Found project:", project.title);
-
-      // Fetch all data in parallel with error handling
-      console.log("Fetching milestones, photos, documents...");
-      
       const [milestonesResult, photosResult, documentsResult] = await Promise.all([
         supabase
           .from("project_milestones")
           .select("title, status")
           .eq("project_id", projectId)
           .order("sort_order")
-          .then(res => {
-            console.log("Milestones response:", res);
-            return res.data || [];
-          }),
-        
+          .then(res => res.data || []),
+
         supabase
           .from("documents")
           .select("id, file_path, name, uploaded_at")
@@ -257,56 +245,37 @@ export default function CompletedProjects() {
           .eq("folder", "photos")
           .order("uploaded_at", { ascending: false })
           .limit(20)
-          .then(res => {
-            console.log("Photos response:", res);
-            return res.data || [];
-          }),
-        
+          .then(res => res.data || []),
+
         supabase
           .from("documents")
           .select("name, folder, file_size")
           .eq("project_id", projectId)
           .neq("folder", "photos")
-          .then(res => {
-            console.log("Documents response:", res);
-            return res.data || [];
-          })
+          .then(res => res.data || [])
       ]);
 
-      console.log("Fetched data counts:", {
-        milestones: milestonesResult.length,
-        photos: photosResult.length,
-        documents: documentsResult.length
-      });
-
-      // Calculate timeline
       const timeline = calculateTimeline(project);
-      console.log("Timeline calculated:", timeline);
 
-      // Update counts if we fetched them
-      const updatedProject = {
+      const finalProject = {
         ...project,
         milestones: milestonesResult.length,
         photos: photosResult.length,
         documents: documentsResult.length,
-      };
-
-      const finalProject = {
-        ...updatedProject,
         milestone_list: milestonesResult,
         photo_gallery: photosResult,
         document_list: documentsResult,
         timeline,
       };
 
-      console.log("Setting selected project:", finalProject);
       setSelectedProject(finalProject);
       setCurrentPhotoIndex(0);
-      console.log("=== FETCH PROJECT DETAILS SUCCESS ===");
     } catch (err: any) {
-      console.error("=== FETCH PROJECT DETAILS ERROR ===");
-      console.error("Error:", err);
-      alert(`Failed to load project details: ${err.message}`);
+      toast({
+        title: "Failed to load project details",
+        description: err.message,
+        variant: "destructive",
+      });
       setShowModal(false);
     } finally {
       setLoadingDetails(false);
@@ -511,7 +480,6 @@ export default function CompletedProjects() {
                   <GlassCard className="p-8 h-full flex flex-col group hover:border-primary/30 transition-all duration-300 cursor-pointer"
                     onClick={(e) => {
                       e.preventDefault();
-                      console.log("Card clicked, fetching details for:", project.id);
                       fetchProjectDetails(project.id);
                     }}>
                     <div className="flex justify-between items-start mb-6">
@@ -622,7 +590,6 @@ export default function CompletedProjects() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
             onClick={() => {
-              console.log("Modal backdrop clicked - closing");
               setShowModal(false);
               setSelectedProject(null);
             }}
@@ -632,10 +599,7 @@ export default function CompletedProjects() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
               className="bg-background border border-white/20 rounded-2xl max-w-6xl w-full max-h-[90vh] overflow-y-auto my-8"
-              onClick={(e) => {
-                console.log("Modal content clicked - stopping propagation");
-                e.stopPropagation();
-              }}
+              onClick={(e) => e.stopPropagation()}
             >
               {loadingDetails ? (
                 <div className="p-20 flex flex-col items-center justify-center">
@@ -653,7 +617,6 @@ export default function CompletedProjects() {
                       </div>
                       <button
                         onClick={() => {
-                          console.log("Close button clicked");
                           setShowModal(false);
                           setSelectedProject(null);
                         }}

@@ -1,15 +1,8 @@
 
-import { Link, useLocation } from "react-router-dom";
-import { useEffect } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 
 const NotFound = () => {
-  const location = useLocation();
-
-  useEffect(() => {
-    console.error("404 Error: User attempted to access non-existent route:", location.pathname);
-  }, [location.pathname]);
-
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden py-8 px-4 sm:px-8">
       {/* Video Background */}

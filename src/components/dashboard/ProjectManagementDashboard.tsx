@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { toast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -99,19 +100,15 @@ export default function ProjectManagementDashboard() {
 
   const initializeUser = async () => {
     try {
-      console.log("[Dashboard] Fetching current user...");
       const user = await getCurrentUser();
-      
+
       if (!user) {
-        console.error("[Dashboard] No user found");
         setLoading(false);
         return;
       }
 
-      console.log("[Dashboard] User loaded:", user.email);
-
       if (!user.status.is_active) {
-        alert("Your account is not active. Contact admin.");
+        toast({ title: "Your account is not active", description: "Contact admin.", variant: "destructive" });
         setLoading(false);
         return;
       }
@@ -119,19 +116,15 @@ export default function ProjectManagementDashboard() {
       setCurrentUser(user);
       const primaryRole = user.roles[0]?.role_name || "client";
       setUserRole(primaryRole);
-      
-      console.log("[Dashboard] User role:", primaryRole);
-    } catch (error) {
-      console.error("[Dashboard] Error initializing user:", error);
+    } catch {
       setLoading(false);
     }
   };
 
   const fetchProjects = async () => {
     if (!currentUser || !userRole) return;
-    
+
     setLoading(true);
-    console.log("[Dashboard] Fetching projects for role:", userRole);
 
     try {
       let query = supabase
@@ -158,7 +151,6 @@ export default function ProjectManagementDashboard() {
       const { data, error } = await query;
 
       if (error) {
-        console.error("[Dashboard] Error fetching projects:", error);
         setLoading(false);
         return;
       }
@@ -173,12 +165,11 @@ export default function ProjectManagementDashboard() {
           },
           manager: p.manager ? { id: p.manager.id, full_name: p.manager.full_name } : null,
         }));
-        
-        console.log("[Dashboard] Loaded projects:", formatted.length);
+
         setProjects(formatted);
       }
-    } catch (error) {
-      console.error("[Dashboard] Error in fetchProjects:", error);
+    } catch {
+      /* keep prior state on failure */
     } finally {
       setLoading(false);
     }

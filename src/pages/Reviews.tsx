@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Star, Send, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/ui/GlassCard';
 
@@ -41,7 +42,7 @@ const Reviews = () => {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!user) {
-      alert('You must be logged in to leave a review.');
+      toast({ title: 'You must be logged in to leave a review.', variant: 'destructive' });
       return;
     }
 
@@ -57,8 +58,7 @@ const Reviews = () => {
       ]);
 
     if (error) {
-      alert('Error submitting review. Please try again.');
-      console.error(error);
+      toast({ title: 'Error submitting review. Please try again.', variant: 'destructive' });
     } else {
       setReview('');
       setSubmitSuccess(true);

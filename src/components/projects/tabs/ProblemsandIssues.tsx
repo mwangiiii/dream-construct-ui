@@ -166,14 +166,12 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
         .order("created_at", { ascending: false });
 
       if (fetchError) {
-        console.error("Fetch error:", fetchError);
         throw fetchError;
       }
 
       setIssues(data || []);
       setError(null);
     } catch (err: any) {
-      console.error("Error in fetchIssues:", err);
       setError(err.message || "Failed to load issues.");
       setIssues([]);
     } finally {
@@ -214,7 +212,6 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
         .select();
 
       if (insertError) {
-        console.error("Insert error:", insertError);
         throw insertError;
       }
 
@@ -223,7 +220,6 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
       showToast("Issue added successfully!", "success");
       await fetchIssues();
     } catch (err: any) {
-      console.error("Error in handleAdd:", err);
       showToast(err.message || "Failed to add issue.", "error");
     }
   };
@@ -257,7 +253,6 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
         .eq("id", editId);
 
       if (updateError) {
-        console.error("Update error:", updateError);
         throw updateError;
       }
 
@@ -267,7 +262,6 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
       showToast("Issue updated successfully!", "success");
       await fetchIssues();
     } catch (err: any) {
-      console.error("Error in handleUpdate:", err);
       showToast(err.message || "Failed to update issue.", "error");
     }
   };
@@ -282,14 +276,12 @@ const ProblemsAndIssues: React.FC<ProblemsAndIssuesProps> = ({ projectId }) => {
         .eq("id", id);
 
       if (deleteError) {
-        console.error("Delete error:", deleteError);
         throw deleteError;
       }
 
       showToast("Issue deleted successfully!", "success");
       await fetchIssues();
     } catch (err: any) {
-      console.error("Error in handleDelete:", err);
       showToast(err.message || "Failed to delete issue.", "error");
     }
 

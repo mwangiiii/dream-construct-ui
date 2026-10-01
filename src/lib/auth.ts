@@ -27,8 +27,32 @@ export interface UserProfile {
   company_id: string | null;
 }
 
+export type RoleName =
+  | 'client'
+  | 'quantity_surveyor'
+  | 'project_manager'
+  | 'manager'
+  | 'finance'
+  | 'admin';
+
+/**
+ * Role precedence — ordered from LEAST to MOST privileged.
+ * `getPrimaryRole` returns the first match in this order, so a user
+ * holding multiple roles is treated as their least-privileged one
+ * (principle of least privilege). This ordering is the single source of
+ * truth used by dashboard routing, layout selection, and role listings.
+ */
+export const ROLE_PRIORITY: readonly RoleName[] = [
+  'client',
+  'quantity_surveyor',
+  'project_manager',
+  'manager',
+  'finance',
+  'admin',
+] as const;
+
 export interface UserRole {
-  role_name: 'admin' | 'manager' | 'project_manager' | 'client';
+  role_name: RoleName;
   description: string | null;
   assigned_at: string;
 }
@@ -58,43 +82,25 @@ export interface AuthUser {
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   try {
-    console.log('[auth.ts] getCurrentUser called');
-    
-    // Step 1: Get session first — this restores from localStorage reliably
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    if (sessionError) {
-      console.error('[auth.ts] Session error:', sessionError);
+    if (sessionError || !session?.user) {
       return null;
     }
 
-    if (!session?.user) {
-      console.log('[auth.ts] No session or user found');
-      return null;
-    }
-
-    console.log('[auth.ts] Session found, user ID:', session.user.id);
-
-    // Step 2: Fetch full profile using valid user ID
     const userProfile = await getUserFullProfile(session.user.id);
 
     if (!userProfile) {
-      console.warn('[auth.ts] Session exists but profile not found');
       return null;
     }
 
-    console.log('[auth.ts] Full profile loaded:', userProfile.email);
-
-    // Optional: Enforce active status
     if (!userProfile.status.is_active) {
-      console.warn('[auth.ts] Inactive user attempted access:', userProfile.status.status_name);
       await supabase.auth.signOut();
       return null;
     }
 
     return userProfile;
-  } catch (error) {
-    console.error('[auth.ts] getCurrentUser failed:', error);
+  } catch {
     return null;
   }
 }
@@ -104,14 +110,9 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
  */
 export async function getUserFullProfile(userId: string): Promise<AuthUser | null> {
   try {
-    console.log('[auth.ts] getUserFullProfile called for:', userId);
-
     const { data: { user } } = await supabase.auth.getUser();
     const email = user?.email || '';
-    console.log('[auth.ts] User email:', email);
 
-    // Fetch profile + joined status using maybeSingle to avoid 406 on missing row
-    console.log('[auth.ts] Fetching profile from database...');
     let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select(`*, user_statuses(status_id, status_name, is_active, description)`)
@@ -119,13 +120,10 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       .maybeSingle();
 
     if (profileError) {
-      console.error('[auth.ts] Profile fetch error:', profileError);
       return null;
     }
 
     if (!profile) {
-      // Profile row missing — auto-create from auth metadata so the user can proceed
-      console.warn('[auth.ts] No profile found, auto-creating from auth metadata...');
       const fullName = user?.user_metadata?.full_name || email.split('@')[0] || 'Unknown';
       const { error: insertError } = await supabase.from('profiles').insert({
         id: userId,
@@ -135,7 +133,6 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
         updated_at: new Date().toISOString(),
       });
       if (insertError) {
-        console.error('[auth.ts] Failed to auto-create profile:', insertError);
         return null;
       }
       const { data: created, error: refetchError } = await supabase
@@ -144,23 +141,15 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
         .eq('id', userId)
         .maybeSingle();
       if (refetchError || !created) {
-        console.error('[auth.ts] Profile re-fetch failed after creation');
         return null;
       }
       profile = created;
     }
 
-    console.log('[auth.ts] Profile fetched:', profile.full_name);
-
-    // Fetch roles
-    const { data: userRoles, error: rolesError } = await supabase
+    const { data: userRoles } = await supabase
       .from('user_roles')
       .select(`role_name, assigned_at, roles(role_name, description)`)
       .eq('user_id', userId);
-
-    if (rolesError) {
-      console.error('[auth.ts] Roles fetch error:', rolesError);
-    }
 
     const roles: UserRole[] = (userRoles || []).map((ur: any) => ({
       role_name: ur.role_name,
@@ -195,10 +184,8 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
       status,
     };
 
-    console.log('[auth.ts] AuthUser complete:', authUser);
     return authUser;
-  } catch (error) {
-    console.error('[auth.ts] getUserFullProfile error:', error);
+  } catch {
     return null;
   }
 }
@@ -207,25 +194,25 @@ export async function getUserFullProfile(userId: string): Promise<AuthUser | nul
 // Dashboard Routing
 // ============================================
 
-export function getPrimaryRole(roles: UserRole[]): UserRole['role_name'] {
-  // Add 'finance' to priority and type
-  const priority: UserRole['role_name'][] = ['finance', 'admin', 'manager', 'project_manager', 'client'];
-  for (const role of priority) {
+export function getPrimaryRole(roles: UserRole[]): RoleName {
+  for (const role of ROLE_PRIORITY) {
     if (roles.some(r => r.role_name === role)) return role;
   }
   return 'client';
 }
 
+const DASHBOARD_ROUTES: Record<RoleName, string> = {
+  client:            '/client/dashboard',
+  quantity_surveyor: '/qs/dashboard',
+  project_manager:   '/pm/dashboard',
+  manager:           '/manager/dashboard',
+  finance:           '/finance/dashboard',
+  admin:             '/admin',
+};
+
 export function getDashboardRoute(roles: UserRole[]): string {
   const role = getPrimaryRole(roles);
-  const map: Record<string, string> = {
-    finance: '/finance/dashboard',
-    admin: '/admin',
-    manager: '/manager/dashboard',
-    project_manager: '/pm/dashboard',
-    client: '/client/dashboard',
-  };
-  return map[role] || '/client/dashboard';
+  return DASHBOARD_ROUTES[role] ?? '/client/dashboard';
 }
 
 // ============================================
@@ -267,7 +254,6 @@ export async function signIn({ email, password }: { email: string; password: str
       primaryRole: getPrimaryRole(userProfile.roles),
     };
   } catch (error: any) {
-    console.error('Sign in error:', error);
     throw new Error(error.message || 'Sign in failed');
   }
 }
@@ -307,7 +293,6 @@ export async function signUp(data: SignupData) {
       session: authData.session,
     };
   } catch (error: any) {
-    console.error('Sign up error:', error);
     throw new Error(error.message || 'Sign up failed');
   }
 }
@@ -318,7 +303,6 @@ export async function signOut() {
     if (error) throw error;
     return { success: true };
   } catch (error: any) {
-    console.error('Sign out error:', error);
     throw new Error(error.message || 'Sign out failed');
   }
 }

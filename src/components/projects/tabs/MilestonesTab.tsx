@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { format, isAfter, isBefore, parseISO, startOfDay } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "@/hooks/use-toast";
 import {
   Calendar,
   Plus,
@@ -241,7 +242,6 @@ export default function MilestonesTab({
       .not("milestone_id", "is", null);   // only tasks linked to a milestone
 
     if (error) {
-      console.error("[MilestonesTab] fetchTasks error:", error.message);
       return;
     }
 
@@ -333,7 +333,7 @@ export default function MilestonesTab({
   const handleUpdateMilestone = async () => {
     if (!editingId || !canEdit) return;
     const err = validateDates(editForm);
-    if (err) { alert(err); return; }
+    if (err) { toast({ title: err, variant: "destructive" }); return; }
 
     setLoading(true);
     try {
@@ -351,7 +351,7 @@ export default function MilestonesTab({
       setEditForm({});
       onUpdate();
     } catch (e: any) {
-      alert(e.message ?? "Failed to update milestone");
+      toast({ title: e.message ?? "Failed to update milestone", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -370,7 +370,7 @@ export default function MilestonesTab({
       );
       onUpdate();
     } catch (e: any) {
-      alert(e.message ?? "Failed to reorder");
+      toast({ title: e.message ?? "Failed to reorder", variant: "destructive" });
     } finally {
       setLoading(false);
     }

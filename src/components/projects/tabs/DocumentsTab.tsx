@@ -2,6 +2,7 @@
   import { useState, useEffect } from "react";
   import { format } from "date-fns";
   import { motion, AnimatePresence } from "framer-motion";
+  import { toast } from "@/hooks/use-toast";
   import {
     FileText,
     Upload,
@@ -158,7 +159,7 @@
           folder: uploadForm.folder,
         });
 
-        alert("Document uploaded successfully!");
+        toast({ title: "Document uploaded successfully!" });
         setShowUploadModal(false);
         setSelectedFile(null);
         setUploadForm({
@@ -168,8 +169,7 @@
         });
         onUpdate();
       } catch (error: any) {
-        console.error("Error uploading document:", error);
-        alert(error.message || "Failed to upload document");
+        toast({ title: error.message || "Failed to upload document", variant: "destructive" });
       } finally {
         setLoading(false);
       }
@@ -187,7 +187,7 @@
           task_id: moveForm.task_id || null,
         });
 
-        alert("Document moved successfully!");
+        toast({ title: "Document moved successfully!" });
         setShowMoveModal(false);
         setDocumentToMove(null);
         setMoveForm({
@@ -197,8 +197,7 @@
         });
         onUpdate();
       } catch (error: any) {
-        console.error("Error moving document:", error);
-        alert(error.message || "Failed to move document");
+        toast({ title: error.message || "Failed to move document", variant: "destructive" });
       } finally {
         setLoading(false);
       }
@@ -212,11 +211,10 @@
       setLoading(true);
       try {
         await projectApi.deleteDocument(doc.id);
-        alert("Document deleted successfully!");
+        toast({ title: "Document deleted successfully!" });
         onUpdate();
       } catch (error: any) {
-        console.error("Error deleting document:", error);
-        alert(error.message || "Failed to delete document");
+        toast({ title: error.message || "Failed to delete document", variant: "destructive" });
       } finally {
         setLoading(false);
       }

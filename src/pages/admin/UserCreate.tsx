@@ -125,15 +125,14 @@ const UserCreate: React.FC = () => {
     }
   };
 
+  // Ordered from LEAST to MOST privileged — matches ROLE_PRIORITY in src/lib/auth.ts.
   const roleOptions = [
-    { value: 'client', label: 'Client', description: 'Can view their own projects' },
-    { value: 'manager', label: 'Manager', description: 'Can manage users and projects' },
-    { value: 'admin', label: 'Admin', description: 'Full system access' },
-    { value: 'project_manager', label: 'Project Manager', description: 'Project Manager Role' },
-    { value: 'surveyor', label: 'Surveyor', description: 'Quantity surveyor role' },
-    { value: 'finance', label: 'Finance', description: 'Finance role' },
-    
-
+    { value: 'client',            label: 'Client',            description: 'Can view their own projects' },
+    { value: 'quantity_surveyor', label: 'Quantity Surveyor', description: 'Measures works and prices bills of quantities' },
+    { value: 'project_manager',   label: 'Project Manager',   description: 'Manages assigned projects end-to-end' },
+    { value: 'manager',           label: 'Manager',           description: 'Can manage users and projects' },
+    { value: 'finance',           label: 'Finance',           description: 'Finance role' },
+    { value: 'admin',             label: 'Admin',             description: 'Full system access' },
   ] as const;
 
   if (checkingAuth || !session) return (

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "@/hooks/use-toast";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -640,7 +641,11 @@ ${inv.status === "cancelled" ? '<div class="watermark">Cancelled</div>' : ""}
 
   const w = window.open("", "invoice_print_" + inv.id, "width=960,height=740,scrollbars=yes,resizable=yes");
   if (!w) {
-    alert("Pop-up blocked. Please allow pop-ups for this site to download invoices as PDF.");
+    toast({
+      title: "Pop-up blocked",
+      description: "Please allow pop-ups for this site to download invoices as PDF.",
+      variant: "destructive",
+    });
     return;
   }
   w.document.open();
@@ -966,9 +971,6 @@ function InvoiceModal({
       if (loadedProjectRef.current !== pid) return;
 
       const workers = (workersRes.data ?? []) as { id: string; full_name: string; role: string | null }[];
-      if ((projectRes as any).error) {
-        console.error("Invoice project-info fetch failed:", (projectRes as any).error);
-      }
       const projectInfo = ((projectRes as any).data ?? null) as Pick<Project, "project_number" | "start_date" | "expected_completion_date" | "site_city" | "site_country"> | null;
 
       // Fetch attendance to compute hours

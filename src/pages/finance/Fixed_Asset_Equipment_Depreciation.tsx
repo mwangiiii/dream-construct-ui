@@ -211,7 +211,7 @@ async function writeAudit(
       changed_by: userId ?? null,
     }]);
   } catch {
-    console.warn("Audit log write failed — non-fatal");
+    /* audit is best-effort */
   }
 }
 

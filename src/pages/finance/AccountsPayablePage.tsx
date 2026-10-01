@@ -39,21 +39,25 @@ interface Project {
 type APStatus = "open" | "partial" | "paid" | "overdue";
 
 interface AccountsPayable {
-  id: string;                      // UUID
-  project_id: string;              // NOT NULL — always required
-  vendor_id: string | null;        // FK → vendors.id
+  id: string;                          // UUID
+  project_id: string;                  // NOT NULL — always required
+  vendor_id: string | null;            // FK → vendors.id
+  // FK → project_financials.id. When set, ties this AP invoice to ONE specific
+  // PM commodity (vendor + commodity + amount) rather than a vendor-level
+  // rollup. NULL for ad-hoc AP entries with no PM counterpart.
+  project_financial_id: number | null;
   vendor_name: string;
   invoice_number: string;
-  etims_code: string;              // NOT NULL
+  etims_code: string;                  // NOT NULL
   date: string;
   due_date: string;
   total_amount: number;
   paid_amount: number;
-  balance: number;                 // DB GENERATED — never written
+  balance: number;                     // DB GENERATED — never written
   status: APStatus;
   retaining_percent: number;
   date_of_payment: string | null;
-  receiving_account_code: string;  // NOT NULL
+  receiving_account_code: string;      // NOT NULL
   notes: string | null;
   created_at?: string;
   updated_at?: string;
@@ -80,6 +84,7 @@ function buildDBPayload(form: APFormData): Record<string, unknown> {
   return {
     project_id:             form.project_id,
     vendor_id:              form.vendor_id   || null,
+    project_financial_id:   form.project_financial_id ?? null,
     vendor_name:            form.vendor_name,
     invoice_number:         form.invoice_number,
     etims_code:             form.etims_code,
@@ -140,6 +145,7 @@ function deriveAP(f: APFormData): APFormData {
 const makeEmpty = (projectId: string): APFormData => ({
   project_id:             projectId,
   vendor_id:              null,
+  project_financial_id:   null,
   vendor_name:            "",
   invoice_number:         "",
   etims_code:             "",
@@ -174,7 +180,7 @@ async function writeAudit(params: {
       changed_at: new Date().toISOString(),
     }]);
   } catch {
-    console.warn("[audit] failed to write audit log", params);
+    /* audit is best-effort */
   }
 }
 
@@ -442,18 +448,25 @@ function APModal({
     if (!vendor) return;
     setForm(p => deriveAP({
       ...p,
-      vendor_id:   vendor.id,
-      vendor_name: vendor.name,
+      vendor_id:            vendor.id,
+      project_financial_id: null,      // ad-hoc vendor → no PM commodity link
+      vendor_name:          vendor.name,
     }));
   };
 
+  // Picking a PM commodity fills the AP invoice from ONE specific
+  // project_financials row — vendor + this commodity's total, never a
+  // cross-commodity aggregate. project_financial_id is the FK that ties this
+  // invoice to that row (and drives the "Vendor → Commodity" label in Job
+  // Costing via the AP mirror trigger).
   const handlePMVendorSelect = (fill: PMVendorFill) => {
     setForm(p => deriveAP({
       ...p,
-      vendor_id:    null,
-      vendor_name:  fill.vendorName,
-      total_amount: fill.totalAmount > 0 ? fill.totalAmount : p.total_amount,
-      notes:        fill.notes || p.notes,
+      vendor_id:            null,
+      project_financial_id: fill.pmFinancialId,
+      vendor_name:          fill.vendorName,
+      total_amount:         fill.totalAmount > 0 ? fill.totalAmount : p.total_amount,
+      notes:                fill.notes || p.notes,
     }));
   };
 
@@ -1453,6 +1466,7 @@ function ProjectAPView({ project, canEdit, onBack }: {
               id:                     editing.id,
               project_id:             editing.project_id,
               vendor_id:              editing.vendor_id ?? null,
+              project_financial_id:   editing.project_financial_id ?? null,
               vendor_name:            editing.vendor_name,
               invoice_number:         editing.invoice_number,
               etims_code:             editing.etims_code,
@@ -1695,6 +1709,7 @@ function GlobalAPView({ canEdit, projects }: {
               id:                     editing.id,
               project_id:             editing.project_id,
               vendor_id:              editing.vendor_id ?? null,
+              project_financial_id:   editing.project_financial_id ?? null,
               vendor_name:            editing.vendor_name,
               invoice_number:         editing.invoice_number,
               etims_code:             editing.etims_code,

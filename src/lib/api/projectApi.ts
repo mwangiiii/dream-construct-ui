@@ -18,7 +18,6 @@ export const projectApi = {
         if (error) throw error;
         return { success: true };
       } catch (error) {
-        console.error('[projectApi] Error permanently deleting update:', error);
         throw error;
       }
     },
@@ -39,7 +38,6 @@ export const projectApi = {
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error updating update content:', error);
       throw error;
     }
   },
@@ -65,7 +63,6 @@ export const projectApi = {
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error adding media to update:', error);
       throw error;
     }
   },
@@ -92,7 +89,6 @@ export const projectApi = {
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error removing media from update:', error);
       throw error;
     }
   },
@@ -364,7 +360,6 @@ uploadDocument: async (docData: {
   // Force refresh if token is expired
   const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
   if (refreshError || !session?.access_token) {
-    console.error("Failed to refresh session:", refreshError);
     throw new Error("Authentication expired - please log in again");
   }
 
@@ -376,7 +371,6 @@ uploadDocument: async (docData: {
   });
 
   if (error) {
-    console.error("Edge function error (upload-document):", error);
     throw error;
   }
   return data as EdgeFunctionResponse;
@@ -620,7 +614,6 @@ moveDocument: async (
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error soft-deleting update:', error);
       throw error;
     }
   },
@@ -641,7 +634,6 @@ moveDocument: async (
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error restoring update:', error);
       throw error;
     }
   },

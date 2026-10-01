@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import { projectApi } from "@/lib/api/projectApi";
 import { uploadFileToStorage } from "@/types/project";
+import { toast } from "@/hooks/use-toast";
 import { 
   Camera, 
   Image, 
@@ -45,8 +46,6 @@ interface Props {
 }
 
 const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, onUpdate }) => {
-  // Debug log for diagnosis
-  console.log('[PhotosTab] photos prop:', photos);
   const [uploads, setUploads] = useState<PhotoUpload[]>([]);
   const [selectedMilestone, setSelectedMilestone] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -60,16 +59,8 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
 
   // Bulletproof photo upload wrapper (uses correct bucket)
   const uploadProjectPhoto = useCallback(async (file: File) => {
-  console.log('Wrapper called with projectId:', projectId);
-  // Only pass file, projectId, and folder; let uploadFileToStorage use its default bucket
-  const result = await uploadFileToStorage(
-    file,
-    projectId,
-    "photos"
-  );
-  console.log('Wrapper result:', result);
-  return result;
-}, [projectId]);
+    return uploadFileToStorage(file, projectId, "photos");
+  }, [projectId]);
 
   const handleBulkUpload = async (files: File[]) => {
     const newUploads: PhotoUpload[] = files.map(file => ({
@@ -100,11 +91,9 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
 
         const { path: uploadedPath, error } = await uploadProjectPhoto(upload.file);
         if (error || !uploadedPath) {
-          console.error(`Upload failed for ${upload.file.name}:`, error);
           throw new Error(`Failed to upload ${upload.file.name}: ${error?.message || "Unknown error"}`);
         }
 
-        // Call edge function to add to DB
         const uploadResult = await projectApi.bulkUploadPhotos({
           project_id: projectId,
           milestone_id: selectedMilestone || null,
@@ -114,7 +103,6 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
             file_size: upload.file.size,
           }],
         });
-        console.log('PhotosTab bulkUploadPhotos result:', uploadResult);
         if (!uploadResult?.success) throw new Error(uploadResult?.error || "Unknown upload error");
 
         setUploads(prev => prev.map(u =>
@@ -126,8 +114,7 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
         onUpdate();  // Refresh photos list
 
       } catch (err: any) {
-        console.error("Bulk photo upload failed:", err);
-        setUploads(prev => prev.map(u => 
+        setUploads(prev => prev.map(u =>
           u.preview === upload.preview 
             ? { ...u, status: "error", error: err.message } 
             : u
@@ -196,7 +183,6 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
       onUpdate();
       showToast("Photo deleted successfully", "success");
     } catch (err: any) {
-      console.error("Delete failed:", err);
       showToast(`Delete failed: ${err.message}`, "error");
     } finally {
       setDeleting(prev => prev.filter(id => id !== photoId));
@@ -204,8 +190,7 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
   };
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
-    // Implement your toast logic here, or use a global one
-    console.log(`${type.toUpperCase()}: ${message}`);
+    toast({ title: message, variant: type === "error" ? "destructive" : undefined });
   };
 
   const groupedPhotos = photos.reduce((acc, photo) => {
@@ -214,7 +199,6 @@ const PhotosTab: React.FC<Props> = ({ projectId, photos, milestones, canEdit, on
     acc[dateKey].push(photo);
     return acc;
   }, {} as Record<string, Document[]>);
-  console.log('[PhotosTab] groupedPhotos:', groupedPhotos);
 
   // Edit Photo Modal
   const handleEditPhoto = (photo: Document) => {

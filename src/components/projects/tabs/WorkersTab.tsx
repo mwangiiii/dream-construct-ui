@@ -769,8 +769,8 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         absentToday = (attData || []).filter((a: any) => a.status === 'absent').length;
       }
       setStats({ total_workers: workerIds.length, present_today: presentToday, absent_today: absentToday });
-    } catch (err) {
-      console.error('[WorkersTab] fetchStats error:', err);
+    } catch {
+      /* stats are best-effort */
     }
   };
 

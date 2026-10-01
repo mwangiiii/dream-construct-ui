@@ -19,51 +19,37 @@ export const uploadFileToStorage = async (
   folder: "documents" | "photos" = "documents",
   bucket: string = "documents-and-images"  // Default fallback
 ): Promise<{ path: string; error?: any }> => {
-  console.log('=== UPLOAD ENTRY LOG ===');  // ← NEW: Confirms function called
-  console.log('Received params:', { fileName: file.name, projectId, folder, bucket });  // ← See if bucket is projectId accidentally
-
   try {
-    // FORCE OVERRIDE: Ignore param if it's a UUID (safety net)
     let safeBucket = bucket;
-    if (bucket.startsWith('4638ef93-') || bucket.length === 36) {  // Detect projectId UUID
+    if (bucket.length === 36) {
       safeBucket = 'documents-and-images';
-      console.warn('⚠️ Bucket param was UUID—overridden to "documents-and-images"');
     }
-    safeBucket = safeBucket.trim().toLowerCase();  // Normalize
-    console.log('Final safeBucket for .from():', safeBucket);  // ← CRITICAL: Should be "documents-and-images"
+    safeBucket = safeBucket.trim().toLowerCase();
 
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(7);
     const fileExt = file.name.split(".").pop()?.toLowerCase() || "";
-    const fileName = `${randomStr}_${timestamp}${fileExt ? `.${fileExt}` : ""}`;  // Match your format
+    const fileName = `${randomStr}_${timestamp}${fileExt ? `.${fileExt}` : ""}`;
 
     const filePath = `${projectId}/${folder}/${fileName}`;
-    console.log('Full filePath:', filePath);
-    console.log('Expected upload URL prefix: /storage/v1/object/' + safeBucket + '/' + filePath);
 
     const { data, error } = await supabase.storage
-      .from(safeBucket)  // ← Uses safeBucket
+      .from(safeBucket)
       .upload(filePath, file, {
         cacheControl: "3600",
-        upsert: true,  // ← CHANGE: Allows overwrites for testing
+        upsert: true,
       });
 
-    console.log('Supabase response:', { data: data?.path, error: error?.message });  // ← See raw error
-
     if (error) {
-      console.error("Storage upload error:", error);
       return { path: "", error };
     }
 
     if (!data?.path) {
-      console.error("Upload succeeded but no path returned:", data);
       return { path: "", error: new Error("No path returned from upload") };
     }
 
-    console.log('=== UPLOAD SUCCESS ===', data.path);
     return { path: data.path };
   } catch (err) {
-    console.error("Upload crash:", err);
     return { path: "", error: err };
   }
 };
@@ -106,7 +92,6 @@ export const projectApi = {
         .eq('project_id', projectId)
         .order('sort_order', { ascending: true });
 
-      if (milestonesError) console.error('Milestones error:', milestonesError);
 
       // 3. Fetch tasks
       const { data: tasks, error: tasksError } = await supabase
@@ -115,7 +100,6 @@ export const projectApi = {
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
 
-      if (tasksError) console.error('Tasks error:', tasksError);
 
       // 4. Enrich tasks with assigned user full_name
       let tasksWithUsers: Task[] = [];
@@ -153,7 +137,6 @@ export const projectApi = {
         .eq('project_id', projectId)
         .order('requested_at', { ascending: false });
 
-      if (approvalsError) console.error('Approvals error:', approvalsError);
 
       let approvalsWithUsers: Approval[] = [];
       if (approvals && approvals.length > 0) {
@@ -193,7 +176,6 @@ export const projectApi = {
         .neq('folder', 'progress_photos')
         .order('uploaded_at', { ascending: false });
 
-      if (documentsError) console.error('Documents error:', documentsError);
 
       let documentsWithUsers: Document[] = [];
       if (documents && documents.length > 0) {
@@ -235,7 +217,6 @@ export const projectApi = {
           ).data?.map(row => row.user_id) || []
         );
 
-      if (teamError) console.error('Team error:', teamError);
 
       return {
         project: project as Project,
@@ -246,7 +227,6 @@ export const projectApi = {
         teamMembers: teamMembers || [],
       };
     } catch (error) {
-      console.error('[projectApi] Error fetching project details:', error);
       throw error;
     }
   },
@@ -283,7 +263,6 @@ export const projectApi = {
 
       return result;
     } catch (error) {
-      console.error('[projectApi] Error creating task:', error);
       throw error;
     }
   },
@@ -316,7 +295,6 @@ export const projectApi = {
 
       return data;
     } catch (error) {
-      console.error('[projectApi] Error updating task:', error);
       throw error;
     }
   },
@@ -331,7 +309,6 @@ export const projectApi = {
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error deleting task:', error);
       throw error;
     }
   },
@@ -351,7 +328,6 @@ export const projectApi = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('[projectApi] Error creating milestone:', error);
       throw error;
     }
   },
@@ -368,7 +344,6 @@ export const projectApi = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('[projectApi] Error updating milestone:', error);
       throw error;
     }
   },
@@ -383,7 +358,6 @@ export const projectApi = {
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error('[projectApi] Error deleting milestone:', error);
       throw error;
     }
   },

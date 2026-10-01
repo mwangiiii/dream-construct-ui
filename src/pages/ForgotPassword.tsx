@@ -53,8 +53,7 @@ const ForgotPassword: React.FC = () => {
 
       // Always show generic success message — prevents enumeration
       setSubmitted(true)
-    } catch (err) {
-      console.error("Network error during password reset:", err)
+    } catch {
       setError("Unable to connect. Please check your internet connection.")
     } finally {
       setLoading(false)

@@ -45,14 +45,12 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
         .eq("project_id", projectId);
 
       if (fetchError) {
-        console.error("Fetch error:", fetchError);
         throw fetchError;
       }
 
       setStages(data || []);
       setError(null);
     } catch (err: any) {
-      console.error("Error in fetchStages:", err);
       setError(err.message || "Failed to load stages.");
       setStages([]);
     } finally {
@@ -84,7 +82,6 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
         .select();
 
       if (insertError) {
-        console.error("Insert error:", insertError);
         throw insertError;
       }
 
@@ -92,7 +89,6 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
       setShowForm(false);
       await fetchStages();
     } catch (err: any) {
-      console.error("Error in handleAdd:", err);
       setError(err.message || "Failed to add stage.");
     }
   };
@@ -116,7 +112,6 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
         .eq("id", editId);
 
       if (updateError) {
-        console.error("Update error:", updateError);
         throw updateError;
       }
 
@@ -125,7 +120,6 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
       setShowForm(false);
       await fetchStages();
     } catch (err: any) {
-      console.error("Error in handleUpdate:", err);
       setError(err.message || "Failed to update stage.");
     }
   };
@@ -140,13 +134,11 @@ const Stages: React.FC<{ projectId?: string }> = ({ projectId }) => {
         .eq("id", id);
 
       if (deleteError) {
-        console.error("Delete error:", deleteError);
         throw deleteError;
       }
 
       await fetchStages();
     } catch (err: any) {
-      console.error("Error in handleDelete:", err);
       setError(err.message || "Failed to delete stage.");
     }
 

@@ -59,13 +59,6 @@ export default function MediaCreate() {
   const log = (level: LogEntry["level"], message: string, data?: any) => {
     const entry: LogEntry = { timestamp: new Date().toISOString(), level, message, data };
     setLogs(prev => [...prev, entry]);
-    const consoleData = data ? [message, data] : [message];
-    switch (level) {
-      case "error":   console.error(...consoleData); break;
-      case "warning": console.warn(...consoleData);  break;
-      case "success": console.log("SUCCESS", ...consoleData); break;
-      default:        console.log(...consoleData);
-    }
   };
 
   useEffect(() => {

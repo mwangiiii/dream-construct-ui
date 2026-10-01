@@ -136,7 +136,7 @@ interface Document {
 
 interface TeamMember {
   user_id: string;
-  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "surveyor";
+  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "quantity_surveyor";
   user: {
     id: string;
     full_name: string;
@@ -203,6 +203,8 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [projectManagers, setProjectManagers] = useState<{ id: string; full_name: string }[]>([]);
+  const [savingManager, setSavingManager] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -224,6 +226,30 @@ export default function ProjectDetailPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const handleProjectManagerChange = async (managerId: string) => {
+    if (!project || !id) return;
+
+    setSavingManager(true);
+    try {
+      const { error } = await supabase
+        .from("projects")
+        .update({ manager_id: managerId || null })
+        .eq("id", id)
+        .select("id")
+        .single();
+
+      if (error) throw error;
+
+      const manager = projectManagers.find((item) => item.id === managerId) || null;
+      setProject({ ...project, manager_id: managerId || null, manager });
+      showToast(manager ? `Assigned to ${manager.full_name}` : "Project manager unassigned");
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : "Could not update project manager", "error");
+    } finally {
+      setSavingManager(false);
+    }
+  };
+
   useEffect(() => {
     initializeUser();
   }, []);
@@ -233,6 +259,33 @@ export default function ProjectDetailPage() {
       fetchProjectAndData();
     }
   }, [id, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser?.roles.some((role) => role.role_name === "admin")) return;
+
+    const fetchProjectManagers = async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("user_id, profiles!inner(id, full_name, status_id)")
+        .eq("role_name", "project_manager")
+        .eq("profiles.status_id", 1);
+
+      if (error) {
+        showToast("Could not load project managers", "error");
+        return;
+      }
+
+      const managers = (data || []).reduce((unique: { id: string; full_name: string }[], item) => {
+        const manager = { id: item.profiles.id, full_name: item.profiles.full_name };
+        if (!unique.some((existing) => existing.id === manager.id)) unique.push(manager);
+        return unique;
+      }, []);
+      managers.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
+      setProjectManagers(managers);
+    };
+
+    fetchProjectManagers();
+  }, [currentUser]);
 
   const initializeUser = async () => {
     try {
@@ -247,8 +300,7 @@ export default function ProjectDetailPage() {
         return;
       }
       setCurrentUser(user);
-    } catch (error) {
-      console.error("[ProjectDetail] Error initializing user:", error);
+    } catch {
       navigate("/login");
     }
   };
@@ -285,11 +337,8 @@ export default function ProjectDetailPage() {
       // Try centralized API first
       let details: any = null;
       try {
-        console.log("[ProjectDetail] Attempting API fetch...");
         details = await projectApi.fetchProjectDetails(id);
-        console.log("[ProjectDetail] API fetch succeeded:", details);
-      } catch (apiErr) {
-        console.warn("[ProjectDetail] API fetch failed, falling back to manual queries:", apiErr);
+      } catch {
         // Fallback: Original manual fetches
         let teamDataRaw: any[] = [];
         try {
@@ -298,9 +347,8 @@ export default function ProjectDetailPage() {
             .select("user_id")
             .eq("project_id", id);
           teamDataRaw = teamRaw || [];
-        } catch (teamErr) {
-          console.warn("[ProjectDetail] project_team table not found or empty - skipping team fetch:", teamErr);
-          teamDataRaw = []; // Proceed without team
+        } catch {
+          teamDataRaw = [];
         }
 
         const teamUserIds = teamDataRaw.map((row: any) => row.user_id);
@@ -386,8 +434,7 @@ export default function ProjectDetailPage() {
       try {
         const photosData = await projectApi.getProjectDocuments(id);
         allPhotos = photosData || [];
-      } catch (photosErr) {
-        console.warn("Photos API failed, using direct query:", photosErr);
+      } catch {
         const { data: fallback } = await supabase
           .from("documents")
           .select("*")
@@ -431,10 +478,7 @@ export default function ProjectDetailPage() {
           : []
       );
 
-      console.log("[ProjectDetail] Data loaded successfully");
-
-    } catch (error) {
-      console.error("[ProjectDetail] Final error in fetch:", error);
+    } catch {
       showToast("Error loading project data", "error");
       // Ultra-fallback: Redirect
       setTimeout(() => navigate("/projects"), 2000);
@@ -534,7 +578,28 @@ export default function ProjectDetailPage() {
                         <span className="text-xs sm:text-base truncate">Client: {project.client?.companies?.name || project.client?.full_name || "Unknown"}</span>
                       </div>
                     )}
-                    {project.manager && (
+                    {isAdmin ? (
+                      <div className="flex w-full min-w-0 flex-col items-start gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+                        <div className="flex items-center gap-2 text-xs sm:text-sm font-medium text-muted-foreground">
+                          <Building2 className="w-4 h-4 text-primary flex-shrink-0" />
+                          <label htmlFor="project-manager">Project Manager</label>
+                        </div>
+                        <select
+                          id="project-manager"
+                          aria-label="Assign project manager"
+                          value={project.manager_id || ""}
+                          onChange={(event) => handleProjectManagerChange(event.target.value)}
+                          disabled={savingManager}
+                          className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-48 lg:w-56"
+                        >
+                          <option value="">Unassigned</option>
+                          {projectManagers.map((manager) => (
+                            <option key={manager.id} value={manager.id}>{manager.full_name}</option>
+                          ))}
+                        </select>
+                        {savingManager && <span className="text-xs text-muted-foreground sm:whitespace-nowrap" aria-live="polite">Updating...</span>}
+                      </div>
+                    ) : project.manager && (
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary flex-shrink-0" />
                         <span className="text-xs sm:text-base truncate">PM: {project.manager.full_name}</span>

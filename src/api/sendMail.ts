@@ -89,8 +89,7 @@ Sent from your website contact form
     });
 
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error: any) {
-    console.error('Failed to send email:', error);
+  } catch {
     return NextResponse.json(
       { error: 'Failed to send message. Please try again later.' },
       { status: 500 }

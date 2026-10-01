@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser } from "@/lib/auth";
+import { toast as globalToast } from "@/hooks/use-toast";
 
 // ─────────────────────────────────────────────────────────────
 // MIGRATION REQUIRED – run once in Supabase SQL editor:
@@ -706,7 +707,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   // ══════════════════════════════════════════════════════════
   const isAdmin = currentUser?.roles?.some((r: any) => r.role_name === "admin");
   const isQuantitySurveyor = currentUser?.roles?.some((r: any) =>
-    ["admin", "surveyor", "manager", "project_manager"].includes(r.role_name)
+    ["admin", "quantity_surveyor", "manager", "project_manager"].includes(r.role_name)
   );
   const isFinanceTeam = currentUser?.roles?.some((r: any) =>
     ["admin", "finance", "manager", "project_manager"].includes(r.role_name)
@@ -749,7 +750,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.milestone_id || !form.material_name.trim()) {
-      alert("Please complete all steps");
+      globalToast({ title: "Please complete all steps", variant: "destructive" });
       return;
     }
     setLoading(true);
@@ -786,7 +787,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       resetForm();
       toast("Material added successfully!");
     } else {
-      alert("Error adding material: " + error?.message);
+      globalToast({ title: "Error adding material", description: error?.message, variant: "destructive" });
     }
     setLoading(false);
   };
@@ -820,7 +821,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       resetForm();
       toast("Material updated successfully!");
     } else {
-      alert("Error updating material: " + error?.message);
+      globalToast({ title: "Error updating material", description: error?.message, variant: "destructive" });
     }
     setLoading(false);
   };
@@ -831,12 +832,12 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     try {
       const { error } = await supabase.from("project_financials").delete().eq("id", id);
-      if (error) { alert("Error deleting: " + error.message); return; }
+      if (error) { globalToast({ title: "Error deleting", description: error.message, variant: "destructive" }); return; }
       setFinancials(prev => ({ ...prev, [milestoneId]: items.filter((_, i) => i !== idx) }));
       if (editId === id) resetForm();
       toast("Material deleted successfully!");
     } catch (err: any) {
-      alert("Unexpected error: " + err.message);
+      globalToast({ title: "Unexpected error", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
       setConfirmDelete(null);
@@ -908,7 +909,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   const openEmailModal = (type: EmailModalData['type'], milestoneId: string, idx: number) => {
     const financial = (financials[milestoneId] || [])[idx];
     if (!financial?.tender_company_id || !financial?.tender_company?.contact_email) {
-      alert("No email address found. Please update company details.");
+      globalToast({ title: "No email address found", description: "Please update company details.", variant: "destructive" });
       return;
     }
     const milestone = milestones.find(m => m.id === milestoneId);
@@ -948,10 +949,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
         await fetchFinancials();
       } else {
         const err = await res.json();
-        alert("Error sending email: " + (err.message || "Unknown error"));
+        globalToast({ title: "Error sending email", description: err.message || "Unknown error", variant: "destructive" });
       }
     } catch (err: any) {
-      alert("Error: " + err.message);
+      globalToast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setSendingEmail(false);
     }
@@ -986,10 +987,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   // Finance action handlers
   // ══════════════════════════════════════════════════════════
   const handleToggleOrderApproval = async (milestoneId: string, idx: number, approved: boolean) => {
-    if (!isFinanceTeam) { alert("Only finance team can update order approval"); return; }
+    if (!isFinanceTeam) { globalToast({ title: "Only finance team can update order approval", variant: "destructive" }); return; }
     const items = financials[milestoneId] || [];
     const item = items[idx];
-    if (!item.order_requested) { alert("Order must be requested first"); return; }
+    if (!item.order_requested) { globalToast({ title: "Order must be requested first", variant: "destructive" }); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("project_financials")
@@ -1005,9 +1006,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   };
 
   const handleToggleFundsSent = async (milestoneId: string, idx: number, sent: boolean) => {
-    if (!isFinanceTeam) { alert("Only finance team can mark funds as sent"); return; }
+    if (!isFinanceTeam) { globalToast({ title: "Only finance team can mark funds as sent", variant: "destructive" }); return; }
     const items = financials[milestoneId] || [];
-    if (!items[idx].funds_requested) { alert("Funds must be requested first"); return; }
+    if (!items[idx].funds_requested) { globalToast({ title: "Funds must be requested first", variant: "destructive" }); return; }
     if (sent) { openEmailModal("funds_sent", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
@@ -1021,7 +1022,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
 
   const handleToggleFundsReceived = async (milestoneId: string, idx: number, received: boolean) => {
     const items = financials[milestoneId] || [];
-    if (!items[idx].funds_sent) { alert("Funds must be sent first"); return; }
+    if (!items[idx].funds_sent) { globalToast({ title: "Funds must be sent first", variant: "destructive" }); return; }
     if (received) { openEmailModal("funds_received", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
@@ -1034,9 +1035,9 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   };
 
   const handleToggleGoodsPaid = async (milestoneId: string, idx: number, paid: boolean) => {
-    if (!isFinanceTeam) { alert("Only finance team can mark goods as paid"); return; }
+    if (!isFinanceTeam) { globalToast({ title: "Only finance team can mark goods as paid", variant: "destructive" }); return; }
     const items = financials[milestoneId] || [];
-    if (!items[idx].funds_received) { alert("Funds must be received first"); return; }
+    if (!items[idx].funds_received) { globalToast({ title: "Funds must be received first", variant: "destructive" }); return; }
     if (paid) { openEmailModal("goods_paid", milestoneId, idx); return; }
     setLoading(true);
     const { data, error } = await supabase
@@ -1074,7 +1075,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
 
   const handleAddCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyForm.name.trim()) { alert("Company name required"); return; }
+    if (!companyForm.name.trim()) { globalToast({ title: "Company name required", variant: "destructive" }); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
@@ -1084,13 +1085,13 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       setTenderCompanies(prev => [...prev, data as TenderCompany]);
       setActiveCatalogCompanyId((data as TenderCompany).id);
       toast("Company added!");
-    } else { alert("Error: " + error?.message); }
+    } else { globalToast({ title: "Error", description: error?.message, variant: "destructive" }); }
     setLoading(false);
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyForm.name.trim()) { alert("Company name required"); return; }
+    if (!companyForm.name.trim()) { globalToast({ title: "Company name required", variant: "destructive" }); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
@@ -1099,7 +1100,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     if (!error && data) {
       setTenderCompanies(prev => prev.map(c => c.id === companyForm.id ? data as TenderCompany : c));
       toast("Company updated!");
-    } else { alert("Error: " + error?.message); }
+    } else { globalToast({ title: "Error", description: error?.message, variant: "destructive" }); }
     setLoading(false);
   };
 
@@ -1107,10 +1108,10 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     try {
       const { error } = await supabase.from("tender_companies").update({ is_active: false }).eq("id", companyId);
-      if (error) { alert("Error: " + error.message); return; }
+      if (error) { globalToast({ title: "Error", description: error.message, variant: "destructive" }); return; }
       setTenderCompanies(prev => prev.filter(c => c.id !== companyId));
       toast("Company deleted!");
-    } catch (err: any) { alert("Error: " + err.message); }
+    } catch (err: any) { globalToast({ title: "Error", description: err.message, variant: "destructive" }); }
     finally { setLoading(false); setConfirmDeleteCompany(null); }
   };
 
@@ -1139,7 +1140,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       if (!error && data) {
         setCatalog(prev => prev.map(c => c.id === editingCatalogItem.id ? data as CatalogItem : c));
         toast("Price updated!");
-      } else { alert("Error: " + error?.message); }
+      } else { globalToast({ title: "Error", description: error?.message, variant: "destructive" }); }
     } else {
       const { data, error } = await supabase
         .from("company_price_catalog")
@@ -1149,7 +1150,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
       if (!error && data) {
         setCatalog(prev => [...prev, data as CatalogItem]);
         toast("Price added!");
-      } else { alert("Error: " + error?.message); }
+      } else { globalToast({ title: "Error", description: error?.message, variant: "destructive" }); }
     }
 
     resetCatalogForm();
@@ -1162,7 +1163,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     if (!error) {
       setCatalog(prev => prev.filter(c => c.id !== item.id));
       toast("Price entry deleted!");
-    } else { alert("Error: " + error.message); }
+    } else { globalToast({ title: "Error", description: error.message, variant: "destructive" }); }
     setConfirmDeleteCatalog(null);
     setCatalogLoading(false);
   };

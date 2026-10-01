@@ -14,24 +14,28 @@ export interface Vendor {
 }
 
 export interface PMVendorFill {
+  /** project_financials.id — links the AP invoice to this PM commodity row. */
+  pmFinancialId:    number;
   vendorName:       string;
+  /** Amount for THIS commodity only — never the vendor's cross-commodity total. */
   totalAmount:      number;
   notes:            string;
-  pricePerUnit?:    number;   // first line item's unit price
-  firstDescription?: string; // first material name
-  firstQty?:        number;  // first material quantity
-  firstUnit?:       string;  // first material unit
+  pricePerUnit:     number;
+  commodityName:    string;
+  commodityQty:     number;
+  commodityUnit:    string;
 }
 
-interface PMVendor {
-  id:               string;
-  name:             string;
-  totalAmount:      number;
-  materialsNote:    string;
-  pricePerUnit:     number;
-  firstDescription: string;
-  firstQty:         number;
-  firstUnit:        string;
+// One PM commodity option = one project_financials row.
+interface PMCommodity {
+  financialId:  number;
+  vendorId:     string;
+  vendorName:   string;
+  commodity:    string;
+  qty:          number;
+  unit:         string;
+  pricePerUnit: number;
+  totalPrice:   number;
 }
 
 interface VendorSelectProps {
@@ -98,11 +102,11 @@ export function VendorSelect({
   disabled = false,
   required = false,
 }: VendorSelectProps) {
-  const [vendors,    setVendors]    = useState<Vendor[]>([]);
-  const [pmVendors,  setPMVendors]  = useState<PMVendor[]>([]);
-  const [loading,    setLoading]    = useState(!pmOnly); // pmOnly skips companies load
-  const [error,      setError]      = useState<string | null>(null);
-  const [displayVal, setDisplayVal] = useState<string>(value ?? "");
+  const [vendors,      setVendors]      = useState<Vendor[]>([]);
+  const [pmCommodities, setPMCommodities] = useState<PMCommodity[]>([]);
+  const [loading,      setLoading]      = useState(!pmOnly); // pmOnly skips companies load
+  const [error,        setError]        = useState<string | null>(null);
+  const [displayVal,   setDisplayVal]   = useState<string>(value ?? "");
 
   // Sync displayVal when external value changes (unless we're showing a PM selection)
   useEffect(() => {
@@ -125,13 +129,18 @@ export function VendorSelect({
       });
   }, [pmOnly]);
 
-  // Load PM vendors for the selected project
+  // Load PM commodities for the selected project.
+  // NOTE: options are per-commodity (one project_financials row = one option).
+  // We deliberately do NOT aggregate by vendor — a vendor supplying multiple
+  // commodities appears once per commodity, each with its own amount. Real AP
+  // invoices arrive per commodity/delivery, not as a vendor-level rollup.
   useEffect(() => {
-    if (!projectId) { setPMVendors([]); return; }
+    if (!projectId) { setPMCommodities([]); return; }
 
     supabase
       .from("project_financials")
       .select(`
+        id,
         total_price,
         price_per_unit,
         material_name,
@@ -142,72 +151,54 @@ export function VendorSelect({
       `)
       .eq("project_id", projectId)
       .not("tender_company_id", "is", null)
+      .order("tender_company_id", { ascending: true })
       .then(({ data, error: err }) => {
         if (err || !data) return;
 
-        type GroupItem = { name: string; qty: number; unit: string; total: number; pricePerUnit: number };
-        const grouped: Record<string, { name: string; items: GroupItem[]; total: number }> = {};
-
+        const rows: PMCommodity[] = [];
         for (const row of data as any[]) {
           const tc = row.tender_company;
-          if (!tc) continue;
-          if (!grouped[tc.id]) grouped[tc.id] = { name: tc.name, items: [], total: 0 };
-          grouped[tc.id].total += Number(row.total_price) || 0;
-          if (row.material_name) {
-            grouped[tc.id].items.push({
-              name:         row.material_name,
-              qty:          Number(row.material_quantity) || 0,
-              unit:         row.material_unit || "units",
-              total:        Number(row.total_price) || 0,
-              pricePerUnit: Number(row.price_per_unit) || 0,
-            });
-          }
+          if (!tc || !row.material_name) continue;
+          rows.push({
+            financialId:  Number(row.id),
+            vendorId:     tc.id,
+            vendorName:   tc.name,
+            commodity:    row.material_name,
+            qty:          Number(row.material_quantity) || 0,
+            unit:         row.material_unit || "units",
+            pricePerUnit: Number(row.price_per_unit) || 0,
+            totalPrice:   Number(row.total_price) || 0,
+          });
         }
 
-        const pm: PMVendor[] = Object.entries(grouped).map(([id, g]) => {
-          const first = g.items[0];
-          const lines = g.items.map(
-            i => `• ${i.qty} ${i.unit} of ${i.name} @ KES ${i.pricePerUnit.toLocaleString("en-KE")}/unit = KES ${i.total.toLocaleString("en-KE")}`
-          );
-          const notes =
-            `Materials ordered from ${g.name}:\n` +
-            lines.join("\n") +
-            `\n\nTotal: KES ${g.total.toLocaleString("en-KE")}`;
-          return {
-            id,
-            name:             g.name,
-            totalAmount:      g.total,
-            materialsNote:    notes,
-            pricePerUnit:     first?.pricePerUnit ?? 0,
-            firstDescription: first?.name ?? "",
-            firstQty:         first?.qty ?? 0,
-            firstUnit:        first?.unit ?? "units",
-          };
-        });
-
-        setPMVendors(pm);
+        setPMCommodities(rows);
       });
   }, [projectId]);
 
   const selectedVendor = vendors.find(v => v.id === value) ?? null;
   const selectedPM     = displayVal.startsWith(PM_PREFIX)
-    ? pmVendors.find(v => v.id === displayVal.slice(PM_PREFIX.length)) ?? null
+    ? pmCommodities.find(c => String(c.financialId) === displayVal.slice(PM_PREFIX.length)) ?? null
     : null;
 
   const handleChange = (val: string) => {
     setDisplayVal(val);
     if (val.startsWith(PM_PREFIX)) {
       const pmId = val.slice(PM_PREFIX.length);
-      const pm   = pmVendors.find(v => v.id === pmId);
+      const pm   = pmCommodities.find(c => String(c.financialId) === pmId);
       if (pm && onPMVendorSelect) {
+        const notes =
+          `From PM · ${pm.vendorName}\n` +
+          `• ${pm.qty} ${pm.unit} of ${pm.commodity} @ KES ${pm.pricePerUnit.toLocaleString("en-KE")}/unit\n` +
+          `Total: KES ${pm.totalPrice.toLocaleString("en-KE")}`;
         onPMVendorSelect({
-          vendorName:       pm.name,
-          totalAmount:      pm.totalAmount,
-          notes:            pm.materialsNote,
-          pricePerUnit:     pm.pricePerUnit,
-          firstDescription: pm.firstDescription,
-          firstQty:         pm.firstQty,
-          firstUnit:        pm.firstUnit,
+          pmFinancialId: pm.financialId,
+          vendorName:    pm.vendorName,
+          totalAmount:   pm.totalPrice,
+          notes,
+          pricePerUnit:  pm.pricePerUnit,
+          commodityName: pm.commodity,
+          commodityQty:  pm.qty,
+          commodityUnit: pm.unit,
         });
       }
       onChange(""); // clear vendor_id — PM vendors are not in companies table
@@ -234,24 +225,25 @@ export function VendorSelect({
             <option value="">
               {loading
                 ? "Loading vendors…"
-                : pmOnly && pmVendors.length === 0 && projectId
-                  ? "— No vendors found in PM $ section for this project —"
+                : pmOnly && pmCommodities.length === 0 && projectId
+                  ? "— No commodities found in PM $ section for this project —"
                   : placeholder}
             </option>
 
-            {/* PM vendors — always shown when available */}
-            {pmVendors.length > 0 && (
+            {/* PM commodities — one option per (vendor + commodity) so each  */}
+            {/* invoice targets a single commodity, never the vendor rollup.  */}
+            {pmCommodities.length > 0 && (
               pmOnly
-                ? pmVendors.map(pm => (
-                    <option key={pm.id} value={PM_PREFIX + pm.id}>
-                      {pm.name} — KES {pm.totalAmount.toLocaleString("en-KE")}
+                ? pmCommodities.map(pm => (
+                    <option key={pm.financialId} value={PM_PREFIX + pm.financialId}>
+                      {pm.vendorName} — {pm.commodity} — KES {pm.totalPrice.toLocaleString("en-KE")}
                     </option>
                   ))
                 : (
-                  <optgroup label="── Project Vendors (from PM) ──">
-                    {pmVendors.map(pm => (
-                      <option key={pm.id} value={PM_PREFIX + pm.id}>
-                        {pm.name} — KES {pm.totalAmount.toLocaleString("en-KE")}
+                  <optgroup label="── Project Commodities (from PM) ──">
+                    {pmCommodities.map(pm => (
+                      <option key={pm.financialId} value={PM_PREFIX + pm.financialId}>
+                        {pm.vendorName} — {pm.commodity} — KES {pm.totalPrice.toLocaleString("en-KE")}
                       </option>
                     ))}
                   </optgroup>
@@ -260,7 +252,7 @@ export function VendorSelect({
 
             {/* All companies — hidden when pmOnly */}
             {!pmOnly && vendors.length > 0 && (
-              pmVendors.length > 0
+              pmCommodities.length > 0
                 ? (
                   <optgroup label="── All Vendors ──">
                     {vendors.map(v => (
@@ -280,16 +272,20 @@ export function VendorSelect({
           <div className="text-xs text-rose-400 italic">⚠️ {error}</div>
         )}
 
-        {/* Info row for selected PM vendor */}
+        {/* Info row for selected PM commodity */}
         {selectedPM && (
           <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
-            <div className="flex items-center gap-1.5 mb-1">
+            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
               <span className="text-[9px] uppercase tracking-widest font-semibold text-primary">From PM</span>
               <span className="text-muted-foreground/40">·</span>
-              <span className="font-medium text-foreground">{selectedPM.name}</span>
+              <span className="font-medium text-foreground">{selectedPM.vendorName}</span>
+              <span className="text-muted-foreground/40">→</span>
+              <span className="font-medium text-foreground">{selectedPM.commodity}</span>
             </div>
-            <div className="text-muted-foreground/80 leading-relaxed whitespace-pre-line text-[11px]">
-              {selectedPM.materialsNote}
+            <div className="text-muted-foreground/80 leading-relaxed text-[11px]">
+              {selectedPM.qty} {selectedPM.unit} @ KES {selectedPM.pricePerUnit.toLocaleString("en-KE")}/unit
+              <span className="text-muted-foreground/40 mx-1">·</span>
+              Total <span className="text-foreground font-medium">KES {selectedPM.totalPrice.toLocaleString("en-KE")}</span>
             </div>
           </div>
         )}

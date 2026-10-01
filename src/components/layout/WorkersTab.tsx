@@ -192,8 +192,6 @@ const EmptyState = ({ icon: Icon, title, description, action, onAction }: any) =
 );
 
 const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate }) => {
-  console.log('[WorkersTab] Render start', { projectId, canEdit });
-
   const [activeTab, setActiveTab] = useState<TabType>('workers');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [loading, setLoading] = useState(true);
@@ -300,13 +298,11 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         .eq('project_id', projectId)
         .order('created_at', { ascending: true });
       if (error) {
-        console.error('Milestones fetch error:', error);
         setMilestones([]);
         return;
       }
       setMilestones((data || []).map((m: any) => ({ id: m.id, name: m.title })));
-    } catch (err) {
-      console.error('[WorkersTab] Milestones fetch error:', err);
+    } catch {
       setMilestones([]);
     }
   };
@@ -333,7 +329,6 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
         .order('created_at', { ascending: true });
 
       if (workersError) {
-        console.error('[WorkersTab] Workers fetch error:', workersError);
         setError('Failed to fetch workers: ' + workersError.message);
         setWorkers([]);
         return [];
@@ -342,8 +337,7 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       const workersData: Worker[] = data || [];
       setWorkers(workersData);
       return workersData;
-    } catch (err: any) {
-      console.error('[WorkersTab] Workers fetch error:', err);
+    } catch {
       setWorkers([]);
       setError('Failed to fetch workers. Please check your connection.');
       return [];
@@ -379,18 +373,15 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       });
 
       if (invokeError) {
-        console.error('Attendance function error:', invokeError);
         setAttendance([]);
         return [];
       }
 
       const records = (fnData?.attendance || []) as AttendanceRecord[];
-      // Filter to only this project's workers
       const filtered = records.filter(r => ids.includes(r.worker_id));
       setAttendance(filtered);
       return filtered;
-    } catch (err: any) {
-      console.error('[WorkersTab] Attendance fetch error:', err);
+    } catch {
       setAttendance([]);
       return [];
     }
@@ -427,18 +418,15 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
       });
 
       if (invokeError) {
-        console.error('Assignments function error:', invokeError);
         setAssignments([]);
         return [];
       }
 
-      // Filter to this project only (edge function may return all)
       const all = (fnData?.assignments || []) as Assignment[];
       const projectAssignments = all.filter(a => a.project_id === projectId);
       setAssignments(projectAssignments);
       return projectAssignments;
-    } catch (err: any) {
-      console.error('[WorkersTab] Assignments fetch error:', err);
+    } catch {
       setAssignments([]);
       return [];
     }
@@ -461,10 +449,9 @@ const WorkersTab: React.FC<WorkersTabProps> = ({ projectId, canEdit, onUpdate })
           fetchedWorkers.map(w => w.id)
         );
 
-        // Compute stats from project-scoped data
         setStats(computeStats(fetchedWorkers, fetchedAttendance, fetchedAssignments));
-      } catch (err) {
-        console.error('[WorkersTab] Initial load error:', err);
+      } catch {
+        /* initial load best-effort */
       } finally {
         setLoading(false);
       }

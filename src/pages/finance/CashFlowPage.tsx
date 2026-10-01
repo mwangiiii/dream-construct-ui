@@ -2011,7 +2011,7 @@ export default function CashFlowPage({ projectId, canEdit = true }: Props) {
       .eq("id", projectId)
       .single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); })
-      .catch(console.error);
+      .catch(() => { /* project fetch is best-effort */ });
   }, [projectId]);
 
   return (

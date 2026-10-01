@@ -54,8 +54,6 @@ import PhotosTab from "@/components/projects/tabs/PhotosTab";
 import DocumentsTab from "@/components/projects/tabs/DocumentsTab";
 import WorkersTab from "@/components/projects/tabs/WorkersTab";
 
-console.log('[ProjectDetailPage] MODULE LOADED');
-
 type Tab =
   | "overview"
   | "milestones"
@@ -160,7 +158,7 @@ interface Worker {
 
 interface TeamMember {
   user_id: string;
-  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "surveyor";
+  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "quantity_surveyor";
   user: {
     id: string;
     full_name: string;
@@ -219,8 +217,6 @@ const GlassCard = ({ children, className = "" }: { children: React.ReactNode; cl
 );
 
 export default function ProjectDetailPage() {
-  console.log('[ProjectDetailPage] COMPONENT FUNCTION CALLED');
-
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -297,10 +293,9 @@ export default function ProjectDetailPage() {
           .from("workers")
           .select("id, full_name, role, status")
           .eq("project_id", id);
-        if (workersError) console.warn("[ProjectDetail] workers fetch error:", workersError.message);
-        else workersList = (workersRaw || []) as Worker[];
-      } catch (err) {
-        console.warn("[ProjectDetail] workers fetch threw:", err);
+        if (!workersError) workersList = (workersRaw || []) as Worker[];
+      } catch {
+        /* workers are optional */
       }
       setWorkers(workersList);
 
@@ -407,8 +402,7 @@ export default function ProjectDetailPage() {
         setDeletedUpdates(deletedEnriched);
       }
 
-    } catch (error) {
-      console.error('[ProjectDetailPage] fetch error:', error);
+    } catch {
       showToast('Error loading project data', 'error');
       setTimeout(() => navigate('/projects'), 2000);
     } finally {
@@ -471,8 +465,7 @@ export default function ProjectDetailPage() {
         }
 
         await fetchProjectAndData();
-      } catch (error) {
-        console.error("[ProjectDetailPage] init error:", error);
+      } catch {
         if (mounted) {
           showToast("Error loading project.", "error");
           setTimeout(() => navigate("/projects"), 2000);
@@ -765,4 +758,3 @@ export default function ProjectDetailPage() {
   );
 }
 
-console.log('[ProjectDetailPage] MODULE END');

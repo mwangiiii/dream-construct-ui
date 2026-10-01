@@ -31,6 +31,7 @@ import AdminLayout from "./components/layout/AdminLayout";
 import ClientLayout from "./components/layout/ClientLayout";
 import ProjectManagerLayout from "./components/layout/ProjectManagerLayout";
 import FinanceLayout from "./components/layout/FinanceLayout";
+import QuantitySurveyorLayout from "./components/layout/QuantitySurveyorLayout";
 
 // ─── Admin Pages ──────────────────────────────────────────────────────────────
 import AdminSettingsPage from "./pages/admin/settings";
@@ -86,6 +87,11 @@ import ClientDashboard from "./pages/client/Dashboard";
 import ClientProjects from "./pages/client/projects";
 import ClientNotifications from "./pages/client/clientNotifications";
 
+// ─── Quantity Surveyor Pages ─────────────────────────────────────────────────
+import QuantitySurveyorDashboard from "./pages/quantity_surveyor/dashboard";
+import QSBillOfQuantities from "./pages/quantity_surveyor/bill_of_quantities";
+import QSMeasurements from "./pages/quantity_surveyor/measurements";
+
 // ─── Public Pages ─────────────────────────────────────────────────────────────
 import Index from "./pages/Index";
 import Services from "./pages/Services";
@@ -110,7 +116,7 @@ const queryClient = new QueryClient();
 // ─── Role-aware wrapper for the shared /policies route ───────────────────────
 // Renders PoliciesPage inside whichever layout matches the user's primary role.
 const PolicyRouteWrapper = () => {
-  const [layoutType, setLayoutType] = useState<"admin" | "finance" | "pm" | "loading">("loading");
+  const [layoutType, setLayoutType] = useState<"admin" | "finance" | "pm" | "qs" | "loading">("loading");
 
   useEffect(() => {
     getCurrentUser().then(user => {
@@ -118,6 +124,7 @@ const PolicyRouteWrapper = () => {
       const role = getPrimaryRole(user.roles);
       if (role === "finance") setLayoutType("finance");
       else if (role === "project_manager") setLayoutType("pm");
+      else if (role === "quantity_surveyor") setLayoutType("qs");
       else setLayoutType("admin");
     });
   }, []);
@@ -131,34 +138,37 @@ const PolicyRouteWrapper = () => {
   }
   if (layoutType === "finance") return <FinanceLayout><PoliciesPage /></FinanceLayout>;
   if (layoutType === "pm")      return <ProjectManagerLayout><PoliciesPage /></ProjectManagerLayout>;
+  if (layoutType === "qs")      return <QuantitySurveyorLayout><PoliciesPage /></QuantitySurveyorLayout>;
   return <AdminLayout><PoliciesPage /></AdminLayout>;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROLES REFERENCE
-//   1 → admin
-//   2 → manager
-//   3 → project_manager
-//   4 → client
-//   5 → finance
-//   6 → surveyor
+// ROLES REFERENCE — precedence order (LEAST to MOST privileged):
+//   client → quantity_surveyor → project_manager → manager → finance → admin
 //
-// Finance routes are accessible to: admin, manager, finance
-// Admin routes:           admin
-// Project manager routes: admin, manager, project_manager
-// Client routes:          client
-// Staff policies:         admin, manager, project_manager, finance, surveyor
+// Primary role for a user holding multiple roles is the LEAST-privileged one
+// (principle of least privilege). See `getPrimaryRole` / `ROLE_PRIORITY`
+// in src/lib/auth.ts — the single source of truth.
+//
+// Route access:
+//   Admin routes:                    admin
+//   Finance routes:                  admin, manager, finance
+//   Project manager routes:          admin, manager, project_manager
+//   Quantity surveyor routes:        admin, manager, quantity_surveyor
+//   Client routes:                   client
+//   Staff policies (all internal):   admin, manager, project_manager, finance, quantity_surveyor
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Role groups (single source of truth) ────────────────────────────────────
 const ROLES = {
-  ADMIN_ONLY:      ["admin"],
-  ADMIN_MANAGER:   ["admin", "manager"],
-  FINANCE:         ["admin", "manager", "finance"],
-  PROJECT_MGMT:    ["admin", "manager", "project_manager"],
-  CLIENT:          ["client"],
-  STAFF:           ["admin", "manager", "project_manager", "finance", "surveyor"],
-  ALL_INTERNAL:    ["admin", "manager", "project_manager", "finance", "surveyor"],
+  ADMIN_ONLY:        ["admin"],
+  ADMIN_MANAGER:     ["admin", "manager"],
+  FINANCE:           ["admin", "manager", "finance"],
+  PROJECT_MGMT:      ["admin", "manager", "project_manager"],
+  QUANTITY_SURVEYOR: ["admin", "manager", "quantity_surveyor"],
+  CLIENT:            ["client"],
+  STAFF:             ["admin", "manager", "project_manager", "finance", "quantity_surveyor"],
+  ALL_INTERNAL:      ["admin", "manager", "project_manager", "finance", "quantity_surveyor"],
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,8 +214,7 @@ const ProtectedRoute: React.FC<{
         );
 
         if (!cancelled) setStatus(hasRole ? "authorized" : "unauthorized");
-      } catch (err) {
-        console.error("[ProtectedRoute] auth check failed:", err);
+      } catch {
         if (!cancelled) setStatus("unauthorized");
       }
     };
@@ -792,8 +801,36 @@ const App = () => {
             />
 
             {/* ══════════════════════════════════════════════════════════════
+                QUANTITY SURVEYOR ROUTES
+                Accessible by: admin, manager, quantity_surveyor
+            ══════════════════════════════════════════════════════════════ */}
+            <Route path="/qs/dashboard"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.QUANTITY_SURVEYOR}>
+                  <QuantitySurveyorLayout><QuantitySurveyorDashboard /></QuantitySurveyorLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/qs/bill-of-quantities"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.QUANTITY_SURVEYOR}>
+                  <QuantitySurveyorLayout><QSBillOfQuantities /></QuantitySurveyorLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/qs/measurements"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.QUANTITY_SURVEYOR}>
+                  <QuantitySurveyorLayout><QSMeasurements /></QuantitySurveyorLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ══════════════════════════════════════════════════════════════
                 STAFF POLICIES — all internal staff roles
-                Accessible by: admin, manager, project_manager, finance, surveyor
+                Accessible by: admin, manager, project_manager, finance, quantity_surveyor
             ══════════════════════════════════════════════════════════════ */}
             <Route path="/staff-policies"
               element={

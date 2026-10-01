@@ -1185,7 +1185,7 @@ export default function ChangeOrdersTrackingPage({ projectId, canEdit = true }: 
       .eq("id", projectId)
       .single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); })
-      .catch(console.error);
+      .catch(() => { /* project fetch is best-effort */ });
   }, [projectId]);
 
   return (

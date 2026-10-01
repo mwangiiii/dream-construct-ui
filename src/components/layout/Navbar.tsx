@@ -86,8 +86,8 @@ const Navbar = () => {
       setCurrentUser(null);
       setIsMobileMenuOpen(false);
       navigate("/");
-    } catch (error) {
-      console.error("Sign out error:", error);
+    } catch {
+      /* sign-out best-effort */
     }
   };
 

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Search, Edit2, Trash2, UserCheck, UserX, Shield,
   Mail, Phone, Briefcase, Building2, X, CheckCircle2,
-  AlertCircle, RefreshCw, UserCog, Clock, Archive, Eye, EyeOff,
+  AlertCircle, RefreshCw, UserCog, Clock, Archive, Eye, EyeOff, Ruler,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -48,13 +48,15 @@ const STATUSES: Record<number, { name: string; color: string; icon: React.Elemen
   5: { name: 'Archived',  color: 'text-muted-foreground bg-muted-foreground/10 border-muted-foreground/30', icon: Archive   },
 };
 
+// Ordered from LEAST to MOST privileged — matches ROLE_PRIORITY in src/lib/auth.ts.
+// Object key-insertion order drives all dropdowns/legends below.
 const ROLES: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  admin:           { label: 'Admin',           color: 'text-accent',     icon: Shield    },
-  manager:         { label: 'Manager',         color: 'text-primary',    icon: UserCog   },
-  client:          { label: 'Client',          color: 'text-green-400',  icon: Users     },
-  finance:         { label: 'Finance',         color: 'text-green-400',  icon: Users     },
-  surveyor:        { label: 'Surveyor',        color: 'text-blue-400',   icon: Building2 },
-  project_manager: { label: 'Project Manager', color: 'text-yellow-400', icon: Briefcase },
+  client:            { label: 'Client',            color: 'text-green-400',  icon: Users     },
+  quantity_surveyor: { label: 'Quantity Surveyor', color: 'text-blue-400',   icon: Ruler     },
+  project_manager:   { label: 'Project Manager',   color: 'text-yellow-400', icon: Briefcase },
+  manager:           { label: 'Manager',           color: 'text-primary',    icon: UserCog   },
+  finance:           { label: 'Finance',           color: 'text-green-400',  icon: Building2 },
+  admin:             { label: 'Admin',             color: 'text-accent',     icon: Shield    },
 };
 
 // ─── EditModal ────────────────────────────────────────────────────────────────
@@ -429,11 +431,9 @@ const UserManagement: React.FC = () => {
         });
         if (!emailError && emailData?.emails) {
           emailMap = emailData.emails;
-        } else if (emailError) {
-          console.warn('Could not fetch auth emails:', emailError.message);
         }
-      } catch (emailFetchErr) {
-        console.warn('Email fetch failed silently:', emailFetchErr);
+      } catch {
+        /* email fetch is best-effort */
       }
 
       const usersWithRoles: User[] = (profilesData || []).map(profile => ({
@@ -445,8 +445,7 @@ const UserManagement: React.FC = () => {
       }));
 
       setUsers(usersWithRoles);
-    } catch (err: any) {
-      console.error('Fetch users error:', err);
+    } catch {
       showNotification('Failed to load users', 'error');
     } finally {
       if (!silent) setLoading(false);

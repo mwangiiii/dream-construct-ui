@@ -13,21 +13,24 @@ interface TeamMember {
   role_name: string;
 }
 
-// Role display priority — highest wins when a user holds multiple roles
+// Public team-page DISPLAY ORDER (leadership first). Deliberately the inverse
+// of the auth `ROLE_PRIORITY` in src/lib/auth.ts — that one is least-privileged
+// first for primary-role selection; this one is most-senior first for
+// hierarchical display on the "Meet the Team" page.
 const ROLE_PRIORITY: Record<string, number> = {
-  admin:           1,
-  manager:         2,
-  project_manager: 3,
-  finance:         4,
-  surveyor:        5,
+  admin:             1,
+  manager:           2,
+  finance:           3,
+  project_manager:   4,
+  quantity_surveyor: 5,
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  admin:           "Admin",
-  manager:         "Manager",
-  project_manager: "Project Manager",
-  finance:         "Finance",
-  surveyor:        "Surveyor",
+  admin:             "Admin",
+  manager:           "Manager",
+  finance:           "Finance",
+  project_manager:   "Project Manager",
+  quantity_surveyor: "Quantity Surveyor",
 };
 
 const TEAM_ROLES = Object.keys(ROLE_PRIORITY);
@@ -78,7 +81,7 @@ const Team = () => {
           full_name:  profile.full_name || "Team Member",
           avatar_url: profile.avatar_url,
           job_title:  profile.job_title || null,
-          role_name:  primaryRole.get(profile.id) || "surveyor",
+          role_name:  primaryRole.get(profile.id) || "quantity_surveyor",
         }));
 
         // Sort: top-level leadership titles first, then role priority, then alphabetically

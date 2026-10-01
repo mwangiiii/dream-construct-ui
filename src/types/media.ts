@@ -121,10 +121,9 @@ export class MediaAPI {
 
       return { success: true, data: result.data };
     } catch (error) {
-      console.error('Upload error:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Upload failed' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Upload failed'
       };
     }
   }

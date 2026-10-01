@@ -120,7 +120,6 @@ export function COAAccountSelect({
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to load accounts";
         setError(msg);
-        console.error("COAAccountSelect error:", err);
       } finally {
         setLoading(false);
       }

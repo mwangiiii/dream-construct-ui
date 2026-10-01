@@ -237,14 +237,19 @@ const api = {
 
   // Auto-fill source: cost from all expense modules + payroll + AR + budget view.
   //
-  // cost_incurred = AP invoices + Job Costs + Taxes cash-out + Loan financing
-  //                 cost + Payroll gross pay.
+  // cost_incurred = AP invoices + manual Job Costs + Taxes cash-out
+  //               + Loan financing cost + Payroll gross pay.
   //
   // Each source is queried directly against its base table so the calculation
   // still works even if `vw_project_cost_incurred` is missing or stale. A
   // failure on any single source is non-fatal — that bucket falls back to 0
   // and the others still contribute, so the user sees partial data rather
   // than a hard error.
+  //
+  // Job Costing is filtered to source='manual' to skip mirror rows that the
+  // trigger (mirror_payroll_to_job_postings) writes for display in the Job
+  // Costing screen. Including those would double-count the same expense
+  // already summed via payroll_checklist / accounts_payable / loans / taxes.
   async projectFinancials(projectId: string): Promise<ProjectFinancials> {
     // Round to 2 dp to avoid accumulated floating-point drift (numeric(15,2)
     // columns can round-trip through JS floats and end up as e.g. 12.7299999).
@@ -264,7 +269,12 @@ const api = {
         supabase
           .from("job_postings")
           .select("actual_amount_used")
-          .eq("project_id", projectId),
+          .eq("project_id", projectId)
+          // Exclude mirror rows (source != 'manual'). Their underlying source
+          // table — payroll_checklist / accounts_payable / loans /
+          // tax_transactions — is already summed as its own bucket, so
+          // counting the mirror here would double-count the same expense.
+          .eq("source", "manual"),
         supabase
           .from("tax_transactions")
           .select("cash_out")
@@ -294,11 +304,6 @@ const api = {
     // yet) doesn't zero out the whole cost figure.
     if (arRes.error)     throw new Error(`AR view: ${arRes.error.message}`);
     if (budgetRes.error) throw new Error(`Budget view: ${budgetRes.error.message}`);
-    if (apRes.error)      console.error("AP cost fetch failed:", apRes.error);
-    if (jcRes.error)      console.error("Job cost fetch failed:", jcRes.error);
-    if (taxRes.error)     console.error("Tax cost fetch failed:", taxRes.error);
-    if (loanRes.error)    console.error("Loan cost fetch failed:", loanRes.error);
-    if (payrollRes.error) console.error("Payroll cost fetch failed:", payrollRes.error);
 
     const ap_cost      = sumCol(apRes.data,      r => (r as any).total_amount);
     const job_cost     = sumCol(jcRes.data,      r => (r as any).actual_amount_used);

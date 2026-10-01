@@ -259,14 +259,6 @@ const SettingsPage = () => {
       const formData = new FormData();
       formData.append("file", avatarFile);
 
-      console.log("Uploading avatar to:", `${supabaseUrl}/functions/v1/upload-avatar`);
-      console.log("File details:", {
-        fileName: avatarFile.name,
-        fileSize: avatarFile.size,
-        fileType: avatarFile.type,
-        userId: user.id
-      });
-
       const res = await fetch(
         `${supabaseUrl}/functions/v1/upload-avatar`,
         {
@@ -279,8 +271,6 @@ const SettingsPage = () => {
       );
 
       const data = await res.json();
-
-      console.log("Upload response:", data);
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || `Upload failed with status ${res.status}`);
@@ -305,7 +295,6 @@ const SettingsPage = () => {
       setTimeout(() => setUploadSuccess(false), 4000);
 
     } catch (err: any) {
-      console.error("Avatar upload error:", err);
       setError(err.message || "Upload failed. Please try again.");
     } finally {
       setUploading(false);
@@ -323,14 +312,11 @@ const SettingsPage = () => {
       const fileName = urlParts[urlParts.length - 1].split("?")[0];
       const filePath = `${user.id}/${fileName}`;
 
-      console.log("Removing avatar:", filePath);
-
       const { error: deleteError } = await supabase.storage
         .from("profile-pictures")
         .remove([filePath]);
 
       if (deleteError) {
-        console.error("Delete error:", deleteError);
         throw deleteError;
       }
 
@@ -347,7 +333,6 @@ const SettingsPage = () => {
       setTimeout(() => setUploadSuccess(false), 4000);
 
     } catch (err: any) {
-      console.error("Remove avatar error:", err);
       setError("Failed to remove avatar: " + err.message);
     } finally {
       setLoading(false);

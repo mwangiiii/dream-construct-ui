@@ -47,10 +47,44 @@ type CostingStage =
   | "Construction"
   | "Inspections and Snagging";
 
+// A row's `source` marks whether the user entered it here directly (`manual`)
+// or whether it was mirrored from another finance module (payroll_checklist,
+// accounts_payable, loans, tax_transactions). Mirrors are display-only —
+// WIP counts them at their source table so this UI must not double-write.
+type JobCostingSource = 'manual' | 'payroll' | 'ap' | 'loan' | 'tax';
+
+// Category × source pairing is enforced at the DB — see
+// `job_postings_category_source_check` in the source-tagging migration.
+// Manual rows are restricted to non-labour values; each mirror source pins
+// its own fixed category.
+type ManualCostCategory = 'materials' | 'equipment' | 'subcontractor' | 'overhead' | 'other';
+type CostCategory = ManualCostCategory | 'labour' | 'vendor' | 'financing' | 'tax';
+
+const MANUAL_CATEGORIES: readonly { value: ManualCostCategory; label: string }[] = [
+  { value: 'materials',     label: 'Materials' },
+  { value: 'equipment',     label: 'Equipment' },
+  { value: 'subcontractor', label: 'Subcontractor' },
+  { value: 'overhead',      label: 'Overhead' },
+  { value: 'other',         label: 'Other' },
+] as const;
+
+const CATEGORY_LABEL: Record<CostCategory, string> = {
+  materials:     'Materials',
+  equipment:     'Equipment',
+  subcontractor: 'Subcontractor',
+  overhead:      'Overhead',
+  other:         'Other',
+  labour:        'Labour',
+  vendor:        'Vendor',
+  financing:     'Financing',
+  tax:           'Tax',
+};
+
 interface JobCosting {
   id: string;
   project_id: string;
-  phase: JobPhase;
+  // NULL for mirror rows — the source module doesn't track construction phase.
+  phase: JobPhase | null;
   stage: string;
   description: string;
   account_code: string;
@@ -59,16 +93,44 @@ interface JobCosting {
   actual_amount_used: number | string;
   profit_loss: number | string;
   amount: number | string;
+  source: JobCostingSource;
+  cost_category: CostCategory;
+  payroll_id: number | null;
+  ap_invoice_id: string | null;
+  loan_id: number | null;
+  tax_id: number | null;
   created_at?: string;
   updated_at?: string;
 }
+
+const SOURCE_META: Record<Exclude<JobCostingSource, 'manual'>, { label: string; module: string; badge: string }> = {
+  payroll: { label: 'Payroll',  module: 'Payroll Checklist',    badge: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300' },
+  ap:      { label: 'AP',       module: 'Accounts Payable',     badge: 'bg-rose-500/10 border-rose-500/20 text-rose-300'       },
+  loan:    { label: 'Loan',     module: 'Loans',                badge: 'bg-amber-500/10 border-amber-500/20 text-amber-300'    },
+  tax:     { label: 'Tax',      module: 'Tax Transactions',     badge: 'bg-cyan-500/10 border-cyan-500/20 text-cyan-300'       },
+};
+
+const isMirror = (c: JobCosting): c is JobCosting & { source: Exclude<JobCostingSource, 'manual'> } =>
+  c.source !== 'manual';
 
 interface Milestone {
   id: string;
   title: string;
 }
 
-type FormData = Omit<JobCosting, "id" | "profit_loss" | "created_at" | "updated_at">;
+// The modal only creates or edits MANUAL rows. Mirror rows (payroll/AP/loan/
+// tax) can never enter the modal — they are read-only in the Job Costing
+// screen and must be edited at their source module. That's why FormData
+// pins source='manual' and constrains cost_category to the manual subset.
+type FormData = Omit<
+  JobCosting,
+  "id" | "profit_loss" | "created_at" | "updated_at"
+    | "source" | "cost_category" | "payroll_id" | "ap_invoice_id" | "loan_id" | "tax_id"
+    | "phase"
+> & {
+  phase: JobPhase;              // manual rows require a real phase (DB CHECK)
+  cost_category: ManualCostCategory;
+};
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -133,6 +195,7 @@ const fmtDate = (s: string) =>
 const makeEmptyForm = (project_id: string): FormData => ({
   project_id,
   phase: "Mobilization",
+  cost_category: "materials",
   stage: "",
   description: "",
   account_code: "",
@@ -326,6 +389,31 @@ function CostingModal({
                 </svg>
               </span>
             </div>
+          </Field>
+
+          {/* Cost Category — Labour is deliberately absent. Labour costs must */}
+          {/* be entered in Payroll Checklist; they mirror here automatically. */}
+          {/* Enforced at the DB by job_postings_category_source_check.        */}
+          <Field label="Cost Category *">
+            <div className="relative">
+              <select
+                value={form.cost_category}
+                onChange={e => set("cost_category", e.target.value as ManualCostCategory)}
+                className={inputCls + " appearance-none pr-10"}
+              >
+                {MANUAL_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value} className="bg-background">{c.label}</option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground/70 mt-1">
+              Labour is not selectable — enter labour in Payroll Checklist.
+            </p>
           </Field>
 
           {/* Description */}
@@ -813,14 +901,31 @@ function CostingsView({ project, canEdit, onBack }: {
     }),
   [costings, filterPhase, search]);
 
+  // Mirror rows have no phase (they're linked from another module), so they
+  // don't belong in the phase-grouped view. Split them out.
+  const manualFiltered  = useMemo(() => filtered.filter(p => !isMirror(p)), [filtered]);
+  const mirrorFiltered  = useMemo(() => filtered.filter(isMirror),          [filtered]);
+
   const grouped = useMemo(() => {
     const g: Partial<Record<JobPhase, JobCosting[]>> = {};
-    filtered.forEach(p => {
+    manualFiltered.forEach(p => {
+      if (!p.phase) return;
       if (!g[p.phase]) g[p.phase] = [];
       g[p.phase]!.push(p);
     });
     return g;
-  }, [filtered]);
+  }, [manualFiltered]);
+
+  // Mirror rows grouped by their originating module for display.
+  const mirrorGrouped = useMemo(() => {
+    const g: Partial<Record<Exclude<JobCostingSource, 'manual'>, JobCosting[]>> = {};
+    mirrorFiltered.forEach(p => {
+      const src = p.source as Exclude<JobCostingSource, 'manual'>;
+      if (!g[src]) g[src] = [];
+      g[src]!.push(p);
+    });
+    return g;
+  }, [mirrorFiltered]);
 
   const grandTotals = useMemo(() => ({
     budgeted: costings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
@@ -871,9 +976,24 @@ function CostingsView({ project, canEdit, onBack }: {
             loading={saving}
           />
         )}
-        {modal === "edit" && editing && (
+        {/* Mirror rows are read-only — they can only reach the modal via  */}
+        {/* setEditing, which we never call for source != 'manual'. If a   */}
+        {/* mirror slips through, fall back to creating a new manual entry */}
+        {/* rather than corrupting the form.                               */}
+        {modal === "edit" && editing && editing.source === "manual" && editing.phase !== null && (
           <CostingModal
-            initial={(({ id: _id, profit_loss: _pl, created_at: _ca, updated_at: _ua, ...rest }) => rest)(editing)}
+            initial={{
+              project_id:           editing.project_id,
+              phase:                editing.phase,
+              cost_category:        editing.cost_category as ManualCostCategory,
+              stage:                editing.stage,
+              description:          editing.description,
+              account_code:         editing.account_code,
+              etims_code:           editing.etims_code,
+              budgeted_amount_paid: editing.budgeted_amount_paid,
+              actual_amount_used:   editing.actual_amount_used,
+              amount:               editing.amount,
+            }}
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
@@ -1022,7 +1142,7 @@ function CostingsView({ project, canEdit, onBack }: {
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
                 Loading job costings…
               </div>
-            ) : Object.keys(grouped).length === 0 ? (
+            ) : Object.keys(grouped).length === 0 && Object.keys(mirrorGrouped).length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
@@ -1155,6 +1275,7 @@ function CostingsView({ project, canEdit, onBack }: {
                                   <tr className="border-y border-white/6" style={{ background: "rgba(255,255,255,0.03)" }}>
                                     {[
                                       "Costing Stage",
+                                      "Category",
                                       "Description",
                                       "Account Code",
                                       "eTIMS Code",
@@ -1185,6 +1306,12 @@ function CostingsView({ project, canEdit, onBack }: {
                                         {/* Costing Stage */}
                                         <td className="px-5 py-3.5 whitespace-nowrap font-medium text-foreground">
                                           {costing.stage}
+                                        </td>
+                                        {/* Category */}
+                                        <td className="px-5 py-3.5 whitespace-nowrap">
+                                          <Badge variant="outline" className="text-[10px] px-2 py-0.5 border-white/15 text-muted-foreground capitalize">
+                                            {CATEGORY_LABEL[costing.cost_category]}
+                                          </Badge>
                                         </td>
                                         {/* Description */}
                                         <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[180px]">
@@ -1255,7 +1382,7 @@ function CostingsView({ project, canEdit, onBack }: {
                                 {/* Phase subtotal footer */}
                                 <tfoot>
                                   <tr className="border-t border-white/10" style={{ background: "rgba(255,255,255,0.02)" }}>
-                                    <td className="px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground" colSpan={4}>
+                                    <td className="px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground" colSpan={5}>
                                       {ph} Total
                                     </td>
                                     <td className="px-5 py-2.5 text-sm font-bold tabular-nums text-foreground font-mono">{fmt(phB)}</td>
@@ -1274,6 +1401,55 @@ function CostingsView({ project, canEdit, onBack }: {
                     </div>
                   );
                 })}
+
+                {/* Linked from other modules — mirrored rows, display only. */}
+                {/* WIP counts these at their source table so they are NOT     */}
+                {/* editable here; the source module owns the record.          */}
+                {Object.keys(mirrorGrouped).length > 0 && (
+                  <div className="px-6 py-5 space-y-4 bg-white/[0.02]">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                        Linked from other modules
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/70">
+                        · read-only · edit at source
+                      </span>
+                    </div>
+                    {(Object.keys(mirrorGrouped) as Array<Exclude<JobCostingSource, 'manual'>>).map(src => {
+                      const meta   = SOURCE_META[src];
+                      const rows   = mirrorGrouped[src]!;
+                      const total  = rows.reduce((s, p) => s + Number(p.actual_amount_used), 0);
+                      return (
+                        <div key={src} className="rounded-xl border border-white/10 overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-2.5 bg-white/[0.03]">
+                            <div className="flex items-center gap-2">
+                              <Badge className={`text-[10px] px-2 py-0.5 font-mono border rounded-full ${meta.badge}`}>
+                                {meta.label}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">{meta.module}</span>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-white/15 text-muted-foreground">
+                                {rows.length}
+                              </Badge>
+                            </div>
+                            <span className="text-xs font-mono tabular-nums text-foreground">{fmt(total)}</span>
+                          </div>
+                          <div className="divide-y divide-white/5">
+                            {rows.map(r => (
+                              <div key={r.id} className="flex items-center justify-between px-4 py-2 text-xs">
+                                <span className="text-muted-foreground truncate max-w-md" title={r.description}>
+                                  {r.description || "—"}
+                                </span>
+                                <span className="font-mono tabular-nums text-foreground">
+                                  {fmt(Number(r.actual_amount_used))}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Grand total bar */}
                 {costings.length > 0 && (
@@ -1325,7 +1501,7 @@ export default function JobCostingPage({ projectId, canEdit = true }: Props) {
       .eq("id", projectId)
       .single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); })
-      .catch(console.error);
+      .catch(() => { /* project fetch is best-effort */ });
   }, [projectId]);
 
   return (

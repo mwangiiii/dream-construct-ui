@@ -416,11 +416,11 @@ function ItemModal({
                     cost_per_quantity: fill.pricePerUnit && fill.pricePerUnit > 0
                       ? fill.pricePerUnit
                       : prev.cost_per_quantity,
-                    description: !prev.description && fill.firstDescription
-                      ? fill.firstDescription
+                    description: !prev.description && fill.commodityName
+                      ? fill.commodityName
                       : prev.description,
-                    quantity_of_item: !prev.quantity_of_item && fill.firstQty
-                      ? fill.firstQty
+                    quantity_of_item: !prev.quantity_of_item && fill.commodityQty
+                      ? fill.commodityQty
                       : prev.quantity_of_item,
                   }));
                 }}
@@ -1210,7 +1210,7 @@ export default function InventoryPage({ projectId }: Props) {
       .eq("id", projectId)
       .single()
       .then(({ data }) => { if (data) setSelectedProject(data as Project); })
-      .catch(console.error);
+      .catch(() => { /* project fetch is best-effort */ });
   }, [projectId]);
 
   return (

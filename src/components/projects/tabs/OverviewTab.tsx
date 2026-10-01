@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "@/hooks/use-toast";
 import {
   Calendar,
   DollarSign,
@@ -241,12 +242,11 @@ export default function OverviewTab({
       });
       if (error) throw error;
       if (data && !data.success) throw new Error(data.error || "Failed to update status");
-      alert("Project status updated successfully!");
+      toast({ title: "Project status updated successfully!" });
       setIsEditingStatus(false);
       onProjectUpdate();
     } catch (err: any) {
-      console.error("Error updating status:", err);
-      alert(err.message || "Failed to update status");
+      toast({ title: err.message || "Failed to update status", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -270,13 +270,12 @@ export default function OverviewTab({
       });
       if (error) throw error;
       if (data && !data.success) throw new Error(data.error || "Failed to update dates");
-      alert("Project dates updated successfully!");
+      toast({ title: "Project dates updated successfully!" });
       setIsEditingDates(false);
       setDateError("");
       onProjectUpdate();
     } catch (err: any) {
-      console.error("Error updating dates:", err);
-      alert(err.message || "Failed to update dates");
+      toast({ title: err.message || "Failed to update dates", variant: "destructive" });
     } finally {
       setLoading(false);
     }
