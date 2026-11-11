@@ -24,7 +24,6 @@ import {
   Clock,
   AlertCircle,
   CheckCircle2,
-  MoreVertical,
   Building2,
   HardHat,
   UserCheck,
@@ -44,6 +43,9 @@ import {
   TrendingUp,
   Activity,
   Layers,
+  UserCog,
+  Loader2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -58,6 +60,22 @@ type ProjectStatus =
   | "completed"
   | "on_hold"
   | "cancelled";
+
+// Mirrors VALID_STATUSES in the update-project-status Edge Function. "cancelled"
+// is deliberately absent — the function rejects it.
+const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
+  { value: "planning",         label: "Planning"         },
+  { value: "pre_construction", label: "Pre-Construction" },
+  { value: "in_construction",  label: "In Construction"  },
+  { value: "inspections",      label: "Inspections"      },
+  { value: "completed",        label: "Completed"        },
+  { value: "on_hold",          label: "On Hold"          },
+];
+
+interface ProjectManagerOption {
+  id: string;
+  full_name: string;
+}
 
 interface Project {
   id: string;
@@ -87,6 +105,10 @@ export default function ProjectManagementDashboard() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [projectManagers, setProjectManagers] = useState<ProjectManagerOption[]>([]);
+  const [savingField, setSavingField] = useState<"manager" | "status" | null>(null);
+
+  const isAdmin = !!currentUser?.roles.some((r) => r.role_name === "admin");
 
   useEffect(() => {
     initializeUser();
@@ -97,6 +119,10 @@ export default function ProjectManagementDashboard() {
       fetchProjects();
     }
   }, [currentUser, userRole]);
+
+  useEffect(() => {
+    if (isAdmin) fetchProjectManagers();
+  }, [isAdmin]);
 
   const initializeUser = async () => {
     try {
@@ -175,6 +201,94 @@ export default function ProjectManagementDashboard() {
     }
   };
 
+  // Only admins may read other users' role rows (RLS: user_roles_select), so this
+  // is gated on isAdmin — for anyone else it would come back empty.
+  const fetchProjectManagers = async () => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("user_id, profiles!inner(id, full_name, status_id)")
+      .eq("role_name", "project_manager")
+      .eq("profiles.status_id", 1);
+
+    if (error) {
+      toast({ title: "Could not load project managers", variant: "destructive" });
+      return;
+    }
+
+    const unique: ProjectManagerOption[] = [];
+    for (const row of data || []) {
+      const { id, full_name } = (row as { profiles: ProjectManagerOption }).profiles;
+      if (!unique.some((m) => m.id === id)) unique.push({ id, full_name });
+    }
+
+    unique.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
+    setProjectManagers(unique);
+  };
+
+  const patchProject = (projectId: string, patch: Partial<Project>) => {
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
+    setSelectedProject((prev) => (prev?.id === projectId ? { ...prev, ...patch } : prev));
+  };
+
+  const handleAssignManager = async (project: Project, managerId: string) => {
+    setSavingField("manager");
+    try {
+      const { error } = await supabase
+        .from("projects")
+        .update({ manager_id: managerId || null })
+        .eq("id", project.id);
+
+      if (error) throw error;
+
+      const manager = projectManagers.find((m) => m.id === managerId) || null;
+      patchProject(project.id, { manager });
+      toast({
+        title: manager ? `Assigned to ${manager.full_name}` : "Project manager unassigned",
+      });
+    } catch (err) {
+      toast({
+        title: err instanceof Error ? err.message : "Could not update project manager",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingField(null);
+    }
+  };
+
+  const handleChangeStatus = async (project: Project, status: ProjectStatus) => {
+    setSavingField("status");
+    try {
+      const { data, error } = await supabase.functions.invoke("update-project-status", {
+        body: { projectId: project.id, status },
+      });
+
+      // A non-2xx reply surfaces as a generic "non-2xx status code" message, so dig
+      // the real reason out of the response body before showing it.
+      if (error) {
+        let detail = error.message;
+        try {
+          const { context } = error as { context?: { json?: () => Promise<{ error?: string }> } };
+          const body = await context?.json?.();
+          if (body?.error) detail = body.error;
+        } catch { /* keep the generic message */ }
+        throw new Error(detail);
+      }
+      if (data && !data.success) throw new Error(data.error || "Failed to update status");
+
+      patchProject(project.id, { status });
+      toast({
+        title: `Status set to ${STATUS_OPTIONS.find((s) => s.value === status)?.label || status}`,
+      });
+    } catch (err) {
+      toast({
+        title: err instanceof Error ? err.message : "Could not update status",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingField(null);
+    }
+  };
+
   const filteredProjects = useMemo(() => {
     return projects.filter((project) => {
       const matchesSearch =
@@ -189,9 +303,6 @@ export default function ProjectManagementDashboard() {
   }, [projects, searchTerm, statusFilter]);
 
   const canCreateProject = ["admin", "manager"].includes(userRole || "");
-  const canEditProject = (project: Project) =>
-    ["admin", "manager"].includes(userRole || "") ||
-    (userRole === "project_manager" && project.manager?.id === currentUser?.profile?.id);
 
   const getStatusColor = (status: ProjectStatus) => {
     const colors: Record<ProjectStatus, string> = {
@@ -389,9 +500,17 @@ export default function ProjectManagementDashboard() {
                           {StatusIcon}
                           {project.status.replace("_", " ")}
                         </span>
-                        {canEditProject(project) && (
-                          <button className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
-                            <MoreVertical className="w-5 h-5 text-muted-foreground" />
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedProject(project);
+                            }}
+                            title="Assign manager & set status"
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-white/10 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-white/5 transition-all"
+                          >
+                            <UserCog className="w-4 h-4" />
+                            Manage
                           </button>
                         )}
                       </div>
@@ -408,12 +527,12 @@ export default function ProjectManagementDashboard() {
                           <Users className="w-4 h-4 flex-shrink-0 text-primary/70" />
                           <span className="truncate">{project.client.company_name || project.client.full_name}</span>
                         </div>
-                        {project.manager && (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <UserCheck className="w-4 h-4 flex-shrink-0 text-primary/70" />
-                            <span className="truncate">{project.manager.full_name}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <UserCheck className="w-4 h-4 flex-shrink-0 text-primary/70" />
+                          <span className={`truncate ${project.manager ? "" : "italic text-muted-foreground/60"}`}>
+                            {project.manager?.full_name || "No manager assigned"}
+                          </span>
+                        </div>
                         <div className="flex items-center justify-between pt-3 border-t border-white/10">
                           <div className="flex items-center gap-2">
                             <Calendar className="w-4 h-4 text-primary/70" />
@@ -517,7 +636,21 @@ export default function ProjectManagementDashboard() {
                         : "No deadline"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button className="text-primary hover:text-primary/80">View</button>
+                      <div className="flex items-center justify-end gap-3">
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedProject(project);
+                            }}
+                            className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            <UserCog className="w-4 h-4" />
+                            Manage
+                          </button>
+                        )}
+                        <button className="text-primary hover:text-primary/80">View</button>
+                      </div>
                     </td>
                   </motion.tr>
                 ))}
@@ -560,6 +693,123 @@ export default function ProjectManagementDashboard() {
           </div>
         </div>
       </motion.div> */}
+
+      {/* Manage Project panel — assign a manager, set the status */}
+      <AnimatePresence>
+        {isAdmin && selectedProject && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => savingField === null && setSelectedProject(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg"
+            >
+              <GlassCard className="border border-white/10 overflow-hidden">
+                <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-white/10">
+                  <div className="min-w-0">
+                    <h3 className="text-xl font-bold">Manage Project</h3>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {selectedProject.project_number} — {selectedProject.title}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedProject(null)}
+                    disabled={savingField !== null}
+                    className="p-2 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-50"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="px-6 py-6 space-y-6">
+                  <div>
+                    <label
+                      htmlFor="manage-project-manager"
+                      className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-2"
+                    >
+                      <UserCheck className="w-4 h-4 text-primary/70" />
+                      Project Manager
+                    </label>
+                    <select
+                      id="manage-project-manager"
+                      value={selectedProject.manager?.id || ""}
+                      disabled={savingField !== null}
+                      onChange={(e) => handleAssignManager(selectedProject, e.target.value)}
+                      className="w-full px-4 py-3 glass border border-white/10 rounded-xl text-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all disabled:opacity-50"
+                    >
+                      <option value="">Unassigned</option>
+                      {projectManagers.map((m) => (
+                        <option key={m.id} value={m.id}>{m.full_name}</option>
+                      ))}
+                    </select>
+                    {projectManagers.length === 0 && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        No active project managers found. Create one under Users, or set an
+                        existing user's status to Active.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="manage-project-status"
+                      className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-2"
+                    >
+                      <Activity className="w-4 h-4 text-primary/70" />
+                      Status
+                    </label>
+                    <select
+                      id="manage-project-status"
+                      value={selectedProject.status}
+                      disabled={savingField !== null}
+                      onChange={(e) => handleChangeStatus(selectedProject, e.target.value as ProjectStatus)}
+                      className="w-full px-4 py-3 glass border border-white/10 rounded-xl text-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all disabled:opacity-50"
+                    >
+                      {/* `projects.status` is free text, so a row can hold a value the Edge
+                          Function won't accept (e.g. "cancelled"). Keep it selectable-but-inert
+                          so the dropdown still reflects reality. */}
+                      {!STATUS_OPTIONS.some((s) => s.value === selectedProject.status) && (
+                        <option value={selectedProject.status} disabled>
+                          {selectedProject.status.replace("_", " ")}
+                        </option>
+                      )}
+                      {STATUS_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {savingField && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-6 py-4 glass border-t border-white/10 flex justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate(`/admin/projects/${selectedProject.id}`)}
+                    className="glass rounded-xl"
+                  >
+                    Open full project
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* New Project Modal */}
       <NewProjectModal
