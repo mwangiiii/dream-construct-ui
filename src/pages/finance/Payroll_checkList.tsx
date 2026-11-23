@@ -165,6 +165,236 @@ const fmtDateTime = (d: string | null | undefined) =>
     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   }) : "—";
 
+// ─── PDF PRINT ────────────────────────────────────────────────────────────────
+// Same approach as printInvoice in InvoicePage: build a self-contained A4 HTML
+// document, open it in a named popup and let the browser's own "Save as PDF"
+// handle the conversion. No PDF library needed, and the output is selectable
+// text rather than a rasterised screenshot.
+// Returns false when the popup was blocked so the caller can surface a toast.
+
+const esc = (v: unknown): string =>
+  String(v ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+
+const PRINT_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter','Segoe UI',Arial,sans-serif;
+    background: #fff; color: #111827; font-size: 12px; line-height: 1.5;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page { margin: 0 auto; padding: 12mm 12mm 10mm; background: #fff; }
+  .mono { font-family: 'JetBrains Mono',monospace; }
+  .hdr { display: flex; justify-content: space-between; align-items: flex-start;
+         border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
+  .title { font-size: 20px; font-weight: 800; letter-spacing: -0.4px; }
+  .sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
+           font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.7px;
+       color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 6px 6px; font-weight: 700; }
+  td { padding: 6px 6px; border-bottom: 1px solid #f3f4f6; font-size: 11px; }
+  tfoot td { border-top: 2px solid #111827; border-bottom: none; font-weight: 800; padding-top: 8px; }
+  .r { text-align: right; }
+  .sec { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;
+         color: #374151; background: #f9fafb; padding: 5px 6px; }
+  .kv { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .kv div { border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; }
+  .kv span { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: 0.6px; color: #6b7280; font-weight: 700; }
+  .kv strong { font-size: 12px; font-weight: 700; }
+  .foot { margin-top: 16px; padding-top: 8px; border-top: 1px solid #e5e7eb;
+          font-size: 9px; color: #9ca3af; display: flex; justify-content: space-between; }
+  @media print {
+    html, body { margin: 0; padding: 0; }
+    .page { width: 100%; padding: 8mm 10mm; }
+    .no-print { display: none !important; }
+    tr { page-break-inside: avoid; }
+    thead { display: table-header-group; }
+  }
+`;
+
+const STATUS_PRINT: Record<PaymentStatus, string> = {
+  Paid:    "background:#052e16;color:#4ade80;",
+  Unpaid:  "background:#2d0a0a;color:#f87171;",
+  Pending: "background:#2d1e00;color:#fbbf24;",
+  Overdue: "background:#2b1203;color:#fb923c;",
+};
+
+function printToolbar(label: string): string {
+  return `
+<div class="no-print" style="position:sticky;top:0;z-index:100;background:#1e293b;
+  border-bottom:1px solid #334155;padding:10px 20px;display:flex;align-items:center;gap:12px;">
+  <span style="font-family:Inter,sans-serif;font-size:13px;font-weight:600;color:#f8fafc;flex:1;">${label}</span>
+  <button onclick="window.print()" style="background:linear-gradient(135deg,#7c3aed,#6d28d9);
+    color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">
+    Save as PDF / Print
+  </button>
+  <button onclick="window.close()" style="background:transparent;color:#94a3b8;
+    border:1px solid #334155;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;">Close</button>
+</div>`;
+}
+
+function openPrintWindow(name: string, html: string, width: number): boolean {
+  const w = window.open("", name, `width=${width},height=760,scrollbars=yes,resizable=yes`);
+  if (!w) return false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  return true;
+}
+
+// Single-employee payslip.
+function printPayslip(entry: PayrollEntry, project?: Project | null): boolean {
+  const scope = project
+    ? `${esc(project.project_number)} — ${esc(project.title)}`
+    : "Company-wide (no project)";
+
+  const allDeductions: Array<[string, number]> = [
+    ["NSSF Tier I", n0(entry.nssf_tier1)],
+    ["NSSF Tier II", n0(entry.nssf_tier2)],
+    ["SHIF", n0(entry.shif)],
+    ["Affordable Housing Levy", n0(entry.housing_levy)],
+    ["Pension", n0(entry.pension)],
+    ["PAYE (net of relief)", n0(entry.paye_net)],
+  ];
+  const deductions = allDeductions.filter(([, v]) => v > 0);
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+<title>Payslip — ${esc(entry.employee_name)}</title><style>${PRINT_CSS}
+.page { width: 210mm; min-height: 297mm; }</style></head><body>
+${printToolbar(`Payslip · ${esc(entry.employee_name)}`)}
+<div class="page">
+  <div class="hdr">
+    <div>
+      <div class="title">Payslip</div>
+      <div class="sub">${scope}</div>
+    </div>
+    <div style="text-align:right">
+      <span class="badge" style="${STATUS_PRINT[entry.payment_status]}">${esc(entry.payment_status)}</span>
+      <div class="sub mono" style="margin-top:6px">${esc(entry.serial_no || `PR-${entry.id}`)}</div>
+    </div>
+  </div>
+
+  <div class="kv">
+    <div><span>Employee</span><strong>${esc(entry.employee_name)}</strong></div>
+    <div><span>Job ID</span><strong class="mono">${esc(entry.job_id || "—")}</strong></div>
+    <div><span>Rate</span><strong>${fmt(entry.rate)} / ${esc(entry.rate_type)}</strong></div>
+    <div><span>Time Worked</span><strong>${esc(entry.time_worked || "—")}</strong></div>
+    <div><span>Due Date</span><strong>${fmtDate(entry.due_date)}</strong></div>
+    <div><span>Paid Date</span><strong>${fmtDate(entry.paid_date)}</strong></div>
+    <div><span>Bank Code</span><strong class="mono">${esc(entry.bank_code || "—")}</strong></div>
+    <div><span>eTIMS</span><strong class="mono">${esc(entry.etims_code || "—")}</strong></div>
+  </div>
+
+  <table>
+    <tbody>
+      <tr><td class="sec" colspan="2">Earnings</td></tr>
+      <tr><td>Gross Pay</td><td class="r mono"><strong>${fmt(entry.gross_pay)}</strong></td></tr>
+      <tr><td class="sec" colspan="2">Statutory Deductions</td></tr>
+      ${deductions.map(([k, v]) => `<tr><td>${k}</td><td class="r mono">${fmt(v)}</td></tr>`).join("")}
+      <tr><td>Taxable Income</td><td class="r mono">${fmt(entry.taxable_income)}</td></tr>
+      <tr><td>Personal Relief</td><td class="r mono">(${fmt(entry.personal_relief)})</td></tr>
+      ${n0(entry.insurance_relief) > 0
+        ? `<tr><td>Insurance Relief</td><td class="r mono">(${fmt(entry.insurance_relief)})</td></tr>` : ""}
+      <tr><td><strong>Total Deductions</strong></td><td class="r mono"><strong>${fmt(entry.total_deductions)}</strong></td></tr>
+    </tbody>
+    <tfoot>
+      <tr><td>Net Pay</td><td class="r mono">${fmt(entry.net_pay)}</td></tr>
+    </tfoot>
+  </table>
+
+  ${entry.notes ? `<p style="margin-top:12px;font-size:10px;color:#6b7280"><strong>Notes:</strong> ${esc(entry.notes)}</p>` : ""}
+
+  <div class="foot">
+    <span>KRA / NSSF / SHIF / AHL compliant · 2026 rates</span>
+    <span>Generated ${new Date().toLocaleDateString("en-KE", { day: "2-digit", month: "long", year: "numeric" })}</span>
+  </div>
+</div>
+<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>
+</body></html>`;
+
+  return openPrintWindow("payslip_" + entry.id, html, 900);
+}
+
+// Multi-row payroll register (landscape A4).
+function printPayrollRegister(
+  entries: PayrollEntry[],
+  projectMap: Record<string, Project>,
+  label: string,
+): boolean {
+  const t = (f: (e: PayrollEntry) => number) => entries.reduce((a, e) => a + f(e), 0);
+
+  const rows = entries.map(e => `
+    <tr>
+      <td>${esc(e.employee_name)}</td>
+      <td class="mono">${esc(e.job_id || "—")}</td>
+      <td>${e.project_id && projectMap[e.project_id]
+            ? esc(projectMap[e.project_id].project_number) : "Company-wide"}</td>
+      <td class="r mono">${fmt(e.gross_pay)}</td>
+      <td class="r mono">${fmt(e.nssf_total)}</td>
+      <td class="r mono">${fmt(e.shif)}</td>
+      <td class="r mono">${fmt(e.housing_levy)}</td>
+      <td class="r mono">${fmt(e.paye_net)}</td>
+      <td class="r mono">${fmt(e.total_deductions)}</td>
+      <td class="r mono"><strong>${fmt(e.net_pay)}</strong></td>
+      <td>${fmtDate(e.due_date)}</td>
+      <td>${esc(e.payment_status)}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+<title>Payroll Register</title><style>${PRINT_CSS}
+.page { width: 297mm; min-height: 210mm; }
+@page { size: A4 landscape; }</style></head><body>
+${printToolbar(`Payroll Register · ${entries.length} records`)}
+<div class="page">
+  <div class="hdr">
+    <div>
+      <div class="title">Payroll Register</div>
+      <div class="sub">${esc(label)} · ${entries.length} record${entries.length === 1 ? "" : "s"}</div>
+    </div>
+    <div class="sub" style="text-align:right">
+      Generated ${new Date().toLocaleDateString("en-KE", { day: "2-digit", month: "long", year: "numeric" })}
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Employee</th><th>Job ID</th><th>Scope</th>
+        <th class="r">Gross</th><th class="r">NSSF</th><th class="r">SHIF</th>
+        <th class="r">AHL</th><th class="r">PAYE</th><th class="r">Deductions</th>
+        <th class="r">Net Pay</th><th>Due</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3">Total</td>
+        <td class="r mono">${fmt(t(e => n0(e.gross_pay)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.nssf_total)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.shif)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.housing_levy)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.paye_net)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.total_deductions)))}</td>
+        <td class="r mono">${fmt(t(e => n0(e.net_pay)))}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="foot">
+    <span>KRA / NSSF / SHIF / AHL compliant · 2026 rates</span>
+    <span>Dream Construct System</span>
+  </div>
+</div>
+<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>
+</body></html>`;
+
+  return openPrintWindow("payroll_register", html, 1100);
+}
+
 function sanitizeEntry(raw: PayrollEntry): PayrollEntry {
   const gross = n0(raw.gross_pay);
   const hasCalc = n0(raw.nssf_total) > 0 || n0(raw.net_pay) > 0 || gross === 0;
@@ -942,7 +1172,7 @@ function GlobalEntryModal({
                 <SectionLabel label="Link to Project" dotColor="bg-primary/50" textColor="text-primary/70"
                   sub="Optional — leave blank for company-wide entry" />
                 <Field label="Project (optional)"
-                  hint="Selecting a project filters the employee dropdown to that project's workers">
+                  hint="Selecting a project filters the employee dropdown to that project's workers, and posts this entry to that project's job costing. Company-wide entries do not appear in any project's job costing.">
                   <div className="relative">
                     <select
                       value={form.project_id ?? ""}
@@ -1185,8 +1415,9 @@ function ProjectCard({ project, onSelect, counts }: {
 }
 
 // ─── PAYROLL ROW ──────────────────────────────────────────────────────────────
-function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap }: {
+function PayrollRow({ entry, canEdit, onEdit, onDelete, onPrint, showProject, projectMap }: {
   entry: PayrollEntry; canEdit: boolean; onEdit: () => void; onDelete: () => void;
+  onPrint?: () => void;
   showProject?: boolean; projectMap?: Record<string, Project>;
 }) {
   const s = STATUS_STYLE[entry.payment_status];
@@ -1239,6 +1470,12 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, showProject, projectMap 
         {canEdit && (
           <td className="px-4 py-3.5 min-w-[90px] whitespace-nowrap">
             <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+              {onPrint && (
+                <button onClick={onPrint} title="Download payslip as PDF"
+                  className="text-xs text-primary hover:text-primary/80 transition-colors px-2 py-1 rounded-lg hover:bg-primary/10 font-medium">
+                  PDF
+                </button>
+              )}
               <button onClick={onEdit}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-white/8 font-medium">
                 Edit
@@ -1356,7 +1593,7 @@ function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: Payroll
 // ─── GROUPED TABLE BODY ───────────────────────────────────────────────────────
 function GroupedPayrollBody({
   entries, filtered, grouped, fetching, canEdit,
-  showProject, projectMap, onEdit, onDelete, onCreateFirst, tableHeaders,
+  showProject, projectMap, onEdit, onDelete, onPrint, onCreateFirst, tableHeaders,
 }: {
   entries: PayrollEntry[];
   filtered: PayrollEntry[];
@@ -1367,6 +1604,7 @@ function GroupedPayrollBody({
   projectMap?: Record<string, Project>;
   onEdit: (e: PayrollEntry) => void;
   onDelete: (e: PayrollEntry) => void;
+  onPrint?: (e: PayrollEntry) => void;
   onCreateFirst: () => void;
   tableHeaders: string[];
 }) {
@@ -1521,7 +1759,8 @@ function GroupedPayrollBody({
                         {rows.map((entry) => (
                           <PayrollRow key={entry.id} entry={entry} canEdit={canEdit}
                             showProject={showProject} projectMap={projectMap}
-                            onEdit={() => onEdit(entry)} onDelete={() => onDelete(entry)} />
+                            onEdit={() => onEdit(entry)} onDelete={() => onDelete(entry)}
+                            onPrint={onPrint ? () => onPrint(entry) : undefined} />
                         ))}
                       </tbody>
                     </table>
@@ -1637,6 +1876,21 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
     () => projects.filter((p) => entryCountByProject[p.id] > 0),
     [projects, entryCountByProject],
   );
+
+  const POPUP_BLOCKED = "Pop-up blocked. Allow pop-ups for this site to download payroll as PDF.";
+
+  const handlePrintRow = (e: PayrollEntry) => {
+    if (!printPayslip(e, e.project_id ? projectMap[e.project_id] : null)) push(POPUP_BLOCKED, "error");
+  };
+
+  const handleDownloadRegister = () => {
+    const scope = projectFilter === "company"
+      ? "Company-wide entries"
+      : projectFilter !== "all"
+        ? `${projectMap[projectFilter]?.project_number ?? "Project"} — ${projectMap[projectFilter]?.title ?? ""}`
+        : "All projects + company-wide";
+    if (!printPayrollRegister(filtered, projectMap, scope)) push(POPUP_BLOCKED, "error");
+  };
 
   const grandGross = allEntries.reduce((a, e) => a + n0(e.gross_pay), 0);
   const grandNet   = allEntries.reduce((a, e) => a + n0(e.net_pay),   0);
@@ -1829,6 +2083,16 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
               </select>
               <SelectChevron />
             </div>
+            <button
+              onClick={handleDownloadRegister}
+              disabled={filtered.length === 0}
+              title="Download the filtered payroll register as PDF"
+              className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-xl border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+              </svg>
+              Download Register
+            </button>
             <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
               {filtered.length} / {displayRows.length}
             </div>
@@ -1842,6 +2106,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             projectMap={projectMap}
             onEdit={(e) => { setEditing(e); setModal("edit"); }}
             onDelete={setDeleting}
+            onPrint={handlePrintRow}
             onCreateFirst={() => setModal("create")}
             tableHeaders={TABLE_HEADERS_GLOBAL}
           />
@@ -2094,6 +2359,17 @@ function PayrollView({ project, canEdit, onBack }: {
     return g;
   }, [filtered]);
 
+  const POPUP_BLOCKED = "Pop-up blocked. Allow pop-ups for this site to download payroll as PDF.";
+
+  const handlePrintRow = (e: PayrollEntry) => {
+    if (!printPayslip(e, project)) push(POPUP_BLOCKED, "error");
+  };
+
+  const handleDownloadRegister = () => {
+    if (!printPayrollRegister(filtered, { [project.id]: project },
+      `${project.project_number} — ${project.title}`)) push(POPUP_BLOCKED, "error");
+  };
+
   const grandGross = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
   const grandNet   = entries.reduce((a, e) => a + n0(e.net_pay),   0);
   const paidCount  = entries.filter((e) => e.payment_status === "Paid").length;
@@ -2243,6 +2519,16 @@ function PayrollView({ project, canEdit, onBack }: {
                 </select>
                 <SelectChevron />
               </div>
+              <button
+                onClick={handleDownloadRegister}
+                disabled={filtered.length === 0}
+                title="Download this project's payroll register as PDF"
+                className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-xl border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+                </svg>
+                Download Register
+              </button>
             </div>
           </CardHeader>
 
@@ -2252,6 +2538,7 @@ function PayrollView({ project, canEdit, onBack }: {
               fetching={fetching} canEdit={canEdit} showProject={false}
               onEdit={(e) => { setEditing(e); setModal("edit"); }}
               onDelete={setDeleting}
+              onPrint={handlePrintRow}
               onCreateFirst={() => setModal("create")}
               tableHeaders={TABLE_HEADERS}
             />

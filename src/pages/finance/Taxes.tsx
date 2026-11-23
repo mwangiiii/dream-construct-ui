@@ -43,7 +43,9 @@ type DeductionType = "PAYE" | "WHT" | "VAT" | "NSSF" | "SHIF" | "AHL" | "Other";
 
 interface TaxEntry {
   id: number;
-  project_id: string;
+  // NULL = firm-wide entry with no project counterpart (corporation tax, PAYE
+  // on head-office staff). Same model as AR and AP.
+  project_id: string | null;
   date: string;
   counter_party: string;
   kra_pin: string | null;
@@ -238,7 +240,7 @@ function recomputeBalances(entries: TaxEntry[]): TaxEntry[] {
   });
 }
 
-const makeEmptyForm = (projectId: string): TaxFormData => ({
+const makeEmptyForm = (projectId: string | null): TaxFormData => ({
   project_id:           projectId,
   date:                 new Date().toISOString().slice(0, 10),
   counter_party:        "",
@@ -283,7 +285,10 @@ function toWritable(form: TaxFormData): TaxFormData {
     is_asset, capital_allowance, cash_in, cash_out, running_balance, notes,
   } = form;
   return {
-    project_id, date, counter_party, kra_pin, transaction_type,
+    // Coerce "" to null: an empty string is not valid UUID input and Postgres
+    // rejects the whole insert with 22P02 rather than treating it as absent.
+    project_id: project_id || null,
+    date, counter_party, kra_pin, transaction_type,
     ref_number, description, tax_period, gross_amount, vat_rate, vat,
     output_vat, input_vat, net_amount, retention_percentage, retention_amount,
     wht_rate, wht_amount, paye, nssf, shif, housing_levy,
@@ -617,14 +622,19 @@ function TaxBreakdownPanel({ form, calc }: { form: TaxFormData; calc: TaxCalcRes
 }
 
 // ─── ENTRY MODAL ──────────────────────────────────────────────────────────────
-function EntryModal({ initial, onSave, onClose, loading }: {
+// showProjectSelector = true  →  global modal: project linking is optional
+// showProjectSelector = false →  per-project modal: project_id is fixed, not shown
+function EntryModal({ initial, onSave, onClose, loading, projects = [], showProjectSelector = false }: {
   initial: TaxFormData & { id?: number };
   onSave: (d: TaxFormData) => void;
   onClose: () => void;
   loading: boolean;
+  projects?: Project[];
+  showProjectSelector?: boolean;
 }) {
   const [form, setForm] = useState<TaxFormData>({ ...initial });
   const isEdit = Boolean(initial.id);
+  const isFirmWide = showProjectSelector && !form.project_id;
 
   const set = <K extends keyof TaxFormData>(k: K, v: TaxFormData[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
@@ -688,6 +698,34 @@ function EntryModal({ initial, onSave, onClose, loading }: {
         <div className="grid grid-cols-1 lg:grid-cols-5 max-h-[76vh] overflow-y-auto">
           {/* LEFT — inputs */}
           <div className="lg:col-span-3 px-6 py-5 space-y-4 border-r border-white/8 overflow-y-auto">
+
+            {showProjectSelector && (
+              <>
+                <SectionLabel label="Scope" dotColor="bg-violet-400" textColor="text-violet-400" />
+                <Field label="Linked Project"
+                  hint="Leave blank to post as a firm-wide (standalone) tax entry">
+                  <Select
+                    value={form.project_id ?? "__none__"}
+                    onValueChange={v => set("project_id", v === "__none__" ? null : v)}
+                  >
+                    <SelectTrigger className={inputCls}><SelectValue placeholder="Select project" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— No project (firm-wide / standalone) —</SelectItem>
+                      {projects.map(p => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.project_number} — {p.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isFirmWide && (
+                    <p className="text-[10px] text-violet-400/70 mt-1">
+                      Entry will appear only in the firm-wide tax register, and is excluded from project job costing.
+                    </p>
+                  )}
+                </Field>
+              </>
+            )}
 
             <SectionLabel label="Transaction Identity" dotColor="bg-sky-400" textColor="text-sky-400" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1669,6 +1707,7 @@ function GlobalTaxTable({ canEdit }: { canEdit: boolean }) {
   const [saving, setSaving]         = useState(false);
   const [showModal, setShowModal]   = useState(false);
   const [editing, setEditing]       = useState<TaxEntry | null>(null);
+  const [projects, setProjects]     = useState<Project[]>([]);
   const { toasts, push }            = useToast();
 
   const fetchAll = useCallback(async () => {
@@ -1679,6 +1718,11 @@ function GlobalTaxTable({ canEdit }: { canEdit: boolean }) {
   }, [push]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Populates the optional project selector in the global modal.
+  useEffect(() => {
+    api.projects().then(setProjects).catch(() => setProjects([]));
+  }, []);
 
   const handleCreate = async (form: TaxFormData) => {
     setSaving(true);
@@ -1733,10 +1777,12 @@ function GlobalTaxTable({ canEdit }: { canEdit: boolean }) {
 
       <AnimatePresence>
         {showModal && !editing && (
-          <EntryModal initial={makeEmptyForm("")} onSave={handleCreate} onClose={() => setShowModal(false)} loading={saving} />
+          <EntryModal initial={makeEmptyForm(null)} onSave={handleCreate} onClose={() => setShowModal(false)} loading={saving}
+            projects={projects} showProjectSelector={true} />
         )}
         {showModal && editing && (
-          <EntryModal initial={{ ...editing }} onSave={handleUpdate} onClose={() => { setShowModal(false); setEditing(null); }} loading={saving} />
+          <EntryModal initial={{ ...editing }} onSave={handleUpdate} onClose={() => { setShowModal(false); setEditing(null); }} loading={saving}
+            projects={projects} showProjectSelector={true} />
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />

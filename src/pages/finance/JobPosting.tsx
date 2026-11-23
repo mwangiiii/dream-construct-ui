@@ -132,6 +132,18 @@ type FormData = Omit<
   cost_category: ManualCostCategory;
 };
 
+// A payroll_checklist row as shown in the attach picker. Only the fields the
+// picker needs — the full payroll record lives in the Payroll module.
+interface PayrollPick {
+  id: number;
+  employee_name: string;
+  job_id: string;
+  gross_pay: number;
+  net_pay: number;
+  payment_status: string;
+  due_date: string | null;
+}
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const PHASES: JobPhase[] = [
@@ -262,6 +274,66 @@ const api = {
     return data as JobCosting;
   },
 
+  // Payroll entries available to attach — same project only, so one project's
+  // wages can never be attributed to another's job costing record. The DB
+  // trigger job_posting_payroll_link_guard enforces the same rule.
+  payrollForProject: async (projectId: string): Promise<PayrollPick[]> => {
+    const { data, error } = await supabase
+      .from("payroll_checklist")
+      .select("id,employee_name,job_id,gross_pay,net_pay,payment_status,due_date")
+      .eq("project_id", projectId)
+      .order("employee_name");
+    if (error) throw new Error(error.message);
+    return (data ?? []) as PayrollPick[];
+  },
+
+  payrollLinks: async (postingIds: string[]): Promise<Record<string, number[]>> => {
+    if (postingIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from("job_posting_payroll_links")
+      .select("job_posting_id,payroll_id")
+      .in("job_posting_id", postingIds);
+    if (error) throw new Error(error.message);
+    const map: Record<string, number[]> = {};
+    (data ?? []).forEach((r: { job_posting_id: string; payroll_id: number }) => {
+      (map[r.job_posting_id] ??= []).push(r.payroll_id);
+    });
+    return map;
+  },
+
+  // Replace the link set for a record: delete the removed, insert the added.
+  // Not wrapped in a transaction — a partial failure leaves the surviving links
+  // intact and the UI refetches, so the worst case is a stale selection rather
+  // than corrupted cost data.
+  setPayrollLinks: async (postingId: string, payrollIds: number[]): Promise<void> => {
+    const { data: existing, error: readErr } = await supabase
+      .from("job_posting_payroll_links")
+      .select("payroll_id")
+      .eq("job_posting_id", postingId);
+    if (readErr) throw new Error(readErr.message);
+
+    const before = new Set((existing ?? []).map((r: { payroll_id: number }) => r.payroll_id));
+    const after  = new Set(payrollIds);
+
+    const toRemove = [...before].filter(id => !after.has(id));
+    const toAdd    = [...after].filter(id => !before.has(id));
+
+    if (toRemove.length) {
+      const { error } = await supabase
+        .from("job_posting_payroll_links")
+        .delete()
+        .eq("job_posting_id", postingId)
+        .in("payroll_id", toRemove);
+      if (error) throw new Error(error.message);
+    }
+    if (toAdd.length) {
+      const { error } = await supabase
+        .from("job_posting_payroll_links")
+        .insert(toAdd.map(payroll_id => ({ job_posting_id: postingId, payroll_id })));
+      if (error) throw new Error(error.message);
+    }
+  },
+
   update: async (id: string, form: FormData): Promise<JobCosting> => {
     const pl = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
     const { data, error } = await supabase
@@ -305,26 +377,202 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// ─── PAYROLL PICKER ───────────────────────────────────────────────────────────
+// "Who do I want to include in this job costing record?" — multi-select over
+// the project's payroll entries. Selection is confirmed before it reaches the
+// parent form, so cancelling leaves the previous set untouched.
+
+function PayrollPickerModal({
+  entries, loading, initialSelected, onConfirm, onClose,
+}: {
+  entries: PayrollPick[];
+  loading: boolean;
+  initialSelected: number[];
+  onConfirm: (ids: number[]) => void;
+  onClose: () => void;
+}) {
+  const [sel, setSel] = useState<Set<number>>(new Set(initialSelected));
+  const [search, setSearch] = useState("");
+
+  const visible = useMemo(() => {
+    if (!search.trim()) return entries;
+    const q = search.toLowerCase();
+    return entries.filter(e =>
+      e.employee_name.toLowerCase().includes(q) || (e.job_id ?? "").toLowerCase().includes(q));
+  }, [entries, search]);
+
+  const toggle = (id: number) =>
+    setSel(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const allVisibleSelected = visible.length > 0 && visible.every(e => sel.has(e.id));
+  const toggleAllVisible = () =>
+    setSel(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visible.forEach(e => next.delete(e.id));
+      else visible.forEach(e => next.add(e.id));
+      return next;
+    });
+
+  const selectedTotal = entries
+    .filter(e => sel.has(e.id))
+    .reduce((s, e) => s + Number(e.gross_pay || 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="relative w-full max-w-2xl rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl bg-background/95"
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }} transition={{ duration: 0.2 }}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h3 className="text-base font-bold text-foreground">Include Payroll Records</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Select the employees whose wages belong to this job costing record.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search employee or job ID…"
+            className={inputCls + " flex-1"}
+          />
+          {visible.length > 0 && (
+            <button onClick={toggleAllVisible}
+              className="text-xs font-medium text-primary hover:text-primary/80 whitespace-nowrap px-3 py-2 rounded-lg hover:bg-primary/10 transition-all">
+              {allVisibleSelected ? "Clear all" : "Select all"}
+            </button>
+          )}
+        </div>
+
+        <div className="max-h-[46vh] overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center gap-3 py-16 text-sm text-muted-foreground">
+              <span className="w-4 h-4 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
+              Loading payroll entries…
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="py-16 text-center text-sm text-muted-foreground px-6">
+              No payroll entries exist for this project yet.
+              <br />
+              <span className="text-xs text-muted-foreground/70">
+                Add them in Payroll Checklist with this project selected, then come back.
+              </span>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="py-16 text-center text-sm text-muted-foreground">No entries match “{search}”.</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {visible.map(e => {
+                const checked = sel.has(e.id);
+                return (
+                  <label key={e.id}
+                    className={`flex items-center gap-3 px-6 py-3 cursor-pointer transition-colors ${
+                      checked ? "bg-primary/5" : "hover:bg-white/3"
+                    }`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggle(e.id)}
+                      className="w-4 h-4 accent-primary cursor-pointer flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{e.employee_name}</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">
+                        {e.job_id || "—"}
+                        {e.due_date ? ` · due ${fmtDate(e.due_date)}` : ""}
+                        {` · ${e.payment_status}`}
+                      </p>
+                    </div>
+                    <span className="text-sm font-mono tabular-nums text-foreground flex-shrink-0">
+                      {fmt(Number(e.gross_pay || 0))}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-white/10">
+          <div className="text-xs text-muted-foreground">
+            <span className="tabular-nums font-semibold text-foreground">{sel.size}</span> selected ·{" "}
+            <span className="tabular-nums font-mono text-primary">{fmt(selectedTotal)}</span> gross
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose}
+              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+              Cancel
+            </button>
+            <button onClick={() => onConfirm([...sel])}
+              className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95"
+              style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+              Confirm Selection
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── COSTING MODAL ────────────────────────────────────────────────────────────
 
 function CostingModal({
   initial, onSave, onClose, loading,
+  payrollEntries, payrollLoading, initialPayrollIds = [],
 }: {
   initial: FormData;
-  onSave: (f: FormData) => void;
+  onSave: (f: FormData, payrollIds: number[]) => void;
   onClose: () => void;
   loading: boolean;
+  payrollEntries: PayrollPick[];
+  payrollLoading: boolean;
+  initialPayrollIds?: number[];
 }) {
   const [form, setForm] = useState<FormData>(initial);
   const isEdit = "id" in initial;
 
+  const [payrollIds, setPayrollIds] = useState<number[]>(initialPayrollIds);
+  const [includePayroll, setIncludePayroll] = useState(initialPayrollIds.length > 0);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const set = <K extends keyof FormData>(k: K, v: FormData[K]) =>
     setForm(p => ({ ...p, [k]: v }));
 
-  const livePL = Number(form.budgeted_amount_paid) - Number(form.actual_amount_used);
+  const selectedPayroll = useMemo(
+    () => payrollEntries.filter(e => payrollIds.includes(e.id)),
+    [payrollEntries, payrollIds]
+  );
+
+  // Labour contributed by the attached payroll entries. Deliberately kept out
+  // of form.actual_amount_used: WIP sums payroll_checklist directly, so writing
+  // it into the stored actual would double-count it. See the link-table
+  // migration for the full reasoning.
+  const payrollTotal = selectedPayroll.reduce((s, e) => s + Number(e.gross_pay || 0), 0);
+  const manualActual = Number(form.actual_amount_used) || 0;
+  const effectiveActual = manualActual + (includePayroll ? payrollTotal : 0);
+
+  const livePL = Number(form.budgeted_amount_paid) - effectiveActual;
   const pct = Number(form.budgeted_amount_paid) > 0
-    ? Math.min(200, Math.round((Number(form.actual_amount_used) / Number(form.budgeted_amount_paid)) * 100))
+    ? Math.min(200, Math.round((effectiveActual / Number(form.budgeted_amount_paid)) * 100))
     : 0;
+
+  const handleToggleInclude = (on: boolean) => {
+    setIncludePayroll(on);
+    if (on && payrollIds.length === 0) setPickerOpen(true);
+    if (!on) setPayrollIds([]);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -459,7 +707,7 @@ function CostingModal({
               onChange={e => set("amount", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
           </Field>
 
-          {/* Live P&L preview */}
+          {/* Live P&L preview — uses the consolidated actual */}
           <div className="flex flex-col justify-center gap-2">
             <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl border ${
               livePL >= 0 ? "bg-emerald-500/5 border-emerald-500/20" : "bg-rose-500/5 border-rose-500/20"
@@ -469,6 +717,69 @@ function CostingModal({
                 {fmtSign(livePL)}
               </span>
             </div>
+          </div>
+
+          {/* ── Payroll inclusion ───────────────────────────────────────────── */}
+          <div className="col-span-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 overflow-hidden">
+            <label className="flex items-start gap-3 px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includePayroll}
+                onChange={e => handleToggleInclude(e.target.checked)}
+                className="w-4 h-4 mt-0.5 accent-primary cursor-pointer flex-shrink-0"
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Include payroll checklist records</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Attach specific employees' wages to this record. Their gross pay is added to the
+                  actual below. Labour still counts once in WIP — it is read from Payroll, not copied.
+                </p>
+              </div>
+            </label>
+
+            {includePayroll && (
+              <div className="px-4 pb-3 space-y-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={() => setPickerOpen(true)}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-all">
+                    {payrollIds.length ? "Change selection" : "Choose employees"}
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    <span className="tabular-nums font-semibold text-foreground">{payrollIds.length}</span>
+                    {payrollIds.length === 1 ? " employee" : " employees"} ·{" "}
+                    <span className="tabular-nums font-mono text-indigo-300">{fmt(payrollTotal)}</span>
+                  </span>
+                </div>
+
+                {selectedPayroll.length > 0 && (
+                  <div className="rounded-lg border border-white/10 divide-y divide-white/5 max-h-32 overflow-y-auto">
+                    {selectedPayroll.map(e => (
+                      <div key={e.id} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                        <span className="text-muted-foreground truncate">{e.employee_name}</span>
+                        <span className="font-mono tabular-nums text-foreground flex-shrink-0 ml-2">
+                          {fmt(Number(e.gross_pay || 0))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* The number the user asked to reconcile: manual + payroll. */}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {[
+                    { label: "Manual actual", value: fmt(manualActual),    color: "text-foreground"   },
+                    { label: "Payroll",       value: fmt(payrollTotal),    color: "text-indigo-300"   },
+                    { label: "Total actual",  value: fmt(effectiveActual), color: "text-emerald-400"  },
+                  ].map(c => (
+                    <div key={c.label} className="rounded-lg bg-white/4 border border-white/8 px-2.5 py-2">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground/70 font-bold mb-0.5">{c.label}</p>
+                      <p className={`text-[11px] font-bold font-mono tabular-nums truncate ${c.color}`} title={c.value}>{c.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Budget utilisation bar */}
@@ -487,18 +798,34 @@ function CostingModal({
             </div>
             {pct > 100 && (
               <p className="text-[10px] text-rose-400 mt-1">
-                ⚠ Over budget by {fmt(Number(form.actual_amount_used) - Number(form.budgeted_amount_paid))}
+                ⚠ Over budget by {fmt(effectiveActual - Number(form.budgeted_amount_paid))}
               </p>
             )}
           </div>
         </div>
+
+        <AnimatePresence>
+          {pickerOpen && (
+            <PayrollPickerModal
+              entries={payrollEntries}
+              loading={payrollLoading}
+              initialSelected={payrollIds}
+              onConfirm={ids => {
+                setPayrollIds(ids);
+                setIncludePayroll(ids.length > 0);
+                setPickerOpen(false);
+              }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
           <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
             Cancel
           </button>
-          <button onClick={() => onSave(form)} disabled={loading}
+          <button onClick={() => onSave(form, includePayroll ? payrollIds : [])} disabled={loading}
             className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
             style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
             {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
@@ -839,6 +1166,12 @@ function CostingsView({ project, canEdit, onBack }: {
   const [deleting, setDeleting] = useState<JobCosting | null>(null);
   const [saving,   setSaving]   = useState(false);
 
+  // Payroll attachment state. `payrollLinks` maps job_posting_id → payroll ids;
+  // `payrollEntries` is the project's pickable payroll rows.
+  const [payrollEntries, setPayrollEntries] = useState<PayrollPick[]>([]);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [payrollLinks,   setPayrollLinks]   = useState<Record<string, number[]>>({});
+
   const { toasts, push } = useToast();
 
   const fetchCostings = useCallback(async () => {
@@ -846,6 +1179,7 @@ function CostingsView({ project, canEdit, onBack }: {
     try {
       const data = await api.list(project.id);
       setCostings(data);
+      setPayrollLinks(await api.payrollLinks(data.map(d => d.id)));
     } catch (e: unknown) {
       push(e instanceof Error ? e.message : "Failed to load job costings.", "error");
     } finally { setFetching(false); }
@@ -853,22 +1187,51 @@ function CostingsView({ project, canEdit, onBack }: {
 
   useEffect(() => { fetchCostings(); }, [fetchCostings]);
 
+  useEffect(() => {
+    setPayrollLoading(true);
+    api.payrollForProject(project.id)
+      .then(setPayrollEntries)
+      .catch(() => setPayrollEntries([]))
+      .finally(() => setPayrollLoading(false));
+  }, [project.id]);
+
+  const grossById = useMemo(
+    () => Object.fromEntries(payrollEntries.map(e => [e.id, Number(e.gross_pay || 0)])),
+    [payrollEntries]
+  );
+
+  // Labour attached to a given record. Read-time only — never written into
+  // actual_amount_used, so WIP keeps counting payroll once at its own table.
+  const linkedPayrollTotal = useCallback(
+    (id: string) => (payrollLinks[id] ?? []).reduce((s, pid) => s + (grossById[pid] ?? 0), 0),
+    [payrollLinks, grossById]
+  );
+
+  const consolidatedActual = useCallback(
+    (c: JobCosting) => Number(c.actual_amount_used) + linkedPayrollTotal(c.id),
+    [linkedPayrollTotal]
+  );
+
   // ── CRUD ──────────────────────────────────────────────────────────────────
-  const handleCreate = async (form: FormData) => {
+  const handleCreate = async (form: FormData, payrollIds: number[]) => {
     setSaving(true);
     try {
       const row = await api.create({ ...form, project_id: project.id });
+      if (payrollIds.length) await api.setPayrollLinks(row.id, payrollIds);
       setCostings(p => [...p, row].sort((a, b) => a.phase.localeCompare(b.phase) || a.stage.localeCompare(b.stage)));
+      setPayrollLinks(p => ({ ...p, [row.id]: payrollIds }));
       push("Job Costing added."); setModal(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to add costing.", "error"); }
     finally { setSaving(false); }
   };
 
-  const handleUpdate = async (form: FormData) => {
+  const handleUpdate = async (form: FormData, payrollIds: number[]) => {
     if (!editing) return; setSaving(true);
     try {
       const row = await api.update(editing.id, form);
+      await api.setPayrollLinks(editing.id, payrollIds);
       setCostings(p => p.map(x => x.id === editing.id ? row : x));
+      setPayrollLinks(p => ({ ...p, [editing.id]: payrollIds }));
       push("Job Costing updated."); setModal(null); setEditing(null);
     } catch (e: unknown) { push(e instanceof Error ? e.message : "Failed to update costing.", "error"); }
     finally { setSaving(false); }
@@ -929,21 +1292,26 @@ function CostingsView({ project, canEdit, onBack }: {
 
   const grandTotals = useMemo(() => ({
     budgeted: costings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
-    actual:   costings.reduce((s, p) => s + Number(p.actual_amount_used),   0),
-    pl:       costings.reduce((s, p) => s + Number(p.profit_loss),          0),
+    // Actual and P&L consolidate attached payroll so the screen total matches
+    // the per-record total shown in the modal.
+    actual:   costings.reduce((s, p) => s + consolidatedActual(p), 0),
+    pl:       costings.reduce((s, p) => s + (Number(p.budgeted_amount_paid) - consolidatedActual(p)), 0),
     amount:   costings.reduce((s, p) => s + Number(p.amount),               0),
-  }), [costings]);
+  }), [costings, consolidatedActual]);
 
   const phaseSummary = useMemo(() =>
     Object.fromEntries(
-      PHASES.map(ph => [ph, {
-        count:    costings.filter(p => p.phase === ph).length,
-        budgeted: costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
-        actual:   costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.actual_amount_used),   0),
-        pl:       costings.filter(p => p.phase === ph).reduce((s, p) => s + Number(p.profit_loss),          0),
-      }])
+      PHASES.map(ph => {
+        const rows = costings.filter(p => p.phase === ph);
+        return [ph, {
+          count:    rows.length,
+          budgeted: rows.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
+          actual:   rows.reduce((s, p) => s + consolidatedActual(p), 0),
+          pl:       rows.reduce((s, p) => s + (Number(p.budgeted_amount_paid) - consolidatedActual(p)), 0),
+        }];
+      })
     ) as Record<JobPhase, { count: number; budgeted: number; actual: number; pl: number }>,
-  [costings]);
+  [costings, consolidatedActual]);
 
   const status = project.status ?? "planning";
 
@@ -974,6 +1342,8 @@ function CostingsView({ project, canEdit, onBack }: {
             onSave={handleCreate}
             onClose={() => setModal(null)}
             loading={saving}
+            payrollEntries={payrollEntries}
+            payrollLoading={payrollLoading}
           />
         )}
         {/* Mirror rows are read-only — they can only reach the modal via  */}
@@ -997,6 +1367,9 @@ function CostingsView({ project, canEdit, onBack }: {
             onSave={handleUpdate}
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
+            payrollEntries={payrollEntries}
+            payrollLoading={payrollLoading}
+            initialPayrollIds={payrollLinks[editing.id] ?? []}
           />
         )}
         {deleting && (
@@ -1165,8 +1538,8 @@ function CostingsView({ project, canEdit, onBack }: {
                   const rows   = grouped[ph]!;
                   const isOpen = expanded[ph];
                   const phB    = rows.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0);
-                  const phA    = rows.reduce((s, p) => s + Number(p.actual_amount_used),   0);
-                  const phPL   = rows.reduce((s, p) => s + Number(p.profit_loss),          0);
+                  const phA    = rows.reduce((s, p) => s + consolidatedActual(p), 0);
+                  const phPL   = phB - phA;
 
                   return (
                     <div key={ph}>
@@ -1210,15 +1583,18 @@ function CostingsView({ project, canEdit, onBack }: {
                             {/* Mobile card list — no horizontal scroll */}
                             <div className="md:hidden divide-y divide-white/8 px-3 pb-3">
                               {rows.map((costing) => {
-                                const pl  = Number(costing.profit_loss);
+                                const act = consolidatedActual(costing);
+                                const payroll = linkedPayrollTotal(costing.id);
+                                const pl  = Number(costing.budgeted_amount_paid) - act;
                                 const pct = Number(costing.budgeted_amount_paid) > 0
-                                  ? Math.min(200, Math.round((Number(costing.actual_amount_used) / Number(costing.budgeted_amount_paid)) * 100))
+                                  ? Math.min(200, Math.round((act / Number(costing.budgeted_amount_paid)) * 100))
                                   : 0;
                                 const meta = [
                                   { label: "Account Code", node: costing.account_code || "—" },
                                   { label: "eTIMS Code",   node: costing.etims_code || "—" },
                                   { label: "Utilisation",  node: `${pct}%` },
                                   { label: "Amount",       node: fmt(Number(costing.amount)) },
+                                  ...(payroll > 0 ? [{ label: "Incl. Payroll", node: fmt(payroll) }] : []),
                                 ];
                                 return (
                                   <div key={costing.id} className="py-4">
@@ -1232,7 +1608,7 @@ function CostingsView({ project, canEdit, onBack }: {
                                     <div className="grid grid-cols-3 gap-2 mb-3">
                                       {[
                                         { l: "Budgeted", v: fmt(Number(costing.budgeted_amount_paid)), c: "text-foreground" },
-                                        { l: "Actual",   v: fmt(Number(costing.actual_amount_used)),   c: pct > 100 ? "text-rose-400" : "text-foreground" },
+                                        { l: "Actual",   v: fmt(act),   c: pct > 100 ? "text-rose-400" : "text-foreground" },
                                         { l: "P&L",      v: fmtSign(pl),                                c: pl >= 0 ? "text-emerald-400" : "text-rose-400" },
                                       ].map(a => (
                                         <div key={a.l} className="rounded-lg bg-white/5 border border-white/8 px-2.5 py-2">
@@ -1293,9 +1669,13 @@ function CostingsView({ project, canEdit, onBack }: {
                                 </thead>
                                 <tbody>
                                   {rows.map((costing, ri) => {
-                                    const pl  = Number(costing.profit_loss);
+                                    // P&L and utilisation are recomputed against the
+                                    // consolidated actual; the stored profit_loss column
+                                    // only reflects the manual portion.
+                                    const act = consolidatedActual(costing);
+                                    const pl  = Number(costing.budgeted_amount_paid) - act;
                                     const pct = Number(costing.budgeted_amount_paid) > 0
-                                      ? Math.min(200, Math.round((Number(costing.actual_amount_used) / Number(costing.budgeted_amount_paid)) * 100))
+                                      ? Math.min(200, Math.round((act / Number(costing.budgeted_amount_paid)) * 100))
                                       : 0;
                                     return (
                                       <motion.tr key={costing.id}
@@ -1334,7 +1714,12 @@ function CostingsView({ project, canEdit, onBack }: {
                                         {/* Actual + utilisation bar */}
                                         <td className="px-5 py-3.5 whitespace-nowrap">
                                           <div>
-                                            <span className="text-sm tabular-nums text-foreground font-mono">{fmt(Number(costing.actual_amount_used))}</span>
+                                            <span className="text-sm tabular-nums text-foreground font-mono">{fmt(consolidatedActual(costing))}</span>
+                                            {linkedPayrollTotal(costing.id) > 0 && (
+                                              <div className="text-[10px] font-mono text-indigo-300/80 mt-0.5">
+                                                incl. {fmt(linkedPayrollTotal(costing.id))} payroll
+                                              </div>
+                                            )}
                                             <div className="mt-1 w-16 h-1 bg-white/10 rounded-full overflow-hidden">
                                               <div
                                                 className={`h-full rounded-full transition-all duration-500 ${pct > 100 ? "bg-rose-400/60" : "bg-emerald-400/60"}`}
