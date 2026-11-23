@@ -6,9 +6,13 @@ import { componentTagger } from "lovable-tagger";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
+    host: true,
     port: 8080,
-    allowedHosts: [".ngrok-free.app"],
+    allowedHosts: true,
+    hmr: {
+      clientPort: 443,
+      protocol: "wss",
+    },
     proxy: {
       // Proxy API requests to local Supabase Edge Functions
       "/api/chart-of-accounts": {
