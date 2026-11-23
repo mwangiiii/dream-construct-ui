@@ -1776,7 +1776,14 @@ function GroupedPayrollBody({
 }
 
 // ─── GLOBAL PAYROLL VIEW ──────────────────────────────────────────────────────
-type GlobalPayrollTab = "consolidated" | "by_project";
+// Same two-tab shape as the global AP and AR registers:
+//   - Consolidated tab: all entries (project-linked + company-wide)
+//   - Company-wide tab: only entries with project_id = null
+// Per-project filtering lives on the project-scoped payroll register, so the
+// old "By Project" tab here was redundant with it.
+// "Company-wide" is this module's existing term for a project-less entry —
+// the AP/AR equivalent is called "standalone".
+type GlobalPayrollTab = "consolidated" | "company";
 
 function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
   const [allEntries,    setAllEntries]    = useState<PayrollEntry[]>([]);
@@ -1784,7 +1791,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   const [search,        setSearch]        = useState("");
   const [filterStatus,  setFilterStatus]  = useState<PaymentStatus | "All">("All");
   const [activeTab,     setActiveTab]     = useState<GlobalPayrollTab>("consolidated");
-  const [projectFilter, setProjectFilter] = useState<string>("all");
   const [modal,         setModal]         = useState<null | "create" | "edit">(null);
   const [editing,       setEditing]       = useState<PayrollEntry | null>(null);
   const [deleting,      setDeleting]      = useState<PayrollEntry | null>(null);
@@ -1835,13 +1841,10 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
     finally { setSaving(false); }
   };
 
-  const displayRows = useMemo(() => {
-    if (activeTab === "by_project") {
-      if (projectFilter === "company") return allEntries.filter((e) => e.project_id === null);
-      if (projectFilter !== "all") return allEntries.filter((e) => e.project_id === projectFilter);
-    }
-    return allEntries;
-  }, [allEntries, activeTab, projectFilter]);
+  const displayRows = useMemo(
+    () => activeTab === "company" ? allEntries.filter((e) => e.project_id === null) : allEntries,
+    [allEntries, activeTab]
+  );
 
   const filtered = useMemo(() =>
     displayRows.filter((e) => {
@@ -1865,17 +1868,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
     return g;
   }, [filtered]);
 
-  const entryCountByProject = useMemo(() => {
-    const c: Record<string, number> = {};
-    allEntries.forEach((e) => { if (e.project_id) c[e.project_id] = (c[e.project_id] ?? 0) + 1; });
-    return c;
-  }, [allEntries]);
-
   const companyCount = allEntries.filter((e) => !e.project_id).length;
-  const projectsWithEntries = useMemo(
-    () => projects.filter((p) => entryCountByProject[p.id] > 0),
-    [projects, entryCountByProject],
-  );
 
   const POPUP_BLOCKED = "Pop-up blocked. Allow pop-ups for this site to download payroll as PDF.";
 
@@ -1884,11 +1877,9 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   };
 
   const handleDownloadRegister = () => {
-    const scope = projectFilter === "company"
-      ? "Company-wide entries"
-      : projectFilter !== "all"
-        ? `${projectMap[projectFilter]?.project_number ?? "Project"} — ${projectMap[projectFilter]?.title ?? ""}`
-        : "All projects + company-wide";
+    const scope = activeTab === "company"
+      ? "Company-wide entries only"
+      : "All projects + company-wide";
     if (!printPayrollRegister(filtered, projectMap, scope)) push(POPUP_BLOCKED, "error");
   };
 
@@ -1904,8 +1895,8 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   [allEntries]);
 
   const tabs: { key: GlobalPayrollTab; label: string; count: number; description: string }[] = [
-    { key: "consolidated", label: "Consolidated",  count: allEntries.length,           description: "All payroll entries — project-linked + company-wide. Scope + Job ID columns visible." },
-    { key: "by_project",   label: "By Project",    count: projectsWithEntries.length,  description: "Filter by a specific project or show company-wide only." },
+    { key: "consolidated", label: "Consolidated",      count: allEntries.length, description: "All payroll entries — project-linked + company-wide. Scope + Job ID columns visible." },
+    { key: "company",      label: "Company-wide Only", count: companyCount,      description: "Entries not linked to any specific project." },
   ];
 
   const TABLE_HEADERS_GLOBAL = [
@@ -2026,7 +2017,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
           <div className="flex gap-1 mb-4 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
             {tabs.map((tab) => (
               <button key={tab.key}
-                onClick={() => { setActiveTab(tab.key); setProjectFilter("all"); }}
+                onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === tab.key ? "bg-white/10 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}>
@@ -2037,29 +2028,6 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
               </button>
             ))}
           </div>
-
-          {activeTab === "by_project" && (
-            <div className="flex items-center gap-3 mb-3">
-              <div className="relative w-80">
-                <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className={selectCls}>
-                  <option value="all">— All Entries —</option>
-                  <option value="company">Company-wide only ({companyCount})</option>
-                  {projectsWithEntries.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.project_number} — {p.title} ({entryCountByProject[p.id] ?? 0})
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
-              {projectFilter !== "all" && (
-                <button onClick={() => setProjectFilter("all")}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
 
           <p className="text-xs text-muted-foreground mb-3">
             {tabs.find((t) => t.key === activeTab)?.description}

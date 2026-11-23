@@ -103,13 +103,8 @@ interface JobCosting {
   updated_at?: string;
 }
 
-const SOURCE_META: Record<Exclude<JobCostingSource, 'manual'>, { label: string; module: string; badge: string }> = {
-  payroll: { label: 'Payroll',  module: 'Payroll Checklist',    badge: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300' },
-  ap:      { label: 'AP',       module: 'Accounts Payable',     badge: 'bg-rose-500/10 border-rose-500/20 text-rose-300'       },
-  loan:    { label: 'Loan',     module: 'Loans',                badge: 'bg-amber-500/10 border-amber-500/20 text-amber-300'    },
-  tax:     { label: 'Tax',      module: 'Tax Transactions',     badge: 'bg-cyan-500/10 border-cyan-500/20 text-cyan-300'       },
-};
-
+// Mirror rows are filtered out of this screen entirely — isMirror is how they
+// are excluded from the phase groups and the totals.
 const isMirror = (c: JobCosting): c is JobCosting & { source: Exclude<JobCostingSource, 'manual'> } =>
   c.source !== 'manual';
 
@@ -555,13 +550,19 @@ function CostingModal({
     [payrollEntries, payrollIds]
   );
 
-  // Labour contributed by the attached payroll entries. Deliberately kept out
-  // of form.actual_amount_used: WIP sums payroll_checklist directly, so writing
-  // it into the stored actual would double-count it. See the link-table
-  // migration for the full reasoning.
   const payrollTotal = selectedPayroll.reduce((s, e) => s + Number(e.gross_pay || 0), 0);
-  const manualActual = Number(form.actual_amount_used) || 0;
-  const effectiveActual = manualActual + (includePayroll ? payrollTotal : 0);
+
+  // When payroll is attached the record IS that labour cost, so its actual
+  // equals the attached gross pay exactly — it is not added on top of a manual
+  // figure. The manual input is therefore zeroed and shown read-only.
+  //
+  // The stored actual_amount_used stays 0 in that case. It must: WIP computes
+  // SUM(manual job_postings) + SUM(payroll_checklist), so writing the wage into
+  // the job costing row too would count it twice. The displayed figure is
+  // derived from the links at read time instead.
+  const effectiveActual = includePayroll
+    ? payrollTotal
+    : (Number(form.actual_amount_used) || 0);
 
   const livePL = Number(form.budgeted_amount_paid) - effectiveActual;
   const pct = Number(form.budgeted_amount_paid) > 0
@@ -570,6 +571,9 @@ function CostingModal({
 
   const handleToggleInclude = (on: boolean) => {
     setIncludePayroll(on);
+    // Zeroing avoids a manual figure silently surviving underneath the
+    // payroll-derived actual.
+    if (on) setForm(p => ({ ...p, actual_amount_used: 0 }));
     if (on && payrollIds.length === 0) setPickerOpen(true);
     if (!on) setPayrollIds([]);
   };
@@ -695,10 +699,17 @@ function CostingModal({
               onChange={e => set("budgeted_amount_paid", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
           </Field>
 
-          {/* Actual Amount */}
+          {/* Actual Amount — driven by the payroll selection when attached */}
           <Field label="Actual Amount Used (Kshs) *">
-            <input type="number" step="0.01" min="0" value={form.actual_amount_used}
-              onChange={e => set("actual_amount_used", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
+            {includePayroll ? (
+              <div className={inputCls + " cursor-not-allowed bg-white/3 flex items-center justify-between"}>
+                <span className="font-mono tabular-nums text-foreground">{fmt(payrollTotal)}</span>
+                <span className="text-[9px] uppercase tracking-wider text-indigo-300/70 shrink-0 ml-2">from payroll</span>
+              </div>
+            ) : (
+              <input type="number" step="0.01" min="0" value={form.actual_amount_used}
+                onChange={e => set("actual_amount_used", e.target.value === "" ? "" : Number(e.target.value))} className={inputCls} />
+            )}
           </Field>
 
           {/* Amount */}
@@ -731,8 +742,8 @@ function CostingModal({
               <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground">Include payroll checklist records</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Attach specific employees' wages to this record. Their gross pay is added to the
-                  actual below. Labour still counts once in WIP — it is read from Payroll, not copied.
+                  Attach specific employees' wages to this record. The actual amount becomes their
+                  combined gross pay. Labour still counts once in WIP — it is read from Payroll, not copied.
                 </p>
               </div>
             </label>
@@ -765,18 +776,13 @@ function CostingModal({
                   </div>
                 )}
 
-                {/* The number the user asked to reconcile: manual + payroll. */}
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  {[
-                    { label: "Manual actual", value: fmt(manualActual),    color: "text-foreground"   },
-                    { label: "Payroll",       value: fmt(payrollTotal),    color: "text-indigo-300"   },
-                    { label: "Total actual",  value: fmt(effectiveActual), color: "text-emerald-400"  },
-                  ].map(c => (
-                    <div key={c.label} className="rounded-lg bg-white/4 border border-white/8 px-2.5 py-2">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground/70 font-bold mb-0.5">{c.label}</p>
-                      <p className={`text-[11px] font-bold font-mono tabular-nums truncate ${c.color}`} title={c.value}>{c.value}</p>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2">
+                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground/70 font-bold">
+                    Actual amount used
+                  </span>
+                  <span className="text-xs font-bold font-mono tabular-nums text-emerald-400">
+                    {fmt(payrollTotal)}
+                  </span>
                 </div>
               </div>
             )}
@@ -1264,10 +1270,12 @@ function CostingsView({ project, canEdit, onBack }: {
     }),
   [costings, filterPhase, search]);
 
-  // Mirror rows have no phase (they're linked from another module), so they
-  // don't belong in the phase-grouped view. Split them out.
-  const manualFiltered  = useMemo(() => filtered.filter(p => !isMirror(p)), [filtered]);
-  const mirrorFiltered  = useMemo(() => filtered.filter(isMirror),          [filtered]);
+  // Mirror rows (payroll/AP/loan/tax) are no longer surfaced on this screen —
+  // each source module owns its own register. Only manual rows are displayed,
+  // and only manual rows feed the totals, so the figures match what is on
+  // screen. Attached payroll still shows through consolidatedActual.
+  const manualFiltered = useMemo(() => filtered.filter(p => !isMirror(p)), [filtered]);
+  const manualCostings = useMemo(() => costings.filter(p => !isMirror(p)), [costings]);
 
   const grouped = useMemo(() => {
     const g: Partial<Record<JobPhase, JobCosting[]>> = {};
@@ -1279,30 +1287,17 @@ function CostingsView({ project, canEdit, onBack }: {
     return g;
   }, [manualFiltered]);
 
-  // Mirror rows grouped by their originating module for display.
-  const mirrorGrouped = useMemo(() => {
-    const g: Partial<Record<Exclude<JobCostingSource, 'manual'>, JobCosting[]>> = {};
-    mirrorFiltered.forEach(p => {
-      const src = p.source as Exclude<JobCostingSource, 'manual'>;
-      if (!g[src]) g[src] = [];
-      g[src]!.push(p);
-    });
-    return g;
-  }, [mirrorFiltered]);
-
   const grandTotals = useMemo(() => ({
-    budgeted: costings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
-    // Actual and P&L consolidate attached payroll so the screen total matches
-    // the per-record total shown in the modal.
-    actual:   costings.reduce((s, p) => s + consolidatedActual(p), 0),
-    pl:       costings.reduce((s, p) => s + (Number(p.budgeted_amount_paid) - consolidatedActual(p)), 0),
-    amount:   costings.reduce((s, p) => s + Number(p.amount),               0),
-  }), [costings, consolidatedActual]);
+    budgeted: manualCostings.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
+    actual:   manualCostings.reduce((s, p) => s + consolidatedActual(p), 0),
+    pl:       manualCostings.reduce((s, p) => s + (Number(p.budgeted_amount_paid) - consolidatedActual(p)), 0),
+    amount:   manualCostings.reduce((s, p) => s + Number(p.amount), 0),
+  }), [manualCostings, consolidatedActual]);
 
   const phaseSummary = useMemo(() =>
     Object.fromEntries(
       PHASES.map(ph => {
-        const rows = costings.filter(p => p.phase === ph);
+        const rows = manualCostings.filter(p => p.phase === ph);
         return [ph, {
           count:    rows.length,
           budgeted: rows.reduce((s, p) => s + Number(p.budgeted_amount_paid), 0),
@@ -1515,7 +1510,7 @@ function CostingsView({ project, canEdit, onBack }: {
                 <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
                 Loading job costings…
               </div>
-            ) : Object.keys(grouped).length === 0 && Object.keys(mirrorGrouped).length === 0 ? (
+            ) : Object.keys(grouped).length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
                 <svg className="w-12 h-12 opacity-20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                   <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
@@ -1786,55 +1781,6 @@ function CostingsView({ project, canEdit, onBack }: {
                     </div>
                   );
                 })}
-
-                {/* Linked from other modules — mirrored rows, display only. */}
-                {/* WIP counts these at their source table so they are NOT     */}
-                {/* editable here; the source module owns the record.          */}
-                {Object.keys(mirrorGrouped).length > 0 && (
-                  <div className="px-6 py-5 space-y-4 bg-white/[0.02]">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                        Linked from other modules
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/70">
-                        · read-only · edit at source
-                      </span>
-                    </div>
-                    {(Object.keys(mirrorGrouped) as Array<Exclude<JobCostingSource, 'manual'>>).map(src => {
-                      const meta   = SOURCE_META[src];
-                      const rows   = mirrorGrouped[src]!;
-                      const total  = rows.reduce((s, p) => s + Number(p.actual_amount_used), 0);
-                      return (
-                        <div key={src} className="rounded-xl border border-white/10 overflow-hidden">
-                          <div className="flex items-center justify-between px-4 py-2.5 bg-white/[0.03]">
-                            <div className="flex items-center gap-2">
-                              <Badge className={`text-[10px] px-2 py-0.5 font-mono border rounded-full ${meta.badge}`}>
-                                {meta.label}
-                              </Badge>
-                              <span className="text-xs text-muted-foreground">{meta.module}</span>
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-white/15 text-muted-foreground">
-                                {rows.length}
-                              </Badge>
-                            </div>
-                            <span className="text-xs font-mono tabular-nums text-foreground">{fmt(total)}</span>
-                          </div>
-                          <div className="divide-y divide-white/5">
-                            {rows.map(r => (
-                              <div key={r.id} className="flex items-center justify-between px-4 py-2 text-xs">
-                                <span className="text-muted-foreground truncate max-w-md" title={r.description}>
-                                  {r.description || "—"}
-                                </span>
-                                <span className="font-mono tabular-nums text-foreground">
-                                  {fmt(Number(r.actual_amount_used))}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
 
                 {/* Grand total bar */}
                 {costings.length > 0 && (

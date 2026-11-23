@@ -12,8 +12,8 @@ import { VendorSelect, type Vendor, type PMVendorFill } from "@/components/finan
 // Key facts about your existing accounts_payable table:
 //   id                     UUID (gen_random_uuid())  — NOT bigserial
 //   project_id             UUID NULL                 — NULL = standalone/firm-wide
-//   etims_code             TEXT NOT NULL             — required, NOT nullable
-//   receiving_account_code TEXT NOT NULL             — required, NOT nullable
+//   etims_code             TEXT NULL                 — optional; see 20261124150000
+//   receiving_account_code TEXT NULL                 — nullable FK to COA; never ''
 //   balance                NUMERIC GENERATED ALWAYS AS (total_amount - paid_amount) STORED
 //   status check           only: 'open','paid','overdue','partial'
 //   NO retaining_amount column                       — computed in UI only
@@ -48,18 +48,22 @@ interface AccountsPayable {
   // PM commodity (vendor + commodity + amount) rather than a vendor-level
   // rollup. NULL for ad-hoc AP entries with no PM counterpart.
   project_financial_id: number | null;
-  vendor_name: string;
-  invoice_number: string;
-  etims_code: string;                  // NOT NULL
-  date: string;
-  due_date: string;
+  // All optional — finance can post a payable with only the amount known and
+  // fill the rest in later. NULL (never "") is the stored "not known yet".
+  vendor_name: string | null;
+  invoice_number: string | null;
+  etims_code: string | null;
+  date: string;                        // NOT NULL — auto-set to today by the form
+  due_date: string | null;
   total_amount: number;
   paid_amount: number;
   balance: number;                     // DB GENERATED — never written
   status: APStatus;
   retaining_percent: number;
   date_of_payment: string | null;
-  receiving_account_code: string;      // NOT NULL
+  // Nullable FK to chart_of_accounts. Must be NULL, never "" — the empty
+  // string is not a valid account code and fails the FK.
+  receiving_account_code: string | null;
   notes: string | null;
   created_at?: string;
   updated_at?: string;
@@ -87,17 +91,20 @@ function buildDBPayload(form: APFormData): Record<string, unknown> {
     project_id:             form.project_id || null,
     vendor_id:              form.vendor_id   || null,
     project_financial_id:   form.project_financial_id ?? null,
-    vendor_name:            form.vendor_name,
-    invoice_number:         form.invoice_number,
-    etims_code:             form.etims_code,
+    // Coerce "" to null on every optional column. Sending "" would store
+    // blanks that read like data, break the receiving_account_code FK, and
+    // raise 22P02 on due_date (invalid input syntax for type date).
+    vendor_name:            form.vendor_name    || null,
+    invoice_number:         form.invoice_number || null,
+    etims_code:             form.etims_code     || null,
     date:                   form.date,
-    due_date:               form.due_date,
+    due_date:               form.due_date       || null,
     total_amount:           Number(form.total_amount)      || 0,
     paid_amount:            Number(form.paid_amount)       || 0,
     status:                 form.status,
     retaining_percent:      Number(form.retaining_percent) || 0,
     date_of_payment:        form.date_of_payment || null,
-    receiving_account_code: form.receiving_account_code,
+    receiving_account_code: form.receiving_account_code || null,
     notes:                  form.notes || null,
     // DO NOT include: balance (GENERATED ALWAYS), retaining_amount (doesn't exist),
     //                 id, created_at, updated_at (handled by DB trigger)
@@ -651,11 +658,10 @@ function APModal({
                   onSelect={handleVendorSelect}
                   onPMVendorSelect={handlePMVendorSelect}
                   projectId={form.project_id || null}
-                  label="Vendor *"
+                  label="Vendor"
                   hint={form.project_id
-                    ? "Shows project vendors from PM — or pick from master list"
-                    : "Firm-wide payable — pick from the vendor master list"}
-                  required
+                    ? "Optional — shows project vendors from PM, or pick from master list"
+                    : "Optional — firm-wide payable, pick from the vendor master list"}
                 />
               </div>
 
@@ -668,15 +674,15 @@ function APModal({
                   <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
                 </div>
               </Field>
-              <Field label="Invoice Number *">
-                <input value={form.invoice_number}
+              <Field label="Invoice Number">
+                <input value={form.invoice_number ?? ""}
                   onChange={e => set("invoice_number", e.target.value)}
-                  placeholder="e.g. INV-2026-001" className={inputCls} />
+                  placeholder="Optional — e.g. INV-2026-001" className={inputCls} />
               </Field>
-              <Field label="eTIMS Code *" hint="Kenya Revenue Authority eTIMS code">
-                <input value={form.etims_code}
+              <Field label="eTIMS Code" hint="Optional — Kenya Revenue Authority eTIMS code">
+                <input value={form.etims_code ?? ""}
                   onChange={e => set("etims_code", e.target.value)}
-                  placeholder="e.g. ETIMS-12345" className={inputCls} />
+                  placeholder="Optional — e.g. ETIMS-12345" className={inputCls} />
               </Field>
               <SelectField label="Status *"
                 value={form.status}
@@ -689,15 +695,15 @@ function APModal({
                   <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
                 </div>
               </Field>
-              <Field label="Due Date *">
+              <Field label="Due Date" hint="Optional — set once payment terms are agreed">
                 <input
                   type="date"
-                  value={form.due_date}
+                  value={form.due_date ?? ""}
                   onChange={e => set("due_date", e.target.value)}
                   className={inputCls + " [color-scheme:dark]"}
                 />
               </Field>
-              <Field label="Total Amount (KES) *">
+              <Field label="Total Amount (KES)">
                 <NumericInput value={form.total_amount}
                   onChange={v => set("total_amount", v)} placeholder="e.g. 120000" />
               </Field>
@@ -742,9 +748,8 @@ function APModal({
                   onChange={v => set("receiving_account_code", v)}
                   filter="bank"
                   valueField="code"
-                  label="Receiving Account Code *"
-                  hint="Select a bank account for this payment"
-                  required
+                  label="Receiving Account Code"
+                  hint="Optional — select a bank account for this payment"
                 />
               </div>
 
@@ -792,15 +797,9 @@ function APModal({
             </button>
             <button
               onClick={() => onSave(form)}
-              disabled={
-                loading ||
-                !form.vendor_name ||
-                !form.invoice_number ||
-                !form.etims_code ||
-                !form.receiving_account_code ||
-                !form.date ||
-                !form.due_date
-              }
+              // Every descriptive field is optional; only the auto-set invoice
+              // date is structurally required (DB NOT NULL).
+              disabled={loading || !form.date}
               className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-50 flex items-center gap-2"
               style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}
             >
@@ -838,7 +837,7 @@ function DeleteConfirm({ row, onConfirm, onClose, loading }: {
             <p className="text-sm text-muted-foreground leading-relaxed">
               Permanently delete invoice{" "}
               <span className="text-foreground font-medium">{row.invoice_number}</span>{" "}
-              from <span className="font-mono text-primary text-xs">{row.vendor_name}</span>?{" "}
+              from <span className="font-mono text-primary text-xs">{row.vendor_name || "unnamed vendor"}</span>?{" "}
               This cannot be undone.
             </p>
           </div>
@@ -1221,7 +1220,7 @@ function APTable({
                   <div key={row.id} className="px-4 py-4">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="min-w-0">
-                        <p className="font-medium text-foreground text-sm truncate">{row.vendor_name}</p>
+                        <p className="font-medium text-foreground text-sm truncate">{row.vendor_name || "— no vendor —"}</p>
                         <p className="font-mono text-xs text-primary mt-0.5">{row.invoice_number}</p>
                       </div>
                       <Badge className={`text-[10px] px-2 py-0.5 border rounded-full font-semibold shrink-0 ${ss.badge}`}>
@@ -1291,7 +1290,9 @@ function APTable({
                         initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: ri * 0.02, duration: 0.16 }}
                         className={`border-b border-white/5 transition-colors ${ss.row}`}>
-                        <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">{row.vendor_name}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap font-medium text-foreground text-xs">
+                          {row.vendor_name || <span className="italic text-muted-foreground/50">— no vendor —</span>}
+                        </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span className="font-mono text-xs font-semibold text-primary">{row.invoice_number}</span>
                         </td>
@@ -1448,8 +1449,8 @@ function ProjectAPView({ project, canEdit, onBack }: {
       if (filterStatus !== "All" && r.status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
-        return r.vendor_name.toLowerCase().includes(q) ||
-          r.invoice_number.toLowerCase().includes(q) ||
+        return (r.vendor_name ?? "").toLowerCase().includes(q) ||
+          (r.invoice_number ?? "").toLowerCase().includes(q) ||
           (r.etims_code ?? "").toLowerCase().includes(q) ||
           (r.receiving_account_code ?? "").toLowerCase().includes(q);
       }
@@ -1680,8 +1681,8 @@ function GlobalAPView({ canEdit, projects }: {
       if (filterStatus !== "All" && r.status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
-        return r.vendor_name.toLowerCase().includes(q) ||
-          r.invoice_number.toLowerCase().includes(q) ||
+        return (r.vendor_name ?? "").toLowerCase().includes(q) ||
+          (r.invoice_number ?? "").toLowerCase().includes(q) ||
           (r.etims_code ?? "").toLowerCase().includes(q) ||
           (r.receiving_account_code ?? "").toLowerCase().includes(q);
       }
