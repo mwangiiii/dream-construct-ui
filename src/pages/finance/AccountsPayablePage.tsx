@@ -11,7 +11,7 @@ import { VendorSelect, type Vendor, type PMVendorFill } from "@/components/finan
 //
 // Key facts about your existing accounts_payable table:
 //   id                     UUID (gen_random_uuid())  — NOT bigserial
-//   project_id             UUID NOT NULL             — required, NOT nullable
+//   project_id             UUID NULL                 — NULL = standalone/firm-wide
 //   etims_code             TEXT NOT NULL             — required, NOT nullable
 //   receiving_account_code TEXT NOT NULL             — required, NOT nullable
 //   balance                NUMERIC GENERATED ALWAYS AS (total_amount - paid_amount) STORED
@@ -40,7 +40,9 @@ type APStatus = "open" | "partial" | "paid" | "overdue";
 
 interface AccountsPayable {
   id: string;                          // UUID
-  project_id: string;                  // NOT NULL — always required
+  // NULL = standalone firm-wide payable (overhead, subscriptions) with no
+  // project counterpart. Same model as accounts_receivable.project_id.
+  project_id: string | null;
   vendor_id: string | null;            // FK → vendors.id
   // FK → project_financials.id. When set, ties this AP invoice to ONE specific
   // PM commodity (vendor + commodity + amount) rather than a vendor-level
@@ -82,7 +84,7 @@ const AP_STATUSES: APStatus[] = ["open", "partial", "paid", "overdue"];
 // which was causing: column "retaining_amount" can only be updated to DEFAULT
 function buildDBPayload(form: APFormData): Record<string, unknown> {
   return {
-    project_id:             form.project_id,
+    project_id:             form.project_id || null,
     vendor_id:              form.vendor_id   || null,
     project_financial_id:   form.project_financial_id ?? null,
     vendor_name:            form.vendor_name,
@@ -142,7 +144,7 @@ function deriveAP(f: APFormData): APFormData {
   };
 }
 
-const makeEmpty = (projectId: string): APFormData => ({
+const makeEmpty = (projectId: string | null): APFormData => ({
   project_id:             projectId,
   vendor_id:              null,
   project_financial_id:   null,
@@ -401,14 +403,17 @@ interface ProjectBudget {
   remaining: number;
 }
 
+// showProjectSelector = true  →  global modal: project linking is optional
+// showProjectSelector = false →  per-project modal: project_id is fixed, not shown
 function APModal({
-  initial, onSave, onClose, loading, projects = [],
+  initial, onSave, onClose, loading, projects = [], showProjectSelector = false,
 }: {
   initial: APFormData & { id?: string };
   onSave: (d: APFormData) => void;
   onClose: () => void;
   loading: boolean;
   projects?: Project[];
+  showProjectSelector?: boolean;
 }) {
   const [form, setForm] = useState<APFormData>(deriveAP({ ...initial }));
   const isEdit = Boolean(initial.id);
@@ -437,10 +442,15 @@ function APModal({
       });
   }, [form.project_id, projects]);
 
-  const handleProjectChange = (projectId: string) => {
+  const isStandalone = showProjectSelector && !form.project_id;
+
+  // Dropping the project invalidates any PM commodity link — a commodity
+  // belongs to a project, and the DB CHECK rejects the pairing.
+  const handleProjectChange = (projectId: string | null) => {
     setForm(p => deriveAP({
       ...p,
-      project_id: projectId,
+      project_id:           projectId,
+      project_financial_id: projectId ? p.project_financial_id : null,
     }));
   };
 
@@ -495,9 +505,16 @@ function APModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-base font-semibold text-foreground tracking-tight">
-            {isEdit ? "Edit AP Record" : "New AP Record"}
-          </h2>
+          <div>
+            <h2 className="text-base font-semibold text-foreground tracking-tight">
+              {isEdit ? "Edit AP Record" : "New AP Record"}
+            </h2>
+            {isStandalone && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Not linked to any project — this will appear in the firm-wide register.
+              </p>
+            )}
+          </div>
           <button onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-white/10">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -526,26 +543,33 @@ function APModal({
           {tab === "invoice" && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-              {/* Project selector */}
-              <div className="col-span-2">
-                <Field label="Project *" hint="All AP records must be linked to a project">
-                  <div className="relative">
-                    <select
-                      value={form.project_id ?? ""}
-                      onChange={e => handleProjectChange(e.target.value)}
-                      className={selectCls}
-                    >
-                      <option value="">— Select a project —</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.project_number} — {p.title}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
-                </Field>
-              </div>
+              {/* Project selector — only in global modal */}
+              {showProjectSelector && (
+                <div className="col-span-2">
+                  <Field label="Linked Project" hint="Leave blank to post as a firm-wide (standalone) payable">
+                    <div className="relative">
+                      <select
+                        value={form.project_id ?? ""}
+                        onChange={e => handleProjectChange(e.target.value || null)}
+                        className={selectCls}
+                      >
+                        <option value="">— No project (firm-wide / standalone) —</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.project_number} — {p.title}
+                          </option>
+                        ))}
+                      </select>
+                      <SelectChevron />
+                    </div>
+                    {isStandalone && (
+                      <p className="text-[10px] text-violet-400/70 mt-1">
+                        Entry will appear only in the consolidated firm-wide AP register, and is excluded from project job costing.
+                      </p>
+                    )}
+                  </Field>
+                </div>
+              )}
 
               {/* Project Info — read-only panel, auto-populated from selected project */}
               {form.project_id && (() => {
@@ -628,7 +652,9 @@ function APModal({
                   onPMVendorSelect={handlePMVendorSelect}
                   projectId={form.project_id || null}
                   label="Vendor *"
-                  hint={form.project_id ? "Shows project vendors from PM — or pick from master list" : "Select a project first to see PM vendors"}
+                  hint={form.project_id
+                    ? "Shows project vendors from PM — or pick from master list"
+                    : "Firm-wide payable — pick from the vendor master list"}
                   required
                 />
               </div>
@@ -768,7 +794,6 @@ function APModal({
               onClick={() => onSave(form)}
               disabled={
                 loading ||
-                !form.project_id ||
                 !form.vendor_name ||
                 !form.invoice_number ||
                 !form.etims_code ||
@@ -1104,7 +1129,12 @@ function APTable({
   projects?: Project[];
   emptyLabel?: string;
 }) {
-  const projectLabel = (pid: string) => {
+  const projectLabel = (pid: string | null) => {
+    if (!pid) return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">
+        Standalone
+      </span>
+    );
     const p = projects.find(pr => pr.id === pid);
     return p
       ? <span className="font-mono text-[11px] text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">{p.project_number}</span>
@@ -1185,7 +1215,7 @@ function APTable({
                   { label: "Retaining",    node: row.retaining_percent > 0 ? `${row.retaining_percent}%` : "—" },
                   { label: "Ret. Amount",  node: retAmt > 0 ? fmtKES(retAmt) : "—" },
                   { label: "Payment Date", node: fmtDate(row.date_of_payment) },
-                  ...(showProjectCol ? [{ label: "Project", node: projectLabel(row.project_id) }] : []),
+                  ...(showProjectCol ? [{ label: "Scope", node: projectLabel(row.project_id) }] : []),
                 ];
                 return (
                   <div key={row.id} className="px-4 py-4">
@@ -1608,7 +1638,12 @@ function ProjectAPView({ project, canEdit, onBack }: {
 }
 
 // ─── GLOBAL AP VIEW ───────────────────────────────────────────────────────────
-type GlobalAPTab = "consolidated" | "by_project";
+// Mirrors GlobalARView:
+//   - Consolidated tab: all invoices (project-linked + standalone)
+//   - Standalone tab: only invoices with project_id = null
+// Per-project filtering lives on the project-scoped AP register, so the old
+// "By Project" tab here was redundant with it.
+type GlobalAPTab = "consolidated" | "standalone";
 
 function GlobalAPView({ canEdit, projects }: {
   canEdit: boolean;
@@ -1620,7 +1655,6 @@ function GlobalAPView({ canEdit, projects }: {
   const [editing,       setEditing]      = useState<AccountsPayable | null>(null);
   const [deleting,      setDeleting]     = useState<AccountsPayable | null>(null);
   const [activeTab,     setActiveTab]    = useState<GlobalAPTab>("consolidated");
-  const [projectFilter, setProjectFilter]= useState<string>("all");
   const [search,        setSearch]       = useState("");
   const [filterStatus,  setFilterStatus] = useState<APStatus | "All">("All");
   const { toasts, push }                = useToast();
@@ -1636,12 +1670,10 @@ function GlobalAPView({ canEdit, projects }: {
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  const displayRows = useMemo(() => {
-    if (activeTab === "by_project" && projectFilter !== "all") {
-      return allRows.filter(r => r.project_id === projectFilter);
-    }
-    return allRows;
-  }, [allRows, activeTab, projectFilter]);
+  const displayRows = useMemo(
+    () => activeTab === "standalone" ? allRows.filter(r => r.project_id === null) : allRows,
+    [allRows, activeTab]
+  );
 
   const filtered = useMemo(() =>
     displayRows.filter(r => {
@@ -1665,20 +1697,11 @@ function GlobalAPView({ canEdit, projects }: {
     overdue:  displayRows.filter(r => r.status === "overdue").length,
   }), [displayRows]);
 
-  const invoiceCountByProject = useMemo(() => {
-    const c: Record<string, number> = {};
-    allRows.forEach(r => { c[r.project_id] = (c[r.project_id] ?? 0) + 1; });
-    return c;
-  }, [allRows]);
-
-  const projectsWithInvoices = useMemo(
-    () => projects.filter(p => invoiceCountByProject[p.id] > 0),
-    [projects, invoiceCountByProject]
-  );
+  const standaloneCount = allRows.filter(r => r.project_id === null).length;
 
   const tabs: { key: GlobalAPTab; label: string; count: number; description: string }[] = [
-    { key: "consolidated", label: "Consolidated",  count: allRows.length,     description: "All invoices across every project in the firm" },
-    { key: "by_project",   label: "By Project",    count: projectsWithInvoices.length, description: "Filter invoices by a specific project" },
+    { key: "consolidated", label: "Consolidated",    count: allRows.length,   description: "All invoices across every project plus standalone firm-wide records" },
+    { key: "standalone",   label: "Standalone Only", count: standaloneCount,  description: "Invoices not linked to any specific project" },
   ];
 
   return (
@@ -1688,7 +1711,7 @@ function GlobalAPView({ canEdit, projects }: {
       <AnimatePresence>
         {modal === "create" && (
           <APModal
-            initial={makeEmpty(projects[0]?.id ?? "")}
+            initial={makeEmpty(null)}
             onSave={form =>
               handleCreate(
                 form,
@@ -1699,6 +1722,7 @@ function GlobalAPView({ canEdit, projects }: {
             onClose={() => setModal(null)}
             loading={saving}
             projects={projects}
+            showProjectSelector={true}
           />
         )}
         {modal === "edit" && editing && (
@@ -1733,6 +1757,7 @@ function GlobalAPView({ canEdit, projects }: {
             onClose={() => { setModal(null); setEditing(null); }}
             loading={saving}
             projects={projects}
+            showProjectSelector={true}
           />
         )}
         {deleting && (
@@ -1765,8 +1790,8 @@ function GlobalAPView({ canEdit, projects }: {
           </span>
         </h2>
         <p className="text-center text-sm text-muted-foreground max-w-xl mx-auto">
-          Consolidated view of all vendor invoices across every project.
-          Switch to "By Project" to drill into a specific project's payables.
+          Consolidated view of all vendor invoices across every project and standalone firm-wide records.
+          Project linking is optional — leave blank to post a standalone payable.
         </p>
       </motion.div>
 
@@ -1809,7 +1834,7 @@ function GlobalAPView({ canEdit, projects }: {
           <div className="flex gap-1 mt-5 p-1 rounded-xl bg-white/5 border border-white/10 w-fit">
             {tabs.map(tab => (
               <button key={tab.key}
-                onClick={() => { setActiveTab(tab.key); setProjectFilter("all"); }}
+                onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium tracking-normal transition-all ${
                   activeTab === tab.key
                     ? "bg-white/10 text-foreground shadow-sm"
@@ -1822,33 +1847,6 @@ function GlobalAPView({ canEdit, projects }: {
               </button>
             ))}
           </div>
-
-          {activeTab === "by_project" && (
-            <div className="mt-3 flex items-center gap-3">
-              <div className="relative w-72">
-                <select
-                  value={projectFilter}
-                  onChange={e => setProjectFilter(e.target.value)}
-                  className={selectCls}
-                >
-                  <option value="all">— All Projects —</option>
-                  {projectsWithInvoices.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.project_number} — {p.title} ({invoiceCountByProject[p.id] ?? 0})
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
-              {projectFilter !== "all" && (
-                <button
-                  onClick={() => setProjectFilter("all")}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
 
           <p className="text-xs text-muted-foreground mt-2 mb-1">
             {tabs.find(t => t.key === activeTab)?.description}
@@ -1871,8 +1869,8 @@ function GlobalAPView({ canEdit, projects }: {
           showProjectCol={activeTab === "consolidated"}
           projects={projects}
           emptyLabel={
-            activeTab === "by_project" && projectFilter !== "all"
-              ? "No invoices found for this project."
+            activeTab === "standalone"
+              ? "No standalone invoices yet. Add an invoice without linking a project."
               : "No invoices posted yet."
           }
         />
@@ -1881,9 +1879,8 @@ function GlobalAPView({ canEdit, projects }: {
           <div className="flex flex-wrap gap-6 items-center justify-between px-6 py-4 border-t border-white/10 text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
               <span className="tabular-nums">{allRows.length} total invoices</span>
-              <span className="tabular-nums text-primary/70">
-                {projectsWithInvoices.length} project{projectsWithInvoices.length !== 1 ? "s" : ""} with invoices
-              </span>
+              {standaloneCount > 0 && <span className="tabular-nums text-violet-400/70">{standaloneCount} standalone</span>}
+              <span className="tabular-nums text-primary/70">{allRows.length - standaloneCount} project-linked</span>
             </div>
             <button onClick={fetchRows} className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
