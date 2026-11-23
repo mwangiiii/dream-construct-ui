@@ -9,10 +9,6 @@ export default defineConfig(({ mode }) => ({
     host: true,
     port: 8080,
     allowedHosts: true,
-    hmr: {
-      clientPort: 443,
-      protocol: "wss",
-    },
     proxy: {
       // Proxy API requests to local Supabase Edge Functions
       "/api/chart-of-accounts": {
