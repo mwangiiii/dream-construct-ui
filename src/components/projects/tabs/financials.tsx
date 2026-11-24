@@ -94,6 +94,11 @@ type TenderCompany = {
   contact_email: string;
   contact_phone: string;
   address: string;
+  // Payee bank details. Auto-fill AP's Receiving Account No when this vendor
+  // is selected on an invoice.
+  bank_name: string | null;
+  bank_account_no: string | null;
+  bank_branch: string | null;
 };
 
 type CatalogItem = {
@@ -554,7 +559,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   // Company modal
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showCompanyForm, setShowCompanyForm] = useState(false);
-  const [companyForm, setCompanyForm] = useState({ id: "", name: "", contact_email: "", contact_phone: "", address: "" });
+  const [companyForm, setCompanyForm] = useState({ id: "", name: "", contact_email: "", contact_phone: "", address: "", bank_name: "", bank_account_no: "", bank_branch: "" });
   const [editingCompany, setEditingCompany] = useState(false);
   const [confirmDeleteCompany, setConfirmDeleteCompany] = useState<string | null>(null);
 
@@ -1054,8 +1059,15 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
   // ══════════════════════════════════════════════════════════
   const openCompanyForm = (company?: TenderCompany) => {
     setCompanyForm(company
-      ? { id: company.id, name: company.name, contact_email: company.contact_email, contact_phone: company.contact_phone, address: company.address }
-      : { id: "", name: "", contact_email: "", contact_phone: "", address: "" }
+      ? {
+          id: company.id, name: company.name,
+          contact_email: company.contact_email, contact_phone: company.contact_phone,
+          address: company.address,
+          bank_name:       company.bank_name       ?? "",
+          bank_account_no: company.bank_account_no ?? "",
+          bank_branch:     company.bank_branch     ?? "",
+        }
+      : { id: "", name: "", contact_email: "", contact_phone: "", address: "", bank_name: "", bank_account_no: "", bank_branch: "" }
     );
     setEditingCompany(!!company);
     if (company) setActiveCatalogCompanyId(company.id);
@@ -1064,7 +1076,7 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
 
   const closeCompanyForm = () => {
     setShowCompanyForm(false);
-    setCompanyForm({ id: "", name: "", contact_email: "", contact_phone: "", address: "" });
+    setCompanyForm({ id: "", name: "", contact_email: "", contact_phone: "", address: "", bank_name: "", bank_account_no: "", bank_branch: "" });
     setEditingCompany(false);
     resetCatalogForm();
     setCatalogSearch("");
@@ -1079,7 +1091,18 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
-      .insert([{ name: companyForm.name, contact_email: companyForm.contact_email, contact_phone: companyForm.contact_phone, address: companyForm.address, is_active: true }])
+      .insert([{
+        name: companyForm.name,
+        contact_email: companyForm.contact_email,
+        contact_phone: companyForm.contact_phone,
+        address: companyForm.address,
+        // Empty → null so "no bank details on file" has one representation and
+        // AP's auto-fill can test it truthily.
+        bank_name:       companyForm.bank_name       || null,
+        bank_account_no: companyForm.bank_account_no || null,
+        bank_branch:     companyForm.bank_branch     || null,
+        is_active: true,
+      }])
       .select().single();
     if (!error && data) {
       setTenderCompanies(prev => [...prev, data as TenderCompany]);
@@ -1095,7 +1118,15 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
     setLoading(true);
     const { data, error } = await supabase
       .from("tender_companies")
-      .update({ name: companyForm.name, contact_email: companyForm.contact_email, contact_phone: companyForm.contact_phone, address: companyForm.address })
+      .update({
+        name: companyForm.name,
+        contact_email: companyForm.contact_email,
+        contact_phone: companyForm.contact_phone,
+        address: companyForm.address,
+        bank_name:       companyForm.bank_name       || null,
+        bank_account_no: companyForm.bank_account_no || null,
+        bank_branch:     companyForm.bank_branch     || null,
+      })
       .eq("id", companyForm.id).select().single();
     if (!error && data) {
       setTenderCompanies(prev => prev.map(c => c.id === companyForm.id ? data as TenderCompany : c));
@@ -1902,6 +1933,39 @@ const Financials: React.FC<FinancialsProps> = ({ projectId }) => {
                       <textarea name="address" value={companyForm.address} onChange={handleCompanyChange} placeholder="Company address" rows={3}
                         className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition resize-none" disabled={loading} />
                     </div>
+                    {/* Payee bank details — feeds Receiving Account No on AP
+                        invoices for this vendor. */}
+                    <div className="pt-2 border-t border-white/10">
+                      <p className="text-xs font-bold uppercase tracking-wider text-sky-300/80 mb-3">
+                        Bank Details
+                      </p>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-muted-foreground mb-2">Bank Account No</label>
+                          <input name="bank_account_no" type="text" value={companyForm.bank_account_no} onChange={handleCompanyChange}
+                            placeholder="e.g., 01234567890"
+                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" disabled={loading} />
+                          <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Auto-fills "Receiving Account No" when this vendor is selected on an Accounts Payable invoice.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-muted-foreground mb-2">Bank Name</label>
+                            <input name="bank_name" type="text" value={companyForm.bank_name} onChange={handleCompanyChange}
+                              placeholder="e.g., Equity Bank"
+                              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" disabled={loading} />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-muted-foreground mb-2">Branch</label>
+                            <input name="bank_branch" type="text" value={companyForm.bank_branch} onChange={handleCompanyChange}
+                              placeholder="e.g., Westlands"
+                              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-base font-medium focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition" disabled={loading} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-sm text-blue-400 flex items-start gap-2">
                       <Tag className="w-4 h-4 mt-0.5 shrink-0" />
                       <span>After {editingCompany ? "saving" : "adding"} the company, select it from the list to add its item prices. Prices will auto-populate in the financial form.</span>

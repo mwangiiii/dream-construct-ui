@@ -453,11 +453,16 @@ function APModal({
 
   // Dropping the project invalidates any PM commodity link — a commodity
   // belongs to a project, and the DB CHECK rejects the pairing.
+  // Going standalone also clears vendor_id and the commodity link: the vendor
+  // selector that sets them is hidden in that mode, so leaving them populated
+  // would persist an ID the user can no longer see or change. vendor_name is
+  // kept — it is still editable and still meaningful.
   const handleProjectChange = (projectId: string | null) => {
     setForm(p => deriveAP({
       ...p,
       project_id:           projectId,
       project_financial_id: projectId ? p.project_financial_id : null,
+      vendor_id:            projectId ? p.vendor_id : null,
     }));
   };
 
@@ -484,6 +489,11 @@ function APModal({
       vendor_name:          fill.vendorName,
       total_amount:         fill.totalAmount > 0 ? fill.totalAmount : p.total_amount,
       notes:                fill.notes || p.notes,
+      // Receiving Account No = the vendor's payee account, held on
+      // tender_companies. Only overwrite when the vendor actually has one on
+      // file, so picking a vendor with no bank details does not wipe a number
+      // that was typed by hand.
+      receiving_account_code: fill.bankAccountNo || p.receiving_account_code,
     }));
   };
 
@@ -650,29 +660,40 @@ function APModal({
                 );
               })()}
 
-              {/* Vendor selector */}
-              <div className="col-span-2">
-                <VendorSelect
-                  value={form.vendor_id ?? null}
-                  onChange={v => set("vendor_id", v || null)}
-                  onSelect={handleVendorSelect}
-                  onPMVendorSelect={handlePMVendorSelect}
-                  projectId={form.project_id || null}
-                  label="Vendor"
-                  hint={form.project_id
-                    ? "Optional — shows project vendors from PM, or pick from master list"
-                    : "Optional — firm-wide payable, pick from the vendor master list"}
-                />
-              </div>
-
-              {/* Vendor name — auto-filled, read-only */}
-              <Field label="Vendor Name" hint="Auto-filled from vendor selection">
-                <div className={inputCls + " cursor-not-allowed bg-white/3 text-foreground/80 flex items-center justify-between"}>
-                  <span className={form.vendor_name ? "text-foreground" : "text-muted-foreground/50 italic"}>
-                    {form.vendor_name || "Auto-fills when vendor is selected"}
-                  </span>
-                  <span className="text-[9px] uppercase tracking-wider text-primary/60 shrink-0 ml-2">auto</span>
+              {/* Vendor selector — project-linked invoices only.
+                  The selector's whole purpose is linking a PM commodity
+                  (project_financials), and those only exist per project. On a
+                  standalone payable it has nothing meaningful to offer, so the
+                  typeable Vendor Name field below is the input instead. */}
+              {form.project_id && (
+                <div className="col-span-2">
+                  <VendorSelect
+                    value={form.vendor_id ?? null}
+                    onChange={v => set("vendor_id", v || null)}
+                    onSelect={handleVendorSelect}
+                    onPMVendorSelect={handlePMVendorSelect}
+                    projectId={form.project_id}
+                    label="Vendor"
+                    hint="Optional — shows project vendors from PM, or pick from master list"
+                  />
                 </div>
+              )}
+
+              {/* Vendor name — free text. Auto-fills from the selector above
+                  when a vendor is picked, but stays editable so a payee that
+                  exists in neither the PM section nor the companies master
+                  list can simply be typed in. */}
+              <Field label="Vendor Name"
+                hint={form.project_id
+                  ? "Optional — auto-fills from the selector above, or type any payee"
+                  : "Optional — type the payee for this firm-wide payable"}>
+                <input
+                  value={form.vendor_name ?? ""}
+                  onChange={e => set("vendor_name", e.target.value)}
+                  placeholder="Optional — e.g. Nairobi Hardware Ltd"
+                  className={inputCls}
+                  autoComplete="off"
+                />
               </Field>
               <Field label="Invoice Number">
                 <input value={form.invoice_number ?? ""}
@@ -742,15 +763,23 @@ function APModal({
                   onChange={e => set("date_of_payment", e.target.value || null)}
                   className={inputCls + " [color-scheme:dark]"} />
               </Field>
+              {/* Receiving Account No = the VENDOR's payee account, not a
+                  Chart of Accounts code. Auto-fills from
+                  tender_companies.bank_account_no when a PM vendor is picked;
+                  stays typeable for vendors with no bank details on file. */}
               <div className="col-span-2">
-                <COAAccountSelect
-                  value={form.receiving_account_code}
-                  onChange={v => set("receiving_account_code", v)}
-                  filter="bank"
-                  valueField="code"
-                  label="Receiving Account Code"
-                  hint="Optional — select a bank account for this payment"
-                />
+                <Field label="Receiving Account No"
+                  hint={form.project_id
+                    ? "Optional — auto-fills from the selected vendor's bank details, or type it"
+                    : "Optional — the vendor's bank account number for this payment"}>
+                  <input
+                    value={form.receiving_account_code ?? ""}
+                    onChange={e => set("receiving_account_code", e.target.value)}
+                    placeholder="Optional — vendor bank account number"
+                    className={inputCls}
+                    autoComplete="off"
+                  />
+                </Field>
               </div>
 
               {/* Payment summary */}

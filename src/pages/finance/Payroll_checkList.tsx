@@ -395,6 +395,150 @@ ${printToolbar(`Payroll Register · ${entries.length} records`)}
   return openPrintWindow("payroll_register", html, 1100);
 }
 
+// ─── EMAIL SHARE ──────────────────────────────────────────────────────────────
+// Posts to the send-payroll-register Edge Function. Only entry IDs are sent —
+// the function re-reads the wages with the service role and formats them, so a
+// tampered request cannot email fabricated figures.
+async function sendPayrollRegisterEmail(opts: {
+  to: string;
+  cc: string;
+  subject: string;
+  message: string;
+  scope: string;
+  payrollIds: number[];
+  mode?: "register" | "payslip";
+}): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not authenticated.");
+
+  const supabaseUrl =
+    (supabase as unknown as { supabaseUrl?: string }).supabaseUrl ??
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL;
+  if (!supabaseUrl) throw new Error("Supabase URL not configured.");
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/send-payroll-register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      to: opts.to,
+      cc: opts.cc,
+      subject: opts.subject,
+      message: opts.message,
+      scope: opts.scope,
+      payroll_ids: opts.payrollIds,
+      mode: opts.mode ?? "register",
+    }),
+  });
+
+  // Read as text first: a boot failure returns a non-JSON body, and swallowing
+  // that into {} is how a real cause becomes an opaque "Email failed (500)".
+  const raw = await res.text();
+  let body: Record<string, unknown> = {};
+  try { body = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON — use raw */ }
+
+  if (!res.ok) {
+    const parts = [
+      typeof body.error === "string" ? body.error : null,
+      typeof body.detail === "string" ? body.detail : null,
+      body.present ? `secrets present: ${JSON.stringify(body.present)}` : null,
+    ].filter(Boolean);
+    throw new Error(
+      parts.length ? parts.join(" — ") : (raw || `Email failed (${res.status})`)
+    );
+  }
+}
+
+// ─── SHARE MODAL ──────────────────────────────────────────────────────────────
+function ShareRegisterModal({ scope, count, title, defaultSubject, onSend, onClose }: {
+  scope: string;
+  count: number;
+  /** "Share Payroll Register" or "Email Payslip" */
+  title?: string;
+  defaultSubject?: string;
+  onSend: (f: { to: string; cc: string; subject: string; message: string }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [to, setTo]           = useState("");
+  const [cc, setCc]           = useState("");
+  const [subject, setSubject] = useState(defaultSubject ?? `Payroll Register — ${scope}`);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to.trim());
+
+  const submit = async () => {
+    setSending(true);
+    try { await onSend({ to, cc, subject, message }); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <motion.div className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
+      <motion.div
+        className="relative w-full max-w-lg rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl bg-[#0d0d0d]/95"
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.96 }} transition={{ duration: 0.2 }}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+          <div>
+            <h3 className="text-base font-bold text-foreground">{title ?? "Share Payroll Register"}</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {scope} · {count} record{count === 1 ? "" : "s"} — sent as a table in the email body
+            </p>
+          </div>
+          <button onClick={onClose}
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/10 transition-all">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <Field label="To *">
+            <input value={to} onChange={(e) => setTo(e.target.value)}
+              placeholder="recipient@example.com" className={inputCls} />
+          </Field>
+          <Field label="Cc" hint="Optional">
+            <input value={cc} onChange={(e) => setCc(e.target.value)}
+              placeholder="optional@example.com" className={inputCls} />
+          </Field>
+          <Field label="Subject">
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} className={inputCls} />
+          </Field>
+          <Field label="Message" hint="Optional — appears above the table">
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4}
+              placeholder="Add a short note for the recipient…"
+              className={inputCls + " resize-none"} />
+          </Field>
+
+          <p className="text-[10px] text-amber-400/80 leading-relaxed">
+            This register contains employee compensation data. Confirm the recipient before sending.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-xl hover:bg-white/5">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={sending || !validEmail || count === 0}
+            className="px-5 py-2 text-sm font-medium rounded-xl text-primary-foreground transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            style={{ background: "linear-gradient(135deg,hsl(var(--primary)),hsl(var(--accent)))" }}>
+            {sending && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+            {sending ? "Sending…" : "Send Email"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function sanitizeEntry(raw: PayrollEntry): PayrollEntry {
   const gross = n0(raw.gross_pay);
   const hasCalc = n0(raw.nssf_total) > 0 || n0(raw.net_pay) > 0 || gross === 0;
@@ -1217,39 +1361,44 @@ function GlobalEntryModal({
                 <input value={form.job_id} onChange={(e) => set("job_id", e.target.value)}
                   placeholder="J-001" className={inputCls} />
               </Field>
+              {/* Free text with suggestions rather than a hard dropdown. A
+                  company-wide entry is often for someone not assigned to any
+                  project, so the name must always be typeable; workerList is
+                  offered as autocomplete rather than as the only option. */}
               <Field
                 label="Employee Name *"
                 hint={
                   hasWorkers
                     ? form.project_id
-                      ? `${workerList.length} workers assigned to selected project`
-                      : `${workerList.length} active company workers`
-                    : "No workers found — enter name manually"
+                      ? `Type any name, or pick from ${workerList.length} workers on this project`
+                      : `Type any name, or pick from ${workerList.length} company workers`
+                    : "Type the employee's full name"
                 }
               >
-                {hasWorkers ? (
-                  <div className="relative">
-                    <select
-                      value={form.employee_name}
-                      onChange={(e) => set("employee_name", e.target.value)}
-                      className={selectCls}
-                    >
-                      <option value="">— Select employee —</option>
-                      {workerList.map((w) => (
-                        <option key={w.id} value={w.full_name}>
-                          {w.full_name}{w.role ? ` (${w.role})` : ""}
-                        </option>
-                      ))}
-                      {form.employee_name && !workerList.find((w) => w.full_name === form.employee_name) && (
-                        <option value={form.employee_name}>{form.employee_name} (saved)</option>
-                      )}
-                    </select>
-                    <SelectChevron />
-                  </div>
-                ) : (
-                  <input value={form.employee_name}
-                    onChange={(e) => set("employee_name", e.target.value)}
-                    placeholder="Full Name" className={inputCls} autoComplete="off" />
+                <input
+                  value={form.employee_name}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    set("employee_name", name);
+                    // Keep worker_id in step when the typed name resolves to a
+                    // known worker; a free-typed name simply has no worker row.
+                    const match = workerList.find(
+                      (w) => w.full_name.toLowerCase() === name.trim().toLowerCase());
+                    set("worker_id", match?.id ?? null);
+                  }}
+                  list={hasWorkers ? "payroll-worker-suggestions" : undefined}
+                  placeholder="Full name"
+                  className={inputCls}
+                  autoComplete="off"
+                />
+                {hasWorkers && (
+                  <datalist id="payroll-worker-suggestions">
+                    {workerList.map((w) => (
+                      <option key={w.id} value={w.full_name}>
+                        {w.role ?? ""}
+                      </option>
+                    ))}
+                  </datalist>
                 )}
               </Field>
             </div>
@@ -1415,9 +1564,10 @@ function ProjectCard({ project, onSelect, counts }: {
 }
 
 // ─── PAYROLL ROW ──────────────────────────────────────────────────────────────
-function PayrollRow({ entry, canEdit, onEdit, onDelete, onPrint, showProject, projectMap }: {
+function PayrollRow({ entry, canEdit, onEdit, onDelete, onPrint, onEmail, showProject, projectMap }: {
   entry: PayrollEntry; canEdit: boolean; onEdit: () => void; onDelete: () => void;
   onPrint?: () => void;
+  onEmail?: () => void;
   showProject?: boolean; projectMap?: Record<string, Project>;
 }) {
   const s = STATUS_STYLE[entry.payment_status];
@@ -1474,6 +1624,12 @@ function PayrollRow({ entry, canEdit, onEdit, onDelete, onPrint, showProject, pr
                 <button onClick={onPrint} title="Download payslip as PDF"
                   className="text-xs text-primary hover:text-primary/80 transition-colors px-2 py-1 rounded-lg hover:bg-primary/10 font-medium">
                   PDF
+                </button>
+              )}
+              {onEmail && (
+                <button onClick={onEmail} title="Email this payslip"
+                  className="text-xs text-sky-300 hover:text-sky-200 transition-colors px-2 py-1 rounded-lg hover:bg-sky-500/10 font-medium">
+                  Email
                 </button>
               )}
               <button onClick={onEdit}
@@ -1593,7 +1749,7 @@ function GrandTotalFooter({ entries, label = "Grand Total" }: { entries: Payroll
 // ─── GROUPED TABLE BODY ───────────────────────────────────────────────────────
 function GroupedPayrollBody({
   entries, filtered, grouped, fetching, canEdit,
-  showProject, projectMap, onEdit, onDelete, onPrint, onCreateFirst, tableHeaders,
+  showProject, projectMap, onEdit, onDelete, onPrint, onEmail, onCreateFirst, tableHeaders,
 }: {
   entries: PayrollEntry[];
   filtered: PayrollEntry[];
@@ -1605,6 +1761,7 @@ function GroupedPayrollBody({
   onEdit: (e: PayrollEntry) => void;
   onDelete: (e: PayrollEntry) => void;
   onPrint?: (e: PayrollEntry) => void;
+  onEmail?: (e: PayrollEntry) => void;
   onCreateFirst: () => void;
   tableHeaders: string[];
 }) {
@@ -1760,7 +1917,8 @@ function GroupedPayrollBody({
                           <PayrollRow key={entry.id} entry={entry} canEdit={canEdit}
                             showProject={showProject} projectMap={projectMap}
                             onEdit={() => onEdit(entry)} onDelete={() => onDelete(entry)}
-                            onPrint={onPrint ? () => onPrint(entry) : undefined} />
+                            onPrint={onPrint ? () => onPrint(entry) : undefined}
+                            onEmail={onEmail ? () => onEmail(entry) : undefined} />
                         ))}
                       </tbody>
                     </table>
@@ -1791,6 +1949,8 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
   const [search,        setSearch]        = useState("");
   const [filterStatus,  setFilterStatus]  = useState<PaymentStatus | "All">("All");
   const [activeTab,     setActiveTab]     = useState<GlobalPayrollTab>("consolidated");
+  const [sharing,       setSharing]       = useState(false);
+  const [emailing,      setEmailing]      = useState<PayrollEntry | null>(null);
   const [modal,         setModal]         = useState<null | "create" | "edit">(null);
   const [editing,       setEditing]       = useState<PayrollEntry | null>(null);
   const [deleting,      setDeleting]      = useState<PayrollEntry | null>(null);
@@ -1872,15 +2032,40 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
 
   const POPUP_BLOCKED = "Pop-up blocked. Allow pop-ups for this site to download payroll as PDF.";
 
+  const registerScope = activeTab === "company"
+    ? "Company-wide entries only"
+    : "All projects + company-wide";
+
   const handlePrintRow = (e: PayrollEntry) => {
     if (!printPayslip(e, e.project_id ? projectMap[e.project_id] : null)) push(POPUP_BLOCKED, "error");
   };
 
   const handleDownloadRegister = () => {
-    const scope = activeTab === "company"
-      ? "Company-wide entries only"
-      : "All projects + company-wide";
-    if (!printPayrollRegister(filtered, projectMap, scope)) push(POPUP_BLOCKED, "error");
+    if (!printPayrollRegister(filtered, projectMap, registerScope)) push(POPUP_BLOCKED, "error");
+  };
+
+  // Shares exactly what is on screen — the current tab plus any search/status
+  // filter — so the recipient sees the same rows the sender is looking at.
+  // emailing === null means "the whole register"; an entry means that payslip.
+  const shareTargets = emailing ? [emailing.id] : filtered.map((e) => e.id);
+  const shareScope   = emailing
+    ? (emailing.project_id ? projectMap[emailing.project_id]?.project_number ?? "Project" : "Company-wide")
+    : registerScope;
+
+  const handleShareSend = async (f: { to: string; cc: string; subject: string; message: string }) => {
+    try {
+      await sendPayrollRegisterEmail({
+        ...f,
+        scope: shareScope,
+        payrollIds: shareTargets,
+        mode: emailing ? "payslip" : "register",
+      });
+      push(`${emailing ? "Payslip" : "Register"} sent to ${f.to}`, "success");
+      setSharing(false);
+      setEmailing(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to send email.", "error");
+    }
   };
 
   const grandGross = allEntries.reduce((a, e) => a + n0(e.gross_pay), 0);
@@ -1932,6 +2117,18 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+        )}
+        {sharing && (
+          <ShareRegisterModal
+            scope={shareScope}
+            count={shareTargets.length}
+            title={emailing ? "Email Payslip" : "Share Payroll Register"}
+            defaultSubject={emailing
+              ? `Payslip — ${emailing.employee_name}`
+              : `Payroll Register — ${registerScope}`}
+            onSend={handleShareSend}
+            onClose={() => { setSharing(false); setEmailing(null); }}
+          />
         )}
       </AnimatePresence>
 
@@ -2061,6 +2258,18 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
               </svg>
               Download Register
             </button>
+            {canEdit && (
+              <button
+                onClick={() => setSharing(true)}
+                disabled={filtered.length === 0}
+                title="Email the filtered payroll register"
+                className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>
+                </svg>
+                Share via Email
+              </button>
+            )}
             <div className="flex items-center px-4 py-2.5 text-xs text-muted-foreground border border-white/8 rounded-xl bg-white/3 whitespace-nowrap tabular-nums">
               {filtered.length} / {displayRows.length}
             </div>
@@ -2075,6 +2284,7 @@ function GlobalPayrollView({ projects, canEdit }: { projects: Project[]; canEdit
             onEdit={(e) => { setEditing(e); setModal("edit"); }}
             onDelete={setDeleting}
             onPrint={handlePrintRow}
+            onEmail={(e) => { setEmailing(e); setSharing(true); }}
             onCreateFirst={() => setModal("create")}
             tableHeaders={TABLE_HEADERS_GLOBAL}
           />
@@ -2265,6 +2475,8 @@ function PayrollView({ project, canEdit, onBack }: {
   const [deleting,       setDeleting]       = useState<PayrollEntry | null>(null);
   const [saving,         setSaving]         = useState(false);
   const [projectWorkers, setProjectWorkers] = useState<Worker[]>([]);
+  const [sharing,        setSharing]        = useState(false);
+  const [emailing,       setEmailing]       = useState<PayrollEntry | null>(null);
   const { toasts, push } = useToast();
 
   const fetchEntries = useCallback(async () => {
@@ -2328,14 +2540,34 @@ function PayrollView({ project, canEdit, onBack }: {
   }, [filtered]);
 
   const POPUP_BLOCKED = "Pop-up blocked. Allow pop-ups for this site to download payroll as PDF.";
+  const registerScope = `${project.project_number} — ${project.title}`;
 
   const handlePrintRow = (e: PayrollEntry) => {
     if (!printPayslip(e, project)) push(POPUP_BLOCKED, "error");
   };
 
   const handleDownloadRegister = () => {
-    if (!printPayrollRegister(filtered, { [project.id]: project },
-      `${project.project_number} — ${project.title}`)) push(POPUP_BLOCKED, "error");
+    if (!printPayrollRegister(filtered, { [project.id]: project }, registerScope)) {
+      push(POPUP_BLOCKED, "error");
+    }
+  };
+
+  const shareTargets = emailing ? [emailing.id] : filtered.map((e) => e.id);
+
+  const handleShareSend = async (f: { to: string; cc: string; subject: string; message: string }) => {
+    try {
+      await sendPayrollRegisterEmail({
+        ...f,
+        scope: registerScope,
+        payrollIds: shareTargets,
+        mode: emailing ? "payslip" : "register",
+      });
+      push(`${emailing ? "Payslip" : "Register"} sent to ${f.to}`, "success");
+      setSharing(false);
+      setEmailing(null);
+    } catch (err: unknown) {
+      push(err instanceof Error ? err.message : "Failed to send email.", "error");
+    }
   };
 
   const grandGross = entries.reduce((a, e) => a + n0(e.gross_pay), 0);
@@ -2374,6 +2606,18 @@ function PayrollView({ project, canEdit, onBack }: {
         )}
         {deleting && (
           <DeleteConfirm entry={deleting} onConfirm={handleDelete} onClose={() => setDeleting(null)} loading={saving} />
+        )}
+        {sharing && (
+          <ShareRegisterModal
+            scope={registerScope}
+            count={shareTargets.length}
+            title={emailing ? "Email Payslip" : "Share Payroll Register"}
+            defaultSubject={emailing
+              ? `Payslip — ${emailing.employee_name}`
+              : `Payroll Register — ${registerScope}`}
+            onSend={handleShareSend}
+            onClose={() => { setSharing(false); setEmailing(null); }}
+          />
         )}
       </AnimatePresence>
 
@@ -2497,6 +2741,18 @@ function PayrollView({ project, canEdit, onBack }: {
                 </svg>
                 Download Register
               </button>
+              {canEdit && (
+                <button
+                  onClick={() => setSharing(true)}
+                  disabled={filtered.length === 0}
+                  title="Email this project's payroll register"
+                  className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>
+                  </svg>
+                  Share via Email
+                </button>
+              )}
             </div>
           </CardHeader>
 
@@ -2507,6 +2763,7 @@ function PayrollView({ project, canEdit, onBack }: {
               onEdit={(e) => { setEditing(e); setModal("edit"); }}
               onDelete={setDeleting}
               onPrint={handlePrintRow}
+              onEmail={(e) => { setEmailing(e); setSharing(true); }}
               onCreateFirst={() => setModal("create")}
               tableHeaders={TABLE_HEADERS}
             />
