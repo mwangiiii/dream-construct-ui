@@ -24,18 +24,23 @@ export interface PMVendorFill {
   commodityName:    string;
   commodityQty:     number;
   commodityUnit:    string;
+  /** Vendor payee bank account — fills AP's Receiving Account No. */
+  bankAccountNo:    string | null;
+  bankName:         string | null;
 }
 
 // One PM commodity option = one project_financials row.
 interface PMCommodity {
-  financialId:  number;
-  vendorId:     string;
-  vendorName:   string;
-  commodity:    string;
-  qty:          number;
-  unit:         string;
-  pricePerUnit: number;
-  totalPrice:   number;
+  financialId:   number;
+  vendorId:      string;
+  vendorName:    string;
+  commodity:     string;
+  qty:           number;
+  unit:          string;
+  pricePerUnit:  number;
+  totalPrice:    number;
+  bankAccountNo: string | null;
+  bankName:      string | null;
 }
 
 interface VendorSelectProps {
@@ -147,7 +152,7 @@ export function VendorSelect({
         material_quantity,
         material_unit,
         tender_company_id,
-        tender_company:tender_companies(id, name, contact_email, contact_phone)
+        tender_company:tender_companies(id, name, contact_email, contact_phone, bank_name, bank_account_no)
       `)
       .eq("project_id", projectId)
       .not("tender_company_id", "is", null)
@@ -160,14 +165,16 @@ export function VendorSelect({
           const tc = row.tender_company;
           if (!tc || !row.material_name) continue;
           rows.push({
-            financialId:  Number(row.id),
-            vendorId:     tc.id,
-            vendorName:   tc.name,
-            commodity:    row.material_name,
-            qty:          Number(row.material_quantity) || 0,
-            unit:         row.material_unit || "units",
-            pricePerUnit: Number(row.price_per_unit) || 0,
-            totalPrice:   Number(row.total_price) || 0,
+            financialId:   Number(row.id),
+            vendorId:      tc.id,
+            vendorName:    tc.name,
+            commodity:     row.material_name,
+            qty:           Number(row.material_quantity) || 0,
+            unit:          row.material_unit || "units",
+            pricePerUnit:  Number(row.price_per_unit) || 0,
+            totalPrice:    Number(row.total_price) || 0,
+            bankAccountNo: tc.bank_account_no ?? null,
+            bankName:      tc.bank_name ?? null,
           });
         }
 
@@ -199,6 +206,8 @@ export function VendorSelect({
           commodityName: pm.commodity,
           commodityQty:  pm.qty,
           commodityUnit: pm.unit,
+          bankAccountNo: pm.bankAccountNo,
+          bankName:      pm.bankName,
         });
       }
       onChange(""); // clear vendor_id — PM vendors are not in companies table
