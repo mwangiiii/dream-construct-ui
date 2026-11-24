@@ -524,6 +524,13 @@ const App = () => {
             <Route path="/finance/payroll-checklist"
               element={<FinanceGuard><PayrollChecklistPage /></FinanceGuard>} />
 
+            {/* Account settings. Reuses the existing settings page rather than
+                adding a fourth byte-identical copy of it — the page is a
+                generic profile/avatar/password editor with nothing role
+                specific in it. */}
+            <Route path="/finance/settings"
+              element={<FinanceGuard><AdminSettingsPage /></FinanceGuard>} />
+
             {/* Finance index/detail — admin + manager only (sensitive overview) */}
             <Route path="/finance/"
               element={

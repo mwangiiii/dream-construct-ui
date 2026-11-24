@@ -25,6 +25,7 @@ import {
   CalendarCheck,
   LayoutDashboard,
   ScrollText,
+  Settings,
   X,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -86,6 +87,12 @@ const financeRoutes = [
     group: "Closing",
     items: [
       { label: "Month-End Checklist",  short: "MEC",  path: "/finance/end-month-close-checklist",           icon: CalendarCheck       },
+    ],
+  },
+  {
+    group: "Account",
+    items: [
+      { label: "Settings",             short: "SET",  path: "/finance/settings",                            icon: Settings            },
     ],
   },
 ];
