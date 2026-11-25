@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchProjectProgress, useDerivedProgress } from "@/lib/projectProgress";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -669,6 +670,19 @@ function WIPModal({
       try {
         const fin = await api.projectFinancials(pid);
         setBreakdown(fin);
+
+        // Percent complete is derived from milestones/tasks, not read from
+        // projects.progress_percent — nothing writes that column, so autofilling
+        // from it seeded percent_complete (and therefore earned revenue) with a
+        // stale figure. Falls back to the existing form value if the derivation
+        // fails, so a transient error cannot zero a real number.
+        let derivedPct: number | null = null;
+        if (withContract) {
+          try {
+            derivedPct = (await fetchProjectProgress([pid]))[pid] ?? null;
+          } catch { /* keep the current value */ }
+        }
+
         setForm((p) => ({
           ...p,
           cost_incurred: fin.cost_incurred,
@@ -677,7 +691,7 @@ function WIPModal({
             ? {
                 // Contract value = revised budget (original + approved change orders)
                 total_contract: fin.revised_budget,
-                percent_complete: project?.progress_percent ?? p.percent_complete,
+                percent_complete: derivedPct ?? p.percent_complete,
               }
             : {}),
         }));
@@ -1097,6 +1111,7 @@ function ProjectCard({
 }) {
   const status = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
+  const pct = useDerivedProgress(project.id, project.progress_percent);
 
   return (
     <motion.button
@@ -1147,17 +1162,17 @@ function ProjectCard({
           </span>
         )}
       </div>
-      {project.progress_percent != null && (
+      {pct != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Progress</span>
-            <span className="text-[10px] font-mono font-bold text-primary">{project.progress_percent}%</span>
+            <span className="text-[10px] font-mono font-bold text-primary">{pct}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
               initial={{ width: 0 }}
-              animate={{ width: `${project.progress_percent}%` }}
+              animate={{ width: `${pct}%` }}
               transition={{ duration: 0.8, ease: "easeOut" }}
             />
           </div>
@@ -1491,6 +1506,9 @@ function WIPView({
 }) {
   const [entries, setEntries] = useState<WIPEntry[]>([]);
   const [financials, setFinancials] = useState<ProjectFinancials | null>(null);
+  // Derived, not projects.progress_percent — that column is never written.
+  // This figure drives liveEarned below, so a stale value understated revenue.
+  const livePercentDerived = useDerivedProgress(project.id, project.progress_percent);
   const [fetching, setFetching] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<BilledStatus | "All">("All");
@@ -1699,7 +1717,7 @@ function WIPView({
         {/* Live Project Financials — auto-pulled from project + modules + AR */}
         {(() => {
           const liveContract = financials ? n0(financials.revised_budget) : n0(project.budget_numeric);
-          const livePercent = n0(project.progress_percent);
+          const livePercent = n0(livePercentDerived);
           const liveEarned = +(liveContract * (livePercent / 100)).toFixed(2);
           const liveCost = n0(financials?.cost_incurred);
           const liveBilled = n0(financials?.billed_to_date);

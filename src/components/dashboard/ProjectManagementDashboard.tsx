@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { useProjectProgress } from "@/lib/projectProgress";
 import { toast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -302,6 +303,15 @@ export default function ProjectManagementDashboard() {
     });
   }, [projects, searchTerm, statusFilter]);
 
+  // Derived from milestones/tasks rather than projects.progress_percent, which
+  // nothing writes. See src/lib/projectProgress.ts. Falls back to the stored
+  // column until the derivation resolves so the figure does not flash 0.
+  const { progress: derivedProgress, ready: progressReady } =
+    useProjectProgress(useMemo(() => projects.map((p) => p.id), [projects]));
+
+  const progressOf = (p: Project): number =>
+    progressReady ? (derivedProgress[p.id] ?? 0) : (p.progress_percent ?? 0);
+
   const canCreateProject = ["admin", "manager"].includes(userRole || "");
 
   const getStatusColor = (status: ProjectStatus) => {
@@ -544,7 +554,7 @@ export default function ProjectManagementDashboard() {
                           </div>
                           <div className="text-right">
                             <div className="text-xs text-muted-foreground">Progress</div>
-                            <div className="font-bold text-primary">{project.progress_percent}%</div>
+                            <div className="font-bold text-primary">{progressOf(project)}%</div>
                           </div>
                         </div>
                       </div>
@@ -624,10 +634,10 @@ export default function ProjectManagementDashboard() {
                         <div className="w-16 bg-white/10 rounded-full h-2">
                           <div
                             className="bg-gradient-to-r from-primary to-accent h-2 rounded-full transition-all"
-                            style={{ width: `${project.progress_percent}%` }}
+                            style={{ width: `${progressOf(project)}%` }}
                           ></div>
                         </div>
-                        <span className="text-sm font-semibold text-primary">{project.progress_percent}%</span>
+                        <span className="text-sm font-semibold text-primary">{progressOf(project)}%</span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { useDerivedProgress } from "@/lib/projectProgress";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -1493,6 +1494,8 @@ function ProjectCard({ project, onSelect, counts }: {
 }) {
   const status = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
+  // projects.progress_percent is stale — nothing writes it. See lib/projectProgress.
+  const pct = useDerivedProgress(project.id, project.progress_percent);
   return (
     <motion.button onClick={() => onSelect(project)} whileHover={{ y: -2 }} transition={{ duration: 0.15 }}
       className="w-full text-left rounded-2xl border border-white/10 backdrop-blur-xl bg-white/4 p-5 hover:border-primary/35 hover:bg-white/7 transition-all duration-200 shadow-sm group">
@@ -1543,15 +1546,15 @@ function ProjectCard({ project, onSelect, counts }: {
           </span>
         )}
       </div>
-      {project.progress_percent != null && (
+      {pct != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Progress</span>
-            <span className="text-[10px] font-mono font-bold text-primary">{project.progress_percent}%</span>
+            <span className="text-[10px] font-mono font-bold text-primary">{pct}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
             <motion.div className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
-              initial={{ width: 0 }} animate={{ width: `${project.progress_percent}%` }}
+              initial={{ width: 0 }} animate={{ width: `${pct}%` }}
               transition={{ duration: 0.8, ease: "easeOut" }} />
           </div>
         </div>

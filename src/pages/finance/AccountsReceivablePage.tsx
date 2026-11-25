@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { useDerivedProgress } from "@/lib/projectProgress";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
 // ─── MIGRATION (run once in Supabase SQL Editor) ──────────────────────────────
@@ -903,6 +904,8 @@ function ProjectCard({ project, onSelect, billingCount }: {
 }) {
   const status    = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
+  // projects.progress_percent is stale — nothing writes it. See lib/projectProgress.
+  const pct       = useDerivedProgress(project.id, project.progress_percent);
 
   return (
     <motion.button
@@ -966,18 +969,18 @@ function ProjectCard({ project, onSelect, billingCount }: {
         )}
       </div>
 
-      {project.progress_percent != null && (
+      {pct != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[10px] text-muted-foreground">Progress</span>
-            <span className="text-[10px] font-mono text-primary">{project.progress_percent}%</span>
+            <span className="text-[10px] font-mono text-primary">{pct}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
             <motion.div
               className="h-full rounded-full"
               style={{ background: "linear-gradient(90deg,hsl(var(--primary)),hsl(var(--accent)))" }}
               initial={{ width: 0 }}
-              animate={{ width: `${project.progress_percent}%` }}
+              animate={{ width: `${pct}%` }}
               transition={{ duration: 0.8, ease: "easeOut" }}
             />
           </div>

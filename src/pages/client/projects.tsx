@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { useProjectProgress } from "@/lib/projectProgress";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -79,6 +80,16 @@ export default function ClientProjects() {
       return matchesSearch;
     });
   }, [projects, searchTerm]);
+
+  // Progress is derived from milestones/tasks, not read from
+  // projects.progress_percent — nothing writes that column, so it is stale.
+  // See src/lib/projectProgress.ts. Falls back to the stored value until the
+  // derivation resolves, so the number does not flash 0 on load.
+  const { progress: derived, ready: progressReady } =
+    useProjectProgress(useMemo(() => projects.map((p) => p.id), [projects]));
+
+  const progressOf = (p: Project): number =>
+    progressReady ? (derived[p.id] ?? 0) : (p.progress_percent ?? 0);
 
   if (loading) {
     return (
@@ -233,12 +244,12 @@ export default function ClientProjects() {
                     <div className="mt-8 pt-6 border-t border-white/10">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-medium text-muted-foreground">Progress</span>
-                        <span className="text-lg font-semibold text-primary">{project.progress_percent}%</span>
+                        <span className="text-lg font-semibold text-primary">{progressOf(project)}%</span>
                       </div>
                       <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
                         <motion.div
                           initial={{ width: 0 }}
-                          animate={{ width: `${project.progress_percent}%` }}
+                          animate={{ width: `${progressOf(project)}%` }}
                           transition={{ delay: idx * 0.05 + 0.3, duration: 0.8 }}
                           className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
                         ></motion.div>
@@ -302,10 +313,10 @@ export default function ClientProjects() {
                         <div className="w-20 h-2 bg-white/10 rounded-full overflow-hidden">
                           <div
                             className="bg-gradient-to-r from-primary to-accent h-full rounded-full transition-all"
-                            style={{ width: `${project.progress_percent}%` }}
+                            style={{ width: `${progressOf(project)}%` }}
                           ></div>
                         </div>
-                        <span className="text-sm font-semibold text-primary min-w-fit">{project.progress_percent}%</span>
+                        <span className="text-sm font-semibold text-primary min-w-fit">{progressOf(project)}%</span>
                       </div>
                     </td>
                     <td className="px-8 py-5 text-sm text-muted-foreground">
@@ -341,19 +352,26 @@ export default function ClientProjects() {
             </div>
             <div className="text-center">
               <div className="text-3xl sm:text-4xl font-bold text-yellow-400">
-                {filteredProjects.filter(p => p.progress_percent < 100).length}
+                {filteredProjects.filter(p => progressOf(p) < 100).length}
               </div>
               <div className="text-sm text-muted-foreground mt-2">In Progress</div>
             </div>
             <div className="text-center">
               <div className="text-3xl sm:text-4xl font-bold text-green-400">
-                {filteredProjects.filter(p => p.progress_percent === 100).length}
+                {filteredProjects.filter(p => progressOf(p) === 100).length}
               </div>
               <div className="text-sm text-muted-foreground mt-2">Completed</div>
             </div>
             <div className="text-center">
               <div className="text-3xl sm:text-4xl font-bold text-blue-400">
-                {filteredProjects.reduce((sum, p) => sum + p.progress_percent, 0) / filteredProjects.length | 0}%
+                {/* Guard the empty list: dividing by 0 gave NaN, and `NaN | 0`
+                    silently rendered "0%" rather than anything meaningful. */}
+                {filteredProjects.length === 0
+                  ? 0
+                  : Math.round(
+                      filteredProjects.reduce((sum, p) => sum + progressOf(p), 0) /
+                      filteredProjects.length
+                    )}%
               </div>
               <div className="text-sm text-muted-foreground mt-2">Avg Progress</div>
             </div>
