@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
+import { renderMarkdown } from "@/lib/markdown";
 import {
   FileText, Plus, Edit2, Trash2, X, AlertCircle,
   ChevronDown, ChevronUp, Eye, EyeOff,
@@ -20,6 +21,10 @@ interface PolicyCategory {
   description: string | null;
   icon: string;
   sort_order: number;
+  // Publishes the document to anonymous visitors. A section is only public
+  // when ITS flag, its is_active, and this category flag are all true — see
+  // 20261125090000_public_legal_documents. Defaults false.
+  is_public: boolean;
 }
 
 interface Policy {
@@ -28,6 +33,7 @@ interface Policy {
   title: string;
   content: string;
   is_active: boolean;
+  is_public: boolean;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -91,7 +97,23 @@ const ToastNotification = ({ toast, onDismiss }: { toast: Toast; onDismiss: (id:
 
 // ─── Modal wrapper ────────────────────────────────────────────────────────────
 
-const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => (
+// The max-width belongs on the PANEL, not on a child. It used to sit on an
+// inner div, which constrained the content while the panel still stretched to
+// the full viewport — leaving a narrow column of fields beside a large empty
+// area. Sizes are capped here and the body scrolls instead of growing, so a
+// long form stays usable on a phone.
+const MODAL_SIZES = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-2xl",
+} as const;
+
+const Modal = ({ open, onClose, children, size = "md" }: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+  size?: keyof typeof MODAL_SIZES;
+}) => (
   <AnimatePresence>
     {open && (
       <motion.div
@@ -106,7 +128,7 @@ const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.94, opacity: 0, y: 8 }}
           transition={{ type: "spring", damping: 26, stiffness: 300 }}
-          className="bg-background border border-border rounded-2xl shadow-2xl w-full"
+          className={`bg-background border border-border rounded-xl shadow-2xl w-full ${MODAL_SIZES[size]} max-h-[88vh] overflow-y-auto`}
           onClick={e => e.stopPropagation()}
         >
           {children}
@@ -129,7 +151,7 @@ export default function PoliciesPage() {
 
   // Category modal
   const [catModal, setCatModal]         = useState<"create" | "edit" | null>(null);
-  const [catForm, setCatForm]           = useState({ title: "", slug: "", description: "", icon: "FileText" });
+  const [catForm, setCatForm]           = useState({ title: "", slug: "", description: "", icon: "FileText", is_public: false });
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [savingCat, setSavingCat]       = useState(false);
@@ -137,7 +159,8 @@ export default function PoliciesPage() {
   // Policy modal
   const [expandedPolicy, setExpandedPolicy]       = useState<string | null>(null);
   const [policyModal, setPolicyModal]             = useState<"create" | "edit" | null>(null);
-  const [policyForm, setPolicyForm]               = useState({ title: "", content: "", is_active: true });
+  const [policyForm, setPolicyForm]               = useState({ title: "", content: "", is_active: true, is_public: false });
+  const [policyPreview, setPolicyPreview]         = useState(false);
   const [editingPolicyId, setEditingPolicyId]     = useState<string | null>(null);
   const [deletingPolicyId, setDeletingPolicyId]   = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy]           = useState(false);
@@ -192,14 +215,14 @@ export default function PoliciesPage() {
 
   const openCreateCat = () => {
     if (!isAdmin) return;
-    setCatForm({ title: "", slug: "", description: "", icon: "FileText" });
+    setCatForm({ title: "", slug: "", description: "", icon: "FileText", is_public: false });
     setEditingCatId(null);
     setCatModal("create");
   };
 
   const openEditCat = (cat: PolicyCategory) => {
     if (!isAdmin) return;
-    setCatForm({ title: cat.title, slug: cat.slug, description: cat.description || "", icon: cat.icon });
+    setCatForm({ title: cat.title, slug: cat.slug, description: cat.description || "", icon: cat.icon, is_public: cat.is_public });
     setEditingCatId(cat.id);
     setCatModal("edit");
   };
@@ -216,6 +239,7 @@ export default function PoliciesPage() {
         title: catForm.title.trim(), slug,
         description: catForm.description || null,
         icon: catForm.icon, sort_order: maxOrder + 1,
+        is_public: catForm.is_public,
       });
       if (error) showToast(error.message, "error");
       else { showToast("Category created", "success"); setCatModal(null); fetchData(); }
@@ -224,6 +248,7 @@ export default function PoliciesPage() {
         title: catForm.title.trim(), slug,
         description: catForm.description || null,
         icon: catForm.icon,
+        is_public: catForm.is_public,
       }).eq("id", editingCatId);
       if (error) showToast(error.message, "error");
       else { showToast("Category updated", "success"); setCatModal(null); fetchData(); }
@@ -247,14 +272,17 @@ export default function PoliciesPage() {
 
   const openCreatePolicy = () => {
     if (!isAdmin) return;
-    setPolicyForm({ title: "", content: "", is_active: true });
+    // Inherit the document's publication state so adding a section to an
+    // already-public document does not silently create an unpublished gap.
+    setPolicyForm({ title: "", content: "", is_active: true,
+                    is_public: categories.find(c => c.id === activeTab)?.is_public ?? false });
     setEditingPolicyId(null);
     setPolicyModal("create");
   };
 
   const openEditPolicy = (pol: Policy) => {
     if (!isAdmin) return;
-    setPolicyForm({ title: pol.title, content: pol.content, is_active: pol.is_active });
+    setPolicyForm({ title: pol.title, content: pol.content, is_active: pol.is_active, is_public: pol.is_public });
     setEditingPolicyId(pol.id);
     setPolicyModal("edit");
   };
@@ -273,6 +301,7 @@ export default function PoliciesPage() {
         title: policyForm.title.trim(),
         content: policyForm.content.trim(),
         is_active: policyForm.is_active,
+        is_public: policyForm.is_public,
         sort_order: maxOrder + 1,
       });
       if (error) showToast(error.message, "error");
@@ -282,6 +311,7 @@ export default function PoliciesPage() {
         title: policyForm.title.trim(),
         content: policyForm.content.trim(),
         is_active: policyForm.is_active,
+        is_public: policyForm.is_public,
       }).eq("id", editingPolicyId);
       if (error) showToast(error.message, "error");
       else { showToast("Policy updated", "success"); setPolicyModal(null); fetchData(); }
@@ -630,75 +660,100 @@ export default function PoliciesPage() {
 
       {/* ── Category Modal ─────────────────────────────────────────────────────── */}
       <Modal open={!!catModal && isAdmin} onClose={() => setCatModal(null)}>
-        <div className="p-6 max-w-md">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-bold">{catModal === "create" ? "New Category" : "Edit Category"}</h2>
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-bold">{catModal === "create" ? "New Category" : "Edit Category"}</h2>
             <button onClick={() => setCatModal(null)} className="p-1.5 rounded-lg hover:bg-white/5 text-muted-foreground transition">
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Category Name *</label>
+              <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Category Name *</label>
               <input
                 type="text"
                 value={catForm.title}
                 onChange={e => setCatForm({ ...catForm, title: e.target.value, slug: slugify(e.target.value) })}
                 placeholder="e.g. Health & Safety"
-                className="w-full px-3.5 py-2.5 bg-white/5 border border-border rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition text-sm"
+                className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-sm"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Slug</label>
-              <input
-                type="text"
-                value={catForm.slug}
-                onChange={e => setCatForm({ ...catForm, slug: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-white/5 border border-border rounded-xl text-sm text-muted-foreground"
-              />
+            {/* Slug and Description share a row — both are short and the pair
+                was eating two full-width rows for no reason. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Slug</label>
+                <input
+                  type="text"
+                  value={catForm.slug}
+                  onChange={e => setCatForm({ ...catForm, slug: e.target.value })}
+                  className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg text-sm text-muted-foreground font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Description</label>
+                <input
+                  type="text"
+                  value={catForm.description}
+                  onChange={e => setCatForm({ ...catForm, description: e.target.value })}
+                  placeholder="Optional"
+                  className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-sm"
+                />
+              </div>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Description</label>
-              <input
-                type="text"
-                value={catForm.description}
-                onChange={e => setCatForm({ ...catForm, description: e.target.value })}
-                placeholder="Short description (optional)"
-                className="w-full px-3.5 py-2.5 bg-white/5 border border-border rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Icon</label>
-              <div className="flex flex-wrap gap-2">
+              <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Icon</label>
+              <div className="flex flex-wrap gap-1.5">
                 {ICON_OPTIONS.map(({ value, Icon }) => (
                   <button
                     key={value}
                     onClick={() => setCatForm({ ...catForm, icon: value })}
-                    className={`w-9 h-9 rounded-lg flex items-center justify-center transition border ${
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition border ${
                       catForm.icon === value
                         ? "bg-primary/20 border-primary text-primary"
                         : "bg-white/5 border-border text-muted-foreground hover:bg-white/10 hover:text-foreground"
                     }`}
                     title={value}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="w-3.5 h-3.5" />
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* Publishes to /terms or /privacy. Amber because this is the one
+                control here that exposes content to the public internet. */}
+            <label className={`flex items-start gap-2.5 cursor-pointer rounded-lg px-3 py-2.5 border transition-colors ${
+              catForm.is_public ? "bg-amber-500/10 border-amber-500/30" : "bg-white/5 border-border"
+            }`}>
+              <input
+                type="checkbox"
+                checked={catForm.is_public}
+                onChange={e => setCatForm({ ...catForm, is_public: e.target.checked })}
+                className="w-4 h-4 mt-0.5 accent-primary cursor-pointer shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">Public document</span>
+                <span className="block text-[11px] text-muted-foreground mt-0.5">
+                  Readable by anyone, signed in or not. Leave off for internal staff
+                  policies. Slug <code>terms-of-service</code> serves /terms and{" "}
+                  <code>privacy-policy</code> serves /privacy.
+                </span>
+              </span>
+            </label>
           </div>
-          <div className="flex gap-3 mt-6">
+          <div className="flex gap-2 mt-5">
             <button
               onClick={saveCategory}
               disabled={savingCat}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary text-background font-semibold py-2.5 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 text-sm"
+              className="flex-1 flex items-center justify-center gap-2 bg-primary text-background font-semibold py-2 rounded-lg hover:bg-primary/90 transition disabled:opacity-50 text-sm"
             >
               {savingCat ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {catModal === "create" ? "Create Category" : "Save Changes"}
+              {catModal === "create" ? "Create" : "Save"}
             </button>
             <button
               onClick={() => setCatModal(null)}
-              className="px-5 py-2.5 rounded-xl bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
+              className="px-4 py-2 rounded-lg bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
             >
               Cancel
             </button>
@@ -707,64 +762,115 @@ export default function PoliciesPage() {
       </Modal>
 
       {/* ── Policy Modal ───────────────────────────────────────────────────────── */}
-      <Modal open={!!policyModal && isAdmin} onClose={() => setPolicyModal(null)}>
-        <div className="p-6 max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Modal open={!!policyModal && isAdmin} onClose={() => setPolicyModal(null)} size="lg">
+        <div className="p-5">
           <div className="flex items-center justify-between mb-1">
-            <h2 className="text-lg font-bold">{policyModal === "create" ? "New Policy" : "Edit Policy"}</h2>
-            <button onClick={() => setPolicyModal(null)} className="p-1.5 rounded-lg hover:bg-white/5 text-muted-foreground transition">
-              <X className="w-4 h-4" />
-            </button>
+            <h2 className="text-base font-bold">{policyModal === "create" ? "New Policy" : "Edit Policy"}</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPolicyPreview(p => !p)}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
+                  policyPreview ? "bg-primary/15 border-primary/30 text-primary"
+                                : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {policyPreview ? "Edit" : "Preview"}
+              </button>
+              <button onClick={() => setPolicyModal(null)} className="p-1.5 rounded-lg hover:bg-white/5 text-muted-foreground transition">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground mb-5">
+          <p className="text-[11px] text-muted-foreground mb-4">
             Category: <span className="text-foreground font-medium">{activeCategory?.title}</span>
           </p>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Policy Title *</label>
+              <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Policy Title *</label>
               <input
                 type="text"
                 value={policyForm.title}
                 onChange={e => setPolicyForm({ ...policyForm, title: e.target.value })}
                 placeholder="e.g. Remote Work Policy"
-                className="w-full px-3.5 py-2.5 bg-white/5 border border-border rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition text-sm"
+                className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Policy Content *</label>
-              <textarea
-                value={policyForm.content}
-                onChange={e => setPolicyForm({ ...policyForm, content: e.target.value })}
-                placeholder="Write the full policy text here..."
-                rows={12}
-                className="w-full px-3.5 py-2.5 bg-white/5 border border-border rounded-xl focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition text-sm resize-y font-mono"
-              />
+              <label className="block text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                Content * {policyPreview ? "— preview" : "— markdown"}
+              </label>
+              {policyPreview ? (
+                <div
+                  className="min-h-[220px] px-3 py-2.5 bg-white/5 border border-border rounded-lg text-sm text-muted-foreground leading-relaxed [&>p]:mb-3 [&>p:last-child]:mb-0"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(policyForm.content) }}
+                />
+              ) : (
+                <>
+                  <textarea
+                    value={policyForm.content}
+                    onChange={e => setPolicyForm({ ...policyForm, content: e.target.value })}
+                    placeholder={"## Heading\n\nParagraph with **bold** and *italic*.\n\n- bullet\n\n[link](https://example.com)"}
+                    rows={10}
+                    className="w-full px-3 py-2 bg-white/5 border border-border rounded-lg focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition text-[13px] resize-y font-mono leading-relaxed"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Markdown: <code>##</code> headings, <code>**bold**</code>, <code>*italic*</code>,
+                    lists, <code>[links](url)</code>. Raw HTML is escaped, not rendered.
+                  </p>
+                </>
+              )}
             </div>
-            <div className="flex items-center gap-3 p-3.5 glass border border-border rounded-xl">
-              <button
-                onClick={() => setPolicyForm({ ...policyForm, is_active: !policyForm.is_active })}
-                className={`relative w-10 h-5.5 rounded-full transition-colors flex-shrink-0 ${policyForm.is_active ? "bg-primary" : "bg-white/20"}`}
-                style={{ height: "22px", width: "40px" }}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform shadow-sm ${policyForm.is_active ? "translate-x-[18px]" : "translate-x-0"}`} />
-              </button>
-              <div>
-                <p className="text-sm font-medium">{policyForm.is_active ? "Visible to staff" : "Hidden from staff"}</p>
-                <p className="text-xs text-muted-foreground">{policyForm.is_active ? "This policy will appear in the staff view" : "Only admins can see this policy"}</p>
-              </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <label className={`flex items-start gap-2.5 cursor-pointer rounded-lg px-3 py-2.5 border transition-colors ${
+                policyForm.is_active ? "bg-primary/5 border-primary/25" : "bg-white/5 border-border"
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={policyForm.is_active}
+                  onChange={e => setPolicyForm({ ...policyForm, is_active: e.target.checked })}
+                  className="w-4 h-4 mt-0.5 accent-primary cursor-pointer shrink-0"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">Active</span>
+                  <span className="block text-[11px] text-muted-foreground mt-0.5">
+                    Inactive is a draft — visible to admins only.
+                  </span>
+                </span>
+              </label>
+
+              <label className={`flex items-start gap-2.5 cursor-pointer rounded-lg px-3 py-2.5 border transition-colors ${
+                policyForm.is_public ? "bg-amber-500/10 border-amber-500/30" : "bg-white/5 border-border"
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={policyForm.is_public}
+                  onChange={e => setPolicyForm({ ...policyForm, is_public: e.target.checked })}
+                  className="w-4 h-4 mt-0.5 accent-primary cursor-pointer shrink-0"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">Public</span>
+                  <span className="block text-[11px] text-muted-foreground mt-0.5">
+                    {activeCategory?.is_public
+                      ? "Readable by anyone once active."
+                      : "No effect until this category is public."}
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
-          <div className="flex gap-3 mt-6">
+          <div className="flex gap-2 mt-5">
             <button
               onClick={savePolicy}
               disabled={savingPolicy}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary text-background font-semibold py-2.5 rounded-xl hover:bg-primary/90 transition disabled:opacity-50 text-sm"
+              className="flex-1 flex items-center justify-center gap-2 bg-primary text-background font-semibold py-2 rounded-lg hover:bg-primary/90 transition disabled:opacity-50 text-sm"
             >
               {savingPolicy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {policyModal === "create" ? "Create Policy" : "Save Changes"}
+              {policyModal === "create" ? "Create" : "Save"}
             </button>
             <button
               onClick={() => setPolicyModal(null)}
-              className="px-5 py-2.5 rounded-xl bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
+              className="px-4 py-2 rounded-lg bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
             >
               Cancel
             </button>
@@ -773,27 +879,27 @@ export default function PoliciesPage() {
       </Modal>
 
       {/* ── Delete Category Confirm ────────────────────────────────────────────── */}
-      <Modal open={!!deletingCatId && isAdmin} onClose={() => setDeletingCatId(null)}>
-        <div className="p-6 max-w-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
-              <AlertCircle className="w-4.5 h-4.5 text-red-500" style={{ width: "18px", height: "18px" }} />
+      <Modal open={!!deletingCatId && isAdmin} onClose={() => setDeletingCatId(null)} size="sm">
+        <div className="p-5">
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <div className="w-8 h-8 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="text-red-500" style={{ width: "16px", height: "16px" }} />
             </div>
-            <h2 className="text-base font-bold">Delete Category?</h2>
+            <h2 className="text-sm font-bold">Delete Category?</h2>
           </div>
-          <p className="text-sm text-muted-foreground mb-5">
-            This will permanently delete the category and <strong className="text-foreground">all policies inside it</strong>. This cannot be undone.
+          <p className="text-[13px] text-muted-foreground mb-4 leading-relaxed">
+            This permanently deletes the category and <strong className="text-foreground">all policies inside it</strong>. Cannot be undone.
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <button
               onClick={() => deletingCatId && deleteCategory(deletingCatId)}
-              className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white font-semibold py-2.5 rounded-xl hover:bg-red-600 transition text-sm"
+              className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 text-white font-semibold py-2 rounded-lg hover:bg-red-600 transition text-sm"
             >
-              <Trash2 className="w-4 h-4" /> Delete
+              <Trash2 className="w-3.5 h-3.5" /> Delete
             </button>
             <button
               onClick={() => setDeletingCatId(null)}
-              className="flex-1 py-2.5 rounded-xl bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
+              className="flex-1 py-2 rounded-lg bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
             >
               Cancel
             </button>
@@ -802,27 +908,27 @@ export default function PoliciesPage() {
       </Modal>
 
       {/* ── Delete Policy Confirm ──────────────────────────────────────────────── */}
-      <Modal open={!!deletingPolicyId && isAdmin} onClose={() => setDeletingPolicyId(null)}>
-        <div className="p-6 max-w-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
-              <AlertCircle className="w-4.5 h-4.5 text-red-500" style={{ width: "18px", height: "18px" }} />
+      <Modal open={!!deletingPolicyId && isAdmin} onClose={() => setDeletingPolicyId(null)} size="sm">
+        <div className="p-5">
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <div className="w-8 h-8 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="text-red-500" style={{ width: "16px", height: "16px" }} />
             </div>
-            <h2 className="text-base font-bold">Delete Policy?</h2>
+            <h2 className="text-sm font-bold">Delete Policy?</h2>
           </div>
-          <p className="text-sm text-muted-foreground mb-5">
+          <p className="text-[13px] text-muted-foreground mb-4 leading-relaxed">
             This policy will be permanently removed and cannot be recovered.
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <button
               onClick={() => deletingPolicyId && deletePolicy(deletingPolicyId)}
-              className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white font-semibold py-2.5 rounded-xl hover:bg-red-600 transition text-sm"
+              className="flex-1 flex items-center justify-center gap-1.5 bg-red-500 text-white font-semibold py-2 rounded-lg hover:bg-red-600 transition text-sm"
             >
-              <Trash2 className="w-4 h-4" /> Delete
+              <Trash2 className="w-3.5 h-3.5" /> Delete
             </button>
             <button
               onClick={() => setDeletingPolicyId(null)}
-              className="flex-1 py-2.5 rounded-xl bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
+              className="flex-1 py-2 rounded-lg bg-white/5 border border-border hover:bg-white/10 transition font-semibold text-sm"
             >
               Cancel
             </button>

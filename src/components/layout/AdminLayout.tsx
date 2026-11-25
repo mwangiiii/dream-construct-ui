@@ -11,7 +11,6 @@ import {
   LogOut,
   Menu,
   ScrollText,
-  Gavel,
   X,
   ChevronRight,
 } from "lucide-react";
@@ -26,9 +25,10 @@ const navItems = [
   { icon: Briefcase,       label: "Projects",   short: "Projects", path: "/admin/projects"      },
   { icon: FileText,        label: "Content",    short: "Content",  path: "/admin/content/media" },
   { icon: Settings,        label: "Settings",   short: "Settings", path: "/admin/settings"      },
+  // Internal staff policies AND the public Terms/Privacy documents — one
+  // editor, reached from here. (A second "Legal" entry pointing at a duplicate
+  // editor was removed; PoliciesPage already had full CRUD.)
   { icon: ScrollText,      label: "Policies",   short: "Policies", path: "/policies"            },
-  // Editor for the above, plus the public Terms of Service / Privacy Policy.
-  { icon: Gavel,           label: "Legal",      short: "Legal",    path: "/admin/policies"      },
 ];
 
 const AdminLayout = ({ children }: AdminLayoutProps) => {

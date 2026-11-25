@@ -105,7 +105,6 @@ import MediaGalleryPage from "./pages/MediaGalleryPage";
 import PoliciesPage from "./pages/PoliciesPage";
 import StaffPoliciesPage from "./pages/Staffpoliciespage";
 import LegalPage from "./pages/LegalPage";
-import PolicyManagement from "./pages/admin/PolicyManagement";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
@@ -666,17 +665,6 @@ const App = () => {
                   <AdminLayout>
                     <div className="p-8"><MediaLibrary /></div>
                   </AdminLayout>
-                </ProtectedRoute>
-              }
-            />
-
-            {/* Policy & legal management — admin/manager only. The RLS on
-                policy_categories and policies requires manager+ to write, so
-                this guard matches what the database will actually allow. */}
-            <Route path="/admin/policies"
-              element={
-                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
-                  <AdminLayout><PolicyManagement /></AdminLayout>
                 </ProtectedRoute>
               }
             />

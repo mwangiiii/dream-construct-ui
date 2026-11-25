@@ -80,7 +80,10 @@ export default function LegalPage({ slug }: { slug: string }) {
   }, [slug]);
 
   return (
-    <div className="container mx-auto px-4 py-16 max-w-3xl">
+    // pt-32 clears the fixed navbar (Navbar.tsx is `fixed top-0`), matching the
+    // spacing other public pages use. py-16 was not enough and the header
+    // overlapped the document title.
+    <div className="container mx-auto px-4 pt-32 pb-20 max-w-3xl">
       {loading ? (
         <div className="flex items-center justify-center gap-3 py-32 text-sm text-muted-foreground">
           <span className="w-5 h-5 border-2 border-white/20 border-t-primary rounded-full animate-spin" />
