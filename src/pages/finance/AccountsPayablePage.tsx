@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 import { VendorSelect, type Vendor, type PMVendorFill } from "@/components/finance/VendorSelect";
 import { useDerivedProgress } from "@/lib/projectProgress";
+import { useProjectSelection } from "@/lib/useProjectSelection";
 
 // ─── ACTUAL SCHEMA (already migrated) ────────────────────────────────────────
 //
@@ -2107,17 +2108,19 @@ function ProjectPickerView({ onSelect }: { onSelect: (p: Project) => void }) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function AccountsPayablePage({ projectId, canEdit = true }: Props) {
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-
-  useEffect(() => {
-    if (!projectId) return;
-    supabase
-      .from("projects")
-      .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
-      .eq("id", projectId)
-      .single()
-      .then(({ data }) => { if (data) setSelectedProject(data as Project); });
-  }, [projectId]);
+  // Selection lives in `?project=` so browser Back returns to the picker
+  // instead of exiting the module to the dashboard. See lib/useProjectSelection.
+  const { project: selectedProject, select, clear } = useProjectSelection<Project>(
+    projectId,
+    async (id) => {
+      const { data } = await supabase
+        .from("projects")
+        .select("id,project_number,title,description,status,progress_percent,budget_numeric,site_city,site_country,expected_completion_date,created_at")
+        .eq("id", id)
+        .maybeSingle();
+      return (data as Project) ?? null;
+    },
+  );
 
   return (
     <AnimatePresence mode="wait">
@@ -2130,7 +2133,7 @@ export default function AccountsPayablePage({ projectId, canEdit = true }: Props
           <ProjectAPView
             project={selectedProject}
             canEdit={canEdit}
-            onBack={() => { if (!projectId) setSelectedProject(null); }}
+            onBack={clear}
           />
         </motion.div>
       ) : (
@@ -2139,7 +2142,7 @@ export default function AccountsPayablePage({ projectId, canEdit = true }: Props
           initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
         >
-          <ProjectPickerView onSelect={setSelectedProject} />
+          <ProjectPickerView onSelect={select} />
         </motion.div>
       )}
     </AnimatePresence>
