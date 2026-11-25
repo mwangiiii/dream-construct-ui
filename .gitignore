@@ -1,4 +1,18 @@
-# Logs
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules
+
+# Single lockfile policy: this project uses npm. A second lockfile from
+# another package manager lets the two drift and installs diverge per machine.
+bun.lockb
+yarn.lock
+pnpm-lock.yaml
+
+# ── Build output ────────────────────────────────────────────────────────────
+dist
+dist-ssr
+*.local
+
+# ── Logs ────────────────────────────────────────────────────────────────────
 logs
 *.log
 npm-debug.log*
@@ -7,23 +21,32 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# ── Secrets ─────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
 
-# Editor directories and files
+# ── Editors / OS ────────────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
+# ── Supabase CLI local state ────────────────────────────────────────────────
+# Was previously seven individual paths plus two malformed entries — a stray
+# " ." and ";supabase/.temp/storage-version". Only `#` starts a comment in
+# gitignore, so the `;` line was treated as a literal pattern and that file
+# was never actually ignored.
+supabase/.temp/
+supabase/.branches/
 
+# ── Large media kept out of git ─────────────────────────────────────────────
 commercial-mastery.mp4
 industrial-innovation.mp4
 Residential-mastery.mp4
@@ -31,14 +54,9 @@ sign-in.mp4
 sign-up.mp4
 videos/
 
-.env
-
-supabase/.temp/gotrue-version
-supabase/.temp/linked-project.json
-supabase/.temp/pooler-url
-supabase/.temp/postgres-version
-supabase/.temp/project-ref
-supabase/.temp/rest-version
-supabase/.temp/storage-migration
- .
-;supabase/.temp/storage-version
+# ── Working files that are not source ───────────────────────────────────────
+# Screenshots and business documents: keep them locally, keep them out of the
+# repo. Generated SQL bundles belong to a single migration run, not history.
+image_of_proof_stored/
+*.pdf
+PENDING_MIGRATIONS.sql
