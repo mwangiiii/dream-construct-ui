@@ -104,6 +104,8 @@ import Reviews from "./pages/Reviews";
 import MediaGalleryPage from "./pages/MediaGalleryPage";
 import PoliciesPage from "./pages/PoliciesPage";
 import StaffPoliciesPage from "./pages/Staffpoliciespage";
+import LegalPage from "./pages/LegalPage";
+import PolicyManagement from "./pages/admin/PolicyManagement";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
@@ -552,6 +554,15 @@ const App = () => {
             <Route path="/contact"  element={<MainLayout><Contact /></MainLayout>} />
             <Route path="/reviews"  element={<MainLayout><Reviews /></MainLayout>} />
             <Route path="/media"    element={<MainLayout><MediaGalleryPage /></MainLayout>} />
+
+            {/* Public legal documents — deliberately OUTSIDE ProtectedRoute.
+                Login.tsx links here before anyone has a session, and anon read
+                is granted by the RLS in 20261125090000. These two routes are
+                what those previously-dead links pointed at. */}
+            <Route path="/terms"
+              element={<MainLayout><LegalPage slug="terms-of-service" /></MainLayout>} />
+            <Route path="/privacy"
+              element={<MainLayout><LegalPage slug="privacy-policy" /></MainLayout>} />
             <Route path="/policies"
               element={
                 <ProtectedRoute requiredRoles={ROLES.STAFF}>
@@ -655,6 +666,17 @@ const App = () => {
                   <AdminLayout>
                     <div className="p-8"><MediaLibrary /></div>
                   </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Policy & legal management — admin/manager only. The RLS on
+                policy_categories and policies requires manager+ to write, so
+                this guard matches what the database will actually allow. */}
+            <Route path="/admin/policies"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
+                  <AdminLayout><PolicyManagement /></AdminLayout>
                 </ProtectedRoute>
               }
             />

@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   ScrollText,
+  Gavel,
   X,
   ChevronRight,
 } from "lucide-react";
@@ -26,6 +27,8 @@ const navItems = [
   { icon: FileText,        label: "Content",    short: "Content",  path: "/admin/content/media" },
   { icon: Settings,        label: "Settings",   short: "Settings", path: "/admin/settings"      },
   { icon: ScrollText,      label: "Policies",   short: "Policies", path: "/policies"            },
+  // Editor for the above, plus the public Terms of Service / Privacy Policy.
+  { icon: Gavel,           label: "Legal",      short: "Legal",    path: "/admin/policies"      },
 ];
 
 const AdminLayout = ({ children }: AdminLayoutProps) => {

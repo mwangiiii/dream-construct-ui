@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
+import { useDerivedProgress } from "@/lib/projectProgress";
 import { toast } from "@/hooks/use-toast";
 import { COAAccountSelect } from "@/components/finance/COAAccountSelect";
 
@@ -1266,6 +1267,8 @@ function ProjectCard({ project, onSelect, invoiceCount }: {
 }) {
   const status    = project.status ?? "planning";
   const statusCls = PROJECT_STATUS_STYLE[status] ?? PROJECT_STATUS_STYLE.planning;
+  // projects.progress_percent is stale — nothing writes it. See lib/projectProgress.
+  const pct       = useDerivedProgress(project.id, project.progress_percent);
   return (
     <motion.button onClick={() => onSelect(project)}
       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
@@ -1303,15 +1306,15 @@ function ProjectCard({ project, onSelect, invoiceCount }: {
           </span>
         )}
       </div>
-      {project.progress_percent != null && (
+      {pct != null && (
         <div className="mb-3">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[10px] text-muted-foreground">Progress</span>
-            <span className="text-[10px] font-mono text-primary">{project.progress_percent}%</span>
+            <span className="text-[10px] font-mono text-primary">{pct}%</span>
           </div>
           <div className="h-1 bg-white/10 rounded-full overflow-hidden">
             <motion.div className="h-full rounded-full" style={{ background: "linear-gradient(90deg,hsl(var(--primary)),hsl(var(--accent)))" }}
-              initial={{ width: 0 }} animate={{ width: `${project.progress_percent}%` }} transition={{ duration: 0.8, ease: "easeOut" }} />
+              initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8, ease: "easeOut" }} />
           </div>
         </div>
       )}
