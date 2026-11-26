@@ -15,7 +15,18 @@ if (!EMAIL_USER || !EMAIL_PASS) {
   console.error("⚠️ EMAIL_USERNAME or EMAIL_PASSWORD is missing in env vars!");
 }
 
-const sendEmail = async (to: string, subject: string, html: string, senderName: string) => {
+// Brand names are the only places the company name is spelled out. If this
+// ever changes (rename, rebrand), it changes here and nowhere else. The email
+// address itself is read from EMAIL_USERNAME at send time, so swapping the
+// Gmail account does not require touching templates.
+//
+//   BRAND_SHORT — compact, impactful; used in the From line.
+//   BRAND_LONG  — longer prose form; used inside the email body (logo bar,
+//                 footer, copyright line).
+const BRAND_SHORT = "REVE CONSTRUCT";
+const BRAND_LONG  = "Reve Construct Ltd";
+
+const sendEmail = async (to: string, subject: string, html: string) => {
   const client = new SMTPClient({
     connection: {
       hostname: "smtp.gmail.com",
@@ -29,7 +40,7 @@ const sendEmail = async (to: string, subject: string, html: string, senderName: 
   });
 
   await client.send({
-    from: `${senderName} <${EMAIL_USER}>`,
+    from: `${BRAND_SHORT} <${EMAIL_USER}>`,
     to: to,
     subject: subject,
     // `content` is the text/plain alternative, not a second copy of the body.
@@ -161,9 +172,13 @@ serve(async (req) => {
       .eq("id", user.id)
       .single();
 
-    const senderName = userProfile?.full_name || "Dream Construct Team";
+    // Historically used to populate the From display name; the From line now
+    // always reads BRAND_SHORT per company policy. Kept available for the body
+    // if a per-user sign-off is added later.
+    const senderName = userProfile?.full_name || BRAND_LONG;
+    void senderName;
 
-    // 6. Create HTML email with Dream Construct branding
+    // 6. Create HTML email with company branding
     const htmlBody = `
 <!DOCTYPE html>
 <html lang="en">
@@ -253,7 +268,7 @@ serve(async (req) => {
 <body>
     <div class="email-container">
         <div class="header">
-            <div class="logo">Dream Construct</div>
+            <div class="logo">${BRAND_LONG}</div>
             <h1>${email_data.subject}</h1>
             <span class="badge">${formatEmailType(email_type)}</span>
         </div>
@@ -266,9 +281,9 @@ ${email_data.body}
             <strong>Reference ID:</strong> #${financial.id}
         </div>
         <div class="footer">
-            <p><strong>Dream Construct</strong></p>
+            <p><strong>${BRAND_LONG}</strong></p>
             <p>This is an automated email from the Project Management System.</p>
-            <p>&copy; ${new Date().getFullYear()} Dream Construct. All rights reserved.</p>
+            <p>&copy; ${new Date().getFullYear()} ${BRAND_LONG}. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -282,7 +297,6 @@ ${email_data.body}
       email_data.to,
       email_data.subject,
       htmlBody,
-      senderName
     );
 
     console.log(`✅ Email sent successfully to: ${email_data.to} (type: ${email_type})`);

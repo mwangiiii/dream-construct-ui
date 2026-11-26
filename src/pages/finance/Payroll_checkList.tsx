@@ -387,7 +387,7 @@ ${printToolbar(`Payroll Register · ${entries.length} records`)}
 
   <div class="foot">
     <span>KRA / NSSF / SHIF / AHL compliant · 2026 rates</span>
-    <span>Dream Construct System</span>
+    <span>Reve Construct Ltd</span>
   </div>
 </div>
 <script>window.addEventListener('load',function(){setTimeout(function(){window.print();},600);});</script>

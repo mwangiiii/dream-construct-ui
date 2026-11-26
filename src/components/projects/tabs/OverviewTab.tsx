@@ -115,15 +115,21 @@ export default function OverviewTab({
   const [deleteBusy,        setDeleteBusy]        = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [dangerError,       setDangerError]       = useState<string | null>(null);
-  const isArchived = Boolean(project?.archived_at);
+  const isArchived     = Boolean(project?.archived_at);
+  const isDeepArchived = Boolean(project?.deep_archived_at);
 
-  // All three admin actions (archive / restore / permanent delete) go
-  // through the same Edge Function `project-lifecycle`. Centralising here
-  // keeps admin gating and storage cleanup in one place — the SQL RPCs
-  // still exist and enforce their own admin check, but the frontend
-  // never calls them directly.
+  // All admin lifecycle actions (archive / restore / deep_archive /
+  // undeep_archive / permanent delete) go through the same Edge Function
+  // `project-lifecycle`. Centralising here keeps admin gating and storage
+  // cleanup in one place — the SQL RPCs still exist and enforce their own
+  // admin check, but the frontend never calls them directly.
   const invokeLifecycle = async (
-    action: "archive" | "restore" | "permanent_delete",
+    action:
+      | "archive"
+      | "restore"
+      | "deep_archive"
+      | "undeep_archive"
+      | "permanent_delete",
   ): Promise<{ ok: true; data: any } | { ok: false; message: string }> => {
     const { data, error } = await supabase.functions.invoke("project-lifecycle", {
       body: { action, project_id: project.id },
@@ -152,6 +158,26 @@ export default function OverviewTab({
     const res = await invokeLifecycle("restore");
     if (res.ok) onProjectUpdate();
     else setDangerError(res.message);
+    setArchiveBusy(false);
+  };
+
+  const handleDeepArchive = async () => {
+    if (!project?.id) return;
+    setArchiveBusy(true);
+    setDangerError(null);
+    const res = await invokeLifecycle("deep_archive");
+    if ("message" in res) setDangerError(res.message);
+    else onProjectUpdate();
+    setArchiveBusy(false);
+  };
+
+  const handleUndeepArchive = async () => {
+    if (!project?.id) return;
+    setArchiveBusy(true);
+    setDangerError(null);
+    const res = await invokeLifecycle("undeep_archive");
+    if ("message" in res) setDangerError(res.message);
+    else onProjectUpdate();
     setArchiveBusy(false);
   };
 
@@ -659,13 +685,17 @@ export default function OverviewTab({
     {/* ═════════════════════════════════════════════════════════════════════
         Danger Zone — Admin only
         ═════════════════════════════════════════════════════════════════════
-        Two-tier deletion:
-          • Archive:  hides the project from dashboards but preserves every
-                      record. Reversible via Restore.
+        Three reversible/destructive lifecycle actions:
+          • Archive:       hides the project from client dashboards. The
+                           assigned project manager still sees it in their
+                           list. Reversible via Restore.
+          • Deep Archive:  hides the project from the assigned project
+                           manager too. Only admin/manager see it. Reversible
+                           by moving back to regular archive, or by Restore.
           • Permanent delete: nothing survives — invoices, contracts,
-                      payroll and every project-scoped record are dropped in
-                      one transaction, plus workers left with zero
-                      assignments. Irreversible. */}
+                           payroll and every project-scoped record are
+                           dropped in one transaction, plus workers left
+                           with zero assignments. Irreversible. */}
     {isAdmin && (
       <GlassCard className="mt-4 sm:mt-8 border border-red-500/25 bg-red-500/[0.03]">
         <div className="flex items-center gap-2 mb-4">
@@ -685,7 +715,7 @@ export default function OverviewTab({
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Archive / Restore */}
           <div className="p-4 rounded-xl border border-white/10 bg-white/5">
             <p className="text-sm font-semibold text-foreground mb-1">
@@ -693,8 +723,8 @@ export default function OverviewTab({
             </p>
             <p className="text-xs text-muted-foreground mb-3">
               {isArchived
-                ? `Archived ${project.archived_at ? format(new Date(project.archived_at), "dd MMM yyyy") : ""}. Restoring makes it visible on dashboards again. No records are affected.`
-                : "Hides this project from every dashboard. All records are preserved and the project can be restored at any time."}
+                ? `Archived ${project.archived_at ? format(new Date(project.archived_at), "dd MMM yyyy") : ""}. Restoring brings the project fully back to active. No records are affected.`
+                : "Hides this project from client dashboards. The assigned project manager can still see it in their list. All records are preserved."}
             </p>
             <button
               onClick={isArchived ? handleRestore : handleArchive}
@@ -707,6 +737,30 @@ export default function OverviewTab({
               {archiveBusy
                 ? "Working…"
                 : isArchived ? "Restore" : "Archive"}
+            </button>
+          </div>
+
+          {/* Deep archive / Move back to regular archive */}
+          <div className="p-4 rounded-xl border border-white/10 bg-white/5">
+            <p className="text-sm font-semibold text-foreground mb-1">
+              {isDeepArchived ? "Move Back to Archive" : "Deep Archive"}
+            </p>
+            <p className="text-xs text-muted-foreground mb-3">
+              {isDeepArchived
+                ? `Deep-archived ${project.deep_archived_at ? format(new Date(project.deep_archived_at), "dd MMM yyyy") : ""}. Moves the project back to regular archive — the assigned project manager will see it in their list again.`
+                : "Hides this project from the assigned project manager too. Only admin and manager see deep-archived projects. Automatically archives the project first if it is still active."}
+            </p>
+            <button
+              onClick={isDeepArchived ? handleUndeepArchive : handleDeepArchive}
+              disabled={archiveBusy}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-sm font-medium transition-all disabled:opacity-50"
+            >
+              {isDeepArchived
+                ? <ArchiveRestore className="w-4 h-4" />
+                : <Archive        className="w-4 h-4" />}
+              {archiveBusy
+                ? "Working…"
+                : isDeepArchived ? "Move Back" : "Deep Archive"}
             </button>
           </div>
 

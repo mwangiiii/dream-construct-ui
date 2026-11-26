@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Eye, EyeOff, Upload, X, ZoomIn, RotateCw, ArrowLeftRight, ArrowUpDown } from "lucide-react";
+import { jsPDF } from "jspdf";
 import {
   Card,
   CardHeader,
@@ -46,6 +47,9 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { getCurrentUser, updateProfile, updatePassword } from "@/lib/auth";
 
+// Must match the phrase the edge function checks.
+const DELETE_PHRASE = "DELETE MY ACCOUNT";
+
 const SettingsPage = () => {
   const [user, setUser] = useState<any>(null);
   const [editMode, setEditMode] = useState(false);
@@ -87,6 +91,12 @@ const SettingsPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteBlockers, setDeleteBlockers] = useState<string[]>([]);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
 
   useEffect(() => {
     getCurrentUser().then((u) => {
@@ -375,6 +385,273 @@ const SettingsPage = () => {
       return;
     }
     setShowConfirmDialog(true);
+  };
+
+  // Exports the signed-in user's own records as a PDF. Every query is scoped to
+  // their id and runs under their session, so RLS is what actually bounds the
+  // export.
+  const handleDownloadData = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
+      if (!userId) throw new Error("Your session has expired. Please sign in again.");
+
+      const [{ data: profileRow }, { data: roles }, { data: managed }] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select("*, user_statuses(status_name, is_active)")
+            .eq("id", userId)
+            .maybeSingle(),
+          supabase.from("user_roles").select("role_name").eq("user_id", userId),
+          // Projects this person is responsible for. A user is not scoped to a
+          // project by membership — manager_id and client_id are the only
+          // links — so those are what there is to export.
+          supabase
+            .from("projects")
+            .select("project_number, title, status, manager_id, client_id")
+            .or(`manager_id.eq.${userId},client_id.eq.${userId}`),
+        ]);
+
+      const profile = profileRow as Record<string, unknown> | null;
+      const roleNames = (roles ?? []).map((r: { role_name: string }) => r.role_name);
+      const projectsList = managed ?? [];
+      const exportedAt = new Date();
+
+      // ─── PDF layout ────────────────────────────────────────────────────────
+      // A4, mm units. Simple left-aligned flow with section headers; wraps and
+      // auto-paginates. No external fonts so it renders the same anywhere.
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const marginX = 18;
+      const bottomY = pageH - 18;
+      const usableW = pageW - marginX * 2;
+      let y = 22;
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > bottomY) {
+          doc.addPage();
+          y = 22;
+        }
+      };
+
+      const sectionHeader = (label: string) => {
+        ensureSpace(14);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(30, 58, 138);
+        doc.text(label.toUpperCase(), marginX, y);
+        y += 1.5;
+        doc.setDrawColor(226, 232, 240);
+        doc.line(marginX, y, pageW - marginX, y);
+        y += 5;
+        doc.setTextColor(15, 23, 42);
+      };
+
+      const labelValueRow = (label: string, value: string) => {
+        const labelW = 42;
+        const valueX = marginX + labelW;
+        const valueLines = doc.splitTextToSize(value || "—", usableW - labelW) as string[];
+        const rowH = Math.max(5.2, valueLines.length * 5);
+        ensureSpace(rowH);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text(label, marginX, y);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(15, 23, 42);
+        doc.text(valueLines, valueX, y);
+        y += rowH + 1;
+      };
+
+      // ─── Header ───────────────────────────────────────────────────────────
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(15, 23, 42);
+      doc.text("My Data Export", marginX, y);
+      y += 7;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text("Reve Construct Ltd", marginX, y);
+      doc.text(
+        `Generated ${exportedAt.toLocaleString("en-KE", { dateStyle: "long", timeStyle: "short" })}`,
+        pageW - marginX,
+        y,
+        { align: "right" },
+      );
+      y += 10;
+
+      // ─── Account ──────────────────────────────────────────────────────────
+      sectionHeader("Account");
+      labelValueRow("User ID", userId);
+      labelValueRow("Email", auth.user.email ?? "—");
+
+      // ─── Profile ──────────────────────────────────────────────────────────
+      sectionHeader("Profile");
+      if (!profile) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No profile on record.", marginX, y);
+        y += 6;
+      } else {
+        const asText = (v: unknown): string => {
+          if (v === null || v === undefined || v === "") return "—";
+          if (typeof v === "object") return JSON.stringify(v);
+          return String(v);
+        };
+        // Known-friendly fields rendered first in a readable order; everything
+        // else falls through so no field is silently dropped.
+        const preferred: Array<[string, string]> = [
+          ["Full name",    "full_name"],
+          ["Phone",        "phone"],
+          ["Company",      "company_name"],
+          ["Job title",    "job_title"],
+          ["Created",      "created_at"],
+          ["Updated",      "updated_at"],
+        ];
+        const shownKeys = new Set<string>(["id", "avatar_url", "user_statuses"]);
+        for (const [label, key] of preferred) {
+          if (key in profile) {
+            labelValueRow(label, asText(profile[key]));
+            shownKeys.add(key);
+          }
+        }
+        const status = profile["user_statuses"] as { status_name?: string; is_active?: boolean } | null;
+        if (status?.status_name) {
+          labelValueRow("Status", `${status.status_name}${status.is_active === false ? " (inactive)" : ""}`);
+        }
+        for (const [key, value] of Object.entries(profile)) {
+          if (shownKeys.has(key)) continue;
+          labelValueRow(key.replace(/_/g, " "), asText(value));
+        }
+      }
+
+      // ─── Roles ────────────────────────────────────────────────────────────
+      sectionHeader("Roles");
+      if (roleNames.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No roles assigned.", marginX, y);
+        y += 6;
+      } else {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(15, 23, 42);
+        const lines = doc.splitTextToSize(roleNames.join(", "), usableW) as string[];
+        ensureSpace(lines.length * 5);
+        doc.text(lines, marginX, y);
+        y += lines.length * 5 + 2;
+      }
+
+      // ─── Projects ─────────────────────────────────────────────────────────
+      sectionHeader("Project assignments");
+      if (projectsList.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(100, 116, 139);
+        doc.text("No project assignments on record.", marginX, y);
+        y += 6;
+      } else {
+        // Small table: # | Project | Status | Your role
+        const colX = [marginX, marginX + 14, marginX + 110, marginX + 142];
+        const headerH = 6;
+        ensureSpace(headerH + 4);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text("#",        colX[0], y);
+        doc.text("Project",  colX[1], y);
+        doc.text("Status",   colX[2], y);
+        doc.text("Your role", colX[3], y);
+        y += 2;
+        doc.setDrawColor(226, 232, 240);
+        doc.line(marginX, y, pageW - marginX, y);
+        y += 4;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(15, 23, 42);
+        projectsList.forEach((p: Record<string, unknown>, i: number) => {
+          const title = `${p.project_number ?? "—"} · ${p.title ?? "Untitled"}`;
+          const status = String(p.status ?? "—").replace(/_/g, " ");
+          const role = p.manager_id === userId ? "Manager" : p.client_id === userId ? "Client" : "—";
+          const titleLines = doc.splitTextToSize(title, colX[2] - colX[1] - 4) as string[];
+          const rowH = Math.max(5.2, titleLines.length * 5);
+          ensureSpace(rowH + 1);
+          doc.text(String(i + 1), colX[0], y);
+          doc.text(titleLines,    colX[1], y);
+          doc.text(status,        colX[2], y);
+          doc.text(role,          colX[3], y);
+          y += rowH + 1;
+        });
+      }
+
+      // ─── Footer on every page ─────────────────────────────────────────────
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          "Exported from Reve Construct Ltd · For account holder use only",
+          marginX,
+          pageH - 10,
+        );
+        doc.text(`Page ${i} of ${pageCount}`, pageW - marginX, pageH - 10, { align: "right" });
+      }
+
+      doc.save(`my-data-${exportedAt.toISOString().slice(0, 10)}.pdf`);
+      setPrivacyModal(false);
+    } catch (e: unknown) {
+      setExportError(e instanceof Error ? e.message : "Could not prepare your data.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModal(false);
+    setDeleteConfirmation("");
+    setDeleteError("");
+    setDeleteBlockers([]);
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError("");
+    setDeleteBlockers([]);
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-my-account", {
+        body: { confirmation: DELETE_PHRASE },
+      });
+
+      // A 409 arrives as a FunctionsHttpError, so the blocker list has to be
+      // read off the response body rather than the thrown error.
+      const blockers = (data as any)?.blockers;
+      if (Array.isArray(blockers) && blockers.length) {
+        setDeleteBlockers(blockers);
+        return;
+      }
+      if (error) throw new Error(error.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
+
+      // The account is gone; the session is now meaningless. Sign out locally
+      // and leave the app rather than letting the UI keep making 401 calls.
+      await supabase.auth.signOut();
+      window.location.replace("/");
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : "Could not delete your account.");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handlePasswordConfirm = async () => {
@@ -855,25 +1132,91 @@ const SettingsPage = () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Download My Data</AlertDialogTitle>
-            <AlertDialogDescription>Your data will be prepared for download. (Feature coming soon)</AlertDialogDescription>
+            <AlertDialogDescription>
+              Exports your profile, assigned roles and project assignments as a PDF
+              file. Project records themselves stay in the system.
+            </AlertDialogDescription>
           </AlertDialogHeader>
+          {exportError && (
+            <Alert variant="destructive">
+              <AlertDescription>{exportError}</AlertDescription>
+            </Alert>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setPrivacyModal(false)}>Close</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDownloadData(); }}
+              disabled={exporting}
+            >
+              {exporting ? "Preparing…" : "Download"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* ==================== DELETE ACCOUNT MODAL ==================== */}
-      <AlertDialog open={deleteModal} onOpenChange={setDeleteModal}>
+      <AlertDialog
+        open={deleteModal}
+        onOpenChange={(open) => { if (!open && !deleting) closeDeleteModal(); }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete My Account</AlertDialogTitle>
-            <AlertDialogDescription>This action is irreversible. Are you sure?</AlertDialogDescription>
+            <AlertDialogTitle>Delete my account</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes your sign-in, profile, photo, role
+              assignments and project memberships. It cannot be undone.
+            </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Work records you created — tasks, documents, site logs, approvals —
+              stay in the system for the projects that depend on them, but they
+              will no longer show your name.
+            </p>
+
+            {deleteBlockers.length > 0 && (
+              <Alert variant="destructive">
+                <AlertTitle>Your account cannot be deleted yet</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc pl-4 space-y-1 mt-1">
+                    {deleteBlockers.map((b) => <li key={b}>{b}</li>)}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {deleteError && (
+              <Alert variant="destructive">
+                <AlertDescription>{deleteError}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirmation">
+                Type <span className="font-mono font-semibold">DELETE MY ACCOUNT</span> to confirm
+              </Label>
+              <Input
+                id="delete-confirmation"
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.target.value)}
+                placeholder="DELETE MY ACCOUNT"
+                autoComplete="off"
+                disabled={deleting}
+              />
+            </div>
+          </div>
+
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteModal(false)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => setDeleteModal(false)}>
-              Delete (Coming Soon)
+            <AlertDialogCancel disabled={deleting} onClick={closeDeleteModal}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting || deleteConfirmation !== DELETE_PHRASE}
+              onClick={(e) => { e.preventDefault(); handleDeleteAccount(); }}
+            >
+              {deleting ? "Deleting…" : "Delete my account"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

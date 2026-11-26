@@ -7,7 +7,8 @@ import {
   SelectContent,
   SelectItem
 } from "@/components/ui/select";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowUpRight } from "lucide-react";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
@@ -73,11 +74,6 @@ const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
   { value: "on_hold",          label: "On Hold"          },
 ];
 
-interface ProjectManagerOption {
-  id: string;
-  full_name: string;
-}
-
 interface Project {
   id: string;
   project_number: string;
@@ -106,7 +102,6 @@ export default function ProjectManagementDashboard() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [projectManagers, setProjectManagers] = useState<ProjectManagerOption[]>([]);
   const [savingField, setSavingField] = useState<"manager" | "status" | null>(null);
 
   const isAdmin = !!currentUser?.roles.some((r) => r.role_name === "admin");
@@ -120,10 +115,6 @@ export default function ProjectManagementDashboard() {
       fetchProjects();
     }
   }, [currentUser, userRole]);
-
-  useEffect(() => {
-    if (isAdmin) fetchProjectManagers();
-  }, [isAdmin]);
 
   const initializeUser = async () => {
     try {
@@ -202,58 +193,9 @@ export default function ProjectManagementDashboard() {
     }
   };
 
-  // Only admins may read other users' role rows (RLS: user_roles_select), so this
-  // is gated on isAdmin — for anyone else it would come back empty.
-  const fetchProjectManagers = async () => {
-    const { data, error } = await supabase
-      .from("user_roles")
-      .select("user_id, profiles!inner(id, full_name, status_id)")
-      .eq("role_name", "project_manager")
-      .eq("profiles.status_id", 1);
-
-    if (error) {
-      toast({ title: "Could not load project managers", variant: "destructive" });
-      return;
-    }
-
-    const unique: ProjectManagerOption[] = [];
-    for (const row of data || []) {
-      const { id, full_name } = (row as { profiles: ProjectManagerOption }).profiles;
-      if (!unique.some((m) => m.id === id)) unique.push({ id, full_name });
-    }
-
-    unique.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
-    setProjectManagers(unique);
-  };
-
-  const patchProject = (projectId: string, patch: Partial<Project>) => {
+  const patchProject =(projectId: string, patch: Partial<Project>) => {
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
     setSelectedProject((prev) => (prev?.id === projectId ? { ...prev, ...patch } : prev));
-  };
-
-  const handleAssignManager = async (project: Project, managerId: string) => {
-    setSavingField("manager");
-    try {
-      const { error } = await supabase
-        .from("projects")
-        .update({ manager_id: managerId || null })
-        .eq("id", project.id);
-
-      if (error) throw error;
-
-      const manager = projectManagers.find((m) => m.id === managerId) || null;
-      patchProject(project.id, { manager });
-      toast({
-        title: manager ? `Assigned to ${manager.full_name}` : "Project manager unassigned",
-      });
-    } catch (err) {
-      toast({
-        title: err instanceof Error ? err.message : "Could not update project manager",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingField(null);
-    }
   };
 
   const handleChangeStatus = async (project: Project, status: ProjectStatus) => {
@@ -383,7 +325,7 @@ export default function ProjectManagementDashboard() {
                 Project Management
               </h1>
               {/* <p className="text-muted-foreground text-lg">
-                Manage all Dream Construct projects from inception to handover
+                Manage all Reve Construct projects from inception to handover
               </p> */}
             </div>
             {canCreateProject && (
@@ -748,24 +690,25 @@ export default function ProjectManagementDashboard() {
                       <UserCheck className="w-4 h-4 text-primary/70" />
                       Project Manager
                     </label>
-                    <select
-                      id="manage-project-manager"
-                      value={selectedProject.manager?.id || ""}
-                      disabled={savingField !== null}
-                      onChange={(e) => handleAssignManager(selectedProject, e.target.value)}
-                      className="w-full px-4 py-3 glass border border-white/10 rounded-xl text-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all disabled:opacity-50"
-                    >
-                      <option value="">Unassigned</option>
-                      {projectManagers.map((m) => (
-                        <option key={m.id} value={m.id}>{m.full_name}</option>
-                      ))}
-                    </select>
-                    {projectManagers.length === 0 && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        No active project managers found. Create one under Users, or set an
-                        existing user's status to Active.
-                      </p>
-                    )}
+                    {/* Read-only. Assignment lives in one place now — see
+                        /admin/assignments. This panel had no authoritative
+                        manager_id (only the embedded manager object), so its
+                        dropdown could show "Unassigned" for a project that
+                        had a manager. */}
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 glass border border-white/10 rounded-xl">
+                      <span className="text-sm text-foreground truncate">
+                        {selectedProject.manager?.full_name ?? (
+                          <span className="text-muted-foreground">Unassigned</span>
+                        )}
+                      </span>
+                      <Link
+                        to="/admin/assignments"
+                        className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                      >
+                        Change
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
 
                   <div>

@@ -135,11 +135,11 @@ const Register = () => {
           <div className="text-center mb-8">
             <Link to="/" className="inline-flex items-center space-x-2 mb-8">
               <div className="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center">
-                <span className="text-background font-bold text-xl">DC</span>
+                <span className="text-background font-bold text-xl">RC</span>
               </div>
             </Link>
             <h1 className="text-4xl font-bold mb-2">Create Account</h1>
-            <p className="text-muted-foreground">Join Dream Construct today</p>
+            <p className="text-muted-foreground">Join Reve Construct today</p>
           </div>
           <GlassCard className="p-8">
             <form onSubmit={handleSubmit} className="space-y-6">

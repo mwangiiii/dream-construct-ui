@@ -20,7 +20,7 @@
 //   SMTP_HOST        optional — defaults to smtp.gmail.com
 //   SMTP_PORT        optional — defaults to 465 (implicit TLS)
 //   SMTP_FROM        optional — defaults to EMAIL_USERNAME
-//   SMTP_FROM_NAME   optional — defaults to "Dream Construct System"
+//   SMTP_FROM_NAME   optional — defaults to BRAND_SHORT ("REVE CONSTRUCT")
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -99,7 +99,17 @@ const shortDate = (d: string | null): string =>
 // layout approach that renders consistently across Gmail, Outlook and Apple
 // Mail. Keep it that way.
 
-const BRAND = "DREAM CONSTRUCT SYSTEM";
+// Brand names are the only places the company name is spelled out. If this
+// ever changes (rename, rebrand), it changes here and nowhere else. The email
+// address itself is read from EMAIL_USERNAME/SMTP_USER at send time, so
+// swapping the Gmail account does not require touching templates.
+//
+//   BRAND_SHORT — compact, impactful; used in the From line (and the
+//                 SMTP_FROM_NAME env override, if unset).
+//   BRAND_LONG  — longer prose form; used inside the email body (letterhead,
+//                 footer disclaimer, sign-off fallback).
+const BRAND_SHORT = "REVE CONSTRUCT";
+const BRAND_LONG  = "Reve Construct Ltd";
 const INK = "#0f172a";
 const MUTED = "#64748b";
 const LINE = "#e2e8f0";
@@ -162,7 +172,7 @@ function shell(opts: {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
     <tr>
       <td style="font-size:15px;font-weight:700;letter-spacing:1.4px;color:#ffffff;">
-        ${esc(BRAND)}
+        ${esc(BRAND_LONG)}
       </td>
       <td align="right"
           style="font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:#c7d2fe;">
@@ -214,7 +224,7 @@ function shell(opts: {
       compensation data. Intended solely for the named recipient. If you received
       this in error, delete it and notify the sender.<br>
       Computed per KRA / NSSF / SHIF / Affordable Housing Levy rules, 2026 rates.
-      &nbsp;·&nbsp; ${esc(BRAND)}
+      &nbsp;·&nbsp; ${esc(BRAND_LONG)}
     </td></tr>
     </table>
   </td></tr>
@@ -486,7 +496,7 @@ serve(async (req) => {
       .from("profiles").select("full_name,email").eq("id", user.id).maybeSingle();
 
     const sender: Sender = {
-      name: profile?.full_name?.trim() || user.email || "Dream Construct System",
+      name: profile?.full_name?.trim() || user.email || BRAND_LONG,
       email: profile?.email ?? user.email ?? "",
     };
 
@@ -539,7 +549,7 @@ serve(async (req) => {
     // Must be the authenticated mailbox — Gmail rewrites or rejects a From
     // that is not the logged-in account (or a verified alias).
     const fromAddress = Deno.env.get("SMTP_FROM") ?? username;
-    const fromName    = Deno.env.get("SMTP_FROM_NAME") ?? "Dream Construct System";
+    const fromName    = Deno.env.get("SMTP_FROM_NAME") ?? BRAND_SHORT;
     const safeScope = typeof scope === "string" && scope.trim()
       ? scope
       : (isPayslip ? "Payslip" : "Payroll register");

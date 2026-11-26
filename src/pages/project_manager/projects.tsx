@@ -11,6 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { useProjectProgress } from "@/lib/projectProgress";
 import { toast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -74,6 +75,8 @@ interface Project {
   client: { id: string; full_name: string; company_name: string };
   manager: { id: string; full_name: string } | null;
   created_at: string;
+  archived_at: string | null;
+  deep_archived_at: string | null;
 }
 
 export default function ProjectManagementDashboard() {
@@ -142,10 +145,18 @@ export default function ProjectManagementDashboard() {
         query = query.eq("manager_id", currentUser.profile.id);
       }
 
-      // Hide archived projects from every dashboard EXCEPT the admin/manager
-      // view — admins need discoverability to restore or permanently delete.
-      if (userRole !== "admin" && userRole !== "manager") {
+      // Visibility rules:
+      //   - admin/manager:      see everything (both archive tiers).
+      //   - project_manager:    sees archived projects they manage so
+      //                         completed work does not vanish, but NOT
+      //                         deep-archived ones (admin-only tier).
+      //   - client:             regular archive already hides from them;
+      //                         deep-archive is implicit (deep implies
+      //                         archived), but keep both filters for safety.
+      if (userRole === "client") {
         query = query.is("archived_at", null);
+      } else if (userRole === "project_manager") {
+        query = query.is("deep_archived_at", null);
       }
 
       const { data, error } = await query;
@@ -187,6 +198,15 @@ export default function ProjectManagementDashboard() {
       return matchesSearch && matchesStatus;
     });
   }, [projects, searchTerm, statusFilter]);
+
+  // Derived from milestones/tasks rather than projects.progress_percent, which
+  // nothing writes. See src/lib/projectProgress.ts. Falls back to the stored
+  // column until the derivation resolves so the figure does not flash 0.
+  const { progress: derivedProgress, ready: progressReady } =
+    useProjectProgress(useMemo(() => projects.map((p) => p.id), [projects]));
+
+  const progressOf = (p: Project): number =>
+    progressReady ? (derivedProgress[p.id] ?? 0) : (p.progress_percent ?? 0);
 
   const canCreateProject = ["admin", "manager"].includes(userRole || "");
   const canEditProject = (project: Project) =>
@@ -262,7 +282,7 @@ export default function ProjectManagementDashboard() {
                 Project Management
               </h1>
               {/* <p className="text-muted-foreground text-lg">
-                Manage all Dream Construct projects from inception to handover
+                Manage all Reve Construct projects from inception to handover
               </p> */}
             </div>
             {canCreateProject && (
@@ -381,14 +401,22 @@ export default function ProjectManagementDashboard() {
                   <GlassCard className="h-full hover:shadow-xl hover:shadow-primary/10 transition-all duration-300 border border-white/10 hover:border-primary/30">
                     <div className="p-6">
                       <div className="flex items-start justify-between mb-3">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-gradient-to-r ${getStatusColor(
-                            project.status
-                          )}`}
-                        >
-                          {StatusIcon}
-                          {project.status.replace("_", " ")}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-gradient-to-r ${getStatusColor(
+                              project.status
+                            )}`}
+                          >
+                            {StatusIcon}
+                            {project.status.replace("_", " ")}
+                          </span>
+                          {project.archived_at && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-white/15 bg-white/5 text-muted-foreground">
+                              <Archive className="w-3.5 h-3.5" />
+                              Archived
+                            </span>
+                          )}
+                        </div>
                         {canEditProject(project) && (
                           <button className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-white/10 rounded">
                             <MoreVertical className="w-5 h-5 text-muted-foreground" />
@@ -425,7 +453,7 @@ export default function ProjectManagementDashboard() {
                           </div>
                           <div className="text-right">
                             <div className="text-xs text-muted-foreground">Progress</div>
-                            <div className="font-bold text-primary">{project.progress_percent}%</div>
+                            <div className="font-bold text-primary">{progressOf(project)}%</div>
                           </div>
                         </div>
                       </div>
@@ -485,14 +513,22 @@ export default function ProjectManagementDashboard() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-gradient-to-r ${getStatusColor(
-                          project.status
-                        )}`}
-                      >
-                        {getStatusIcon(project.status)}
-                        {project.status.replace("_", " ")}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-gradient-to-r ${getStatusColor(
+                            project.status
+                          )}`}
+                        >
+                          {getStatusIcon(project.status)}
+                          {project.status.replace("_", " ")}
+                        </span>
+                        {project.archived_at && (
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border border-white/15 bg-white/5 text-muted-foreground">
+                            <Archive className="w-3 h-3" />
+                            Archived
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {project.client.company_name || project.client.full_name}
@@ -505,10 +541,10 @@ export default function ProjectManagementDashboard() {
                         <div className="w-16 bg-white/10 rounded-full h-2">
                           <div
                             className="bg-gradient-to-r from-primary to-accent h-2 rounded-full transition-all"
-                            style={{ width: `${project.progress_percent}%` }}
+                            style={{ width: `${progressOf(project)}%` }}
                           ></div>
                         </div>
-                        <span className="text-sm font-semibold text-primary">{project.progress_percent}%</span>
+                        <span className="text-sm font-semibold text-primary">{progressOf(project)}%</span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">

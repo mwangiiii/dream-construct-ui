@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, UserCheck, UserX, TrendingUp, Clock, CheckCircle,
   Plus, X, ArrowRight, Download, Search,
-  Edit, Eye, Trash2
+  Edit, Eye, Trash2, AlertTriangle, ListChecks
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabaseClient';
@@ -17,7 +17,16 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 
-function PMWorkers() {
+interface PMWorkersProps {
+  // When set, the page is scoped to this single project: workers appear
+  // only if they have at least one assignment on it; attendance and
+  // assignments are filtered the same way. PM usage leaves this undefined
+  // and the backend scopes the data (existing behavior). Admin usage
+  // supplies a project id via the picker.
+  projectId?: string;
+}
+
+function PMWorkers({ projectId }: PMWorkersProps = {}) {
   const [activeTab, setActiveTab] = useState('attendance');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [showAddWorker, setShowAddWorker] = useState(false);
@@ -25,22 +34,21 @@ function PMWorkers() {
   const [showAssignTask, setShowAssignTask] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Data states
-  const [workers, setWorkers] = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
+  // Raw data straight from the API — pre-scope.
+  const [allWorkers, setAllWorkers] = useState<any[]>([]);
+  const [allAttendance, setAllAttendance] = useState<any[]>([]);
+  const [allAssignments, setAllAssignments] = useState<any[]>([]);
   const [stats, setStats] = useState({
     total_workers: 0,
     present_today: 0,
     absent_today: 0,
     avg_performance: 0
   });
-  // Assignment states
-  const [assignments, setAssignments] = useState<any[]>([]);
   const [assignmentForm, setAssignmentForm] = useState({
     worker_id: '',
     task: '',
     due_date: '',
-    status: 'pending',
+    status: 'assigned',
     notes: ''
   });
   const [assignmentFilter, setAssignmentFilter] = useState({
@@ -83,13 +91,13 @@ function PMWorkers() {
     try {
       const { data, error: funcError } = await supabase.functions.invoke('get-workers', { method: 'GET' });
       if (funcError) {
-        setWorkers([]);
+        setAllWorkers([]);
         setError('Failed to fetch workers: ' + funcError.message);
         return;
       }
-      setWorkers(data?.workers || []);
+      setAllWorkers(data?.workers || []);
     } catch {
-      setWorkers([]);
+      setAllWorkers([]);
       setError('Failed to fetch workers. Please check your connection.');
     }
   };
@@ -100,12 +108,12 @@ function PMWorkers() {
         body: { date }
       });
       if (funcError) {
-        setAttendance([]);
+        setAllAttendance([]);
         return;
       }
-      setAttendance(data?.attendance || []);
+      setAllAttendance(data?.attendance || []);
     } catch {
-      setAttendance([]);
+      setAllAttendance([]);
     }
   };
 
@@ -114,14 +122,35 @@ function PMWorkers() {
     try {
       const { data, error: funcError } = await supabase.functions.invoke('get-worker-assignments', { method: 'GET' });
       if (funcError) {
-        setAssignments([]);
+        setAllAssignments([]);
         return;
       }
-      setAssignments(data?.assignments || []);
+      setAllAssignments(data?.assignments || []);
     } catch (err) {
-      setAssignments([]);
+      setAllAssignments([]);
     }
   };
+
+  // Scoped views. When projectId is set (admin picker), workers appear only
+  // if they have at least one assignment on that project; assignments and
+  // attendance are filtered the same way. When projectId is undefined (PM),
+  // these pass through unchanged so existing behavior is preserved.
+  const assignments = useMemo(
+    () => (projectId ? allAssignments.filter(a => a.project_id === projectId) : allAssignments),
+    [allAssignments, projectId]
+  );
+  const scopedWorkerIds = useMemo(
+    () => new Set(assignments.map(a => a.worker_id)),
+    [assignments]
+  );
+  const workers = useMemo(
+    () => (projectId ? allWorkers.filter(w => scopedWorkerIds.has(w.id)) : allWorkers),
+    [allWorkers, scopedWorkerIds, projectId]
+  );
+  const attendance = useMemo(
+    () => (projectId ? allAttendance.filter(rec => scopedWorkerIds.has(rec.worker_id)) : allAttendance),
+    [allAttendance, scopedWorkerIds, projectId]
+  );
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -232,7 +261,7 @@ function PMWorkers() {
       }
 
       setShowAssignTask(false);
-      setAssignmentForm({ worker_id: '', task: '', due_date: '', status: 'pending', notes: '' });
+      setAssignmentForm({ worker_id: '', task: '', due_date: '', status: 'assigned', notes: '' });
       await fetchAssignments();
     } catch (err: any) {
       toast({ title: 'Failed to assign task', description: err.message || 'Unknown error', variant: 'destructive' });
@@ -267,6 +296,58 @@ function PMWorkers() {
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
+
+  // Performance is derived from task assignments, which are already loaded for
+  // the assignments tab — no extra round trip. Attendance is deliberately left
+  // out: get-daily-attendance only returns a single day, so any rate computed
+  // from it would describe today rather than a trend.
+  const performance = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+
+    const rows = workers.map(w => {
+      const mine = assignments.filter(a => a.worker_id === w.id);
+      const completed = mine.filter(a => a.status === 'completed').length;
+      const inProgress = mine.filter(a => a.status === 'in_progress').length;
+      // assignment_status enum: assigned | in_progress | completed | delayed.
+      // "Not started" = freshly assigned, no progress yet.
+      const notStarted = mine.filter(a => a.status === 'assigned').length;
+      const delayed    = mine.filter(a => a.status === 'delayed').length;
+      const overdue = mine.filter(
+        a => a.status !== 'completed' && a.due_date && a.due_date < today
+      ).length;
+
+      return {
+        id: w.id,
+        name: w.full_name || w.id,
+        role: w.role || '—',
+        assigned: mine.length,
+        completed,
+        inProgress,
+        notStarted,
+        delayed,
+        overdue,
+        rate: mine.length ? Math.round((completed / mine.length) * 100) : 0,
+      };
+    });
+
+    // Workers with no tasks have no performance to report; listing them at 0%
+    // would read as poor performance rather than missing data.
+    const active = rows.filter(r => r.assigned > 0);
+    active.sort((a, b) => b.rate - a.rate || b.completed - a.completed);
+
+    const totals = {
+      assigned: active.reduce((s, r) => s + r.assigned, 0),
+      completed: active.reduce((s, r) => s + r.completed, 0),
+      overdue: active.reduce((s, r) => s + r.overdue, 0),
+    };
+
+    return {
+      rows: active,
+      unassignedCount: rows.length - active.length,
+      totals,
+      rate: totals.assigned ? Math.round((totals.completed / totals.assigned) * 100) : 0,
+    };
+  }, [workers, assignments]);
 
   const StatCard = ({ icon: Icon, title, value, subtitle, color }: any) => (
     <motion.div
@@ -536,9 +617,10 @@ function PMWorkers() {
                 <label>Status:</label>
                 <select value={assignmentFilter.status} onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value }))} className="px-3 py-2 rounded border">
                   <option value="">All</option>
-                  <option value="pending">Pending</option>
+                  <option value="assigned">Assigned</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
+                  <option value="delayed">Delayed</option>
                 </select>
               </div>
               <div className="flex gap-2 items-center">
@@ -598,12 +680,97 @@ function PMWorkers() {
         {/* PERFORMANCE TAB */}
         {activeTab === 'performance' && (
           <motion.div key="performance" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-            <EmptyState
-              icon={TrendingUp}
-              title="Performance Analytics"
-              description="Detailed performance metrics coming soon."
-              action={null}
-            />
+            {performance.rows.length === 0 ? (
+              <EmptyState
+                icon={TrendingUp}
+                title="No performance data yet"
+                description="Performance is measured from assigned tasks. Assign tasks to workers and their completion rates will appear here."
+                action={null}
+              />
+            ) : (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                  <StatCard icon={ListChecks} title="Tasks Assigned"
+                    value={performance.totals.assigned}
+                    subtitle={`Across ${performance.rows.length} worker${performance.rows.length === 1 ? '' : 's'}`}
+                    color="text-blue-600" />
+                  <StatCard icon={CheckCircle} title="Completed"
+                    value={performance.totals.completed}
+                    subtitle="Tasks marked complete" color="text-green-600" />
+                  <StatCard icon={TrendingUp} title="Completion Rate"
+                    value={`${performance.rate}%`}
+                    subtitle="Completed of all assigned" color="text-primary" />
+                  <StatCard icon={AlertTriangle} title="Overdue"
+                    value={performance.totals.overdue}
+                    subtitle="Past due and not complete" color="text-red-600" />
+                </div>
+
+                <div className="rounded-2xl border-2 border-white/10 bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-xl overflow-hidden">
+                  <div className="px-6 py-5 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-lg font-bold">Performance by Worker</h3>
+                    {performance.unassignedCount > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {performance.unassignedCount} worker
+                        {performance.unassignedCount === 1 ? '' : 's'} with no tasks assigned
+                      </p>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-background/30">
+                        <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                          <th className="py-4 px-6 font-semibold">Worker</th>
+                          <th className="py-4 px-6 font-semibold">Role</th>
+                          <th className="py-4 px-6 font-semibold text-right">Assigned</th>
+                          <th className="py-4 px-6 font-semibold text-right">Done</th>
+                          <th className="py-4 px-6 font-semibold text-right">In Progress</th>
+                          <th className="py-4 px-6 font-semibold text-right">Not Started</th>
+                          <th className="py-4 px-6 font-semibold text-right">Delayed</th>
+                          <th className="py-4 px-6 font-semibold text-right">Overdue</th>
+                          <th className="py-4 px-6 font-semibold">Completion</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {performance.rows.map(r => (
+                          <tr key={r.id} className="border-b border-white/10 last:border-b-0 hover:bg-background/30 transition-colors">
+                            <td className="py-4 px-6 font-medium text-foreground">{r.name}</td>
+                            <td className="py-4 px-6 text-muted-foreground capitalize">{String(r.role).replace(/_/g, ' ')}</td>
+                            <td className="py-4 px-6 text-right text-foreground">{r.assigned}</td>
+                            <td className="py-4 px-6 text-right text-green-500 font-semibold">{r.completed}</td>
+                            <td className="py-4 px-6 text-right text-foreground">{r.inProgress}</td>
+                            <td className="py-4 px-6 text-right text-foreground">{r.notStarted}</td>
+                            <td className="py-4 px-6 text-right font-semibold">
+                              {r.delayed > 0
+                                ? <span className="text-amber-500">{r.delayed}</span>
+                                : <span className="text-muted-foreground">0</span>}
+                            </td>
+                            <td className="py-4 px-6 text-right font-semibold">
+                              {r.overdue > 0
+                                ? <span className="text-red-500">{r.overdue}</span>
+                                : <span className="text-muted-foreground">0</span>}
+                            </td>
+                            <td className="py-4 px-6 min-w-[160px]">
+                              <div className="flex items-center gap-3">
+                                <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${
+                                      r.rate >= 75 ? 'bg-green-500'
+                                        : r.rate >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`}
+                                    style={{ width: `${r.rate}%` }}
+                                  />
+                                </div>
+                                <span className="text-sm font-semibold text-foreground w-10 text-right">{r.rate}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -877,9 +1044,10 @@ function PMWorkers() {
               <div>
                 <label className="font-semibold">Status</label>
                 <select value={assignmentForm.status} onChange={e => setAssignmentForm(f => ({ ...f, status: e.target.value }))} className="w-full px-4 py-3 border-2 border-white/10 rounded-xl bg-white/5">
-                  <option value="pending">Pending</option>
+                  <option value="assigned">Assigned</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
+                  <option value="delayed">Delayed</option>
                 </select>
               </div>
               <div>

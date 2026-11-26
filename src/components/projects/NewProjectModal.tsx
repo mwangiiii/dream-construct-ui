@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "@/hooks/use-toast";
+import { fetchProjectManagers } from "@/lib/projectManagerAssignment";
 import {
   X,
   Building2,
@@ -213,40 +214,7 @@ export default function NewProjectModal({
         setClients(transformedClients);
       }
 
-      // Fetch project managers
-      const { data: managerData, error: managerError } = await supabase
-        .from("user_roles")
-        .select(`
-          user_id,
-          profiles!inner(
-            id,
-            full_name,
-            status_id
-          )
-        `)
-        .eq("role_name", "project_manager")
-        .eq("profiles.status_id", 1);
-
-      if (!managerError) {
-        const transformedManagers = managerData?.map((item: any) => ({
-          id: item.profiles.id,
-          full_name: item.profiles.full_name,
-        })) || [];
-
-        const uniqueManagers = transformedManagers.reduce((acc: Manager[], current) => {
-          const exists = acc.find((item) => item.id === current.id);
-          if (!exists) {
-            acc.push(current);
-          }
-          return acc;
-        }, []);
-
-        uniqueManagers.sort((a, b) =>
-          (a.full_name || "").localeCompare(b.full_name || "")
-        );
-
-        setManagers(uniqueManagers);
-      }
+      setManagers(await fetchProjectManagers());
     } catch {
       /* fetch is best-effort; UI stays empty */
     }
@@ -288,7 +256,7 @@ export default function NewProjectModal({
 
     setLoading(true);
     try {
-      const { error } = await supabase.from("projects").insert({
+      const { data: created, error } = await supabase.from("projects").insert({
         project_number: nextProjectNumber,
         title: formData.title.trim(),
         description: formData.description.trim() || null,
@@ -307,9 +275,25 @@ export default function NewProjectModal({
         site_country: formData.site_country,
         status: "planning",
         progress_percent: 0,
-      });
+      }).select("id").single();
 
       if (error) throw error;
+
+      // Creating a project with a manager is an assignment too, so it gets the
+      // same notification. Best-effort: the project exists either way.
+      if (formData.manager_id && created?.id) {
+        const { error: notifyError } = await supabase.functions.invoke(
+          "notify-project-assignment",
+          { body: { projectId: created.id, managerId: formData.manager_id } },
+        );
+        if (notifyError) {
+          toast({
+            title: "Project created, but the manager was not notified",
+            description: notifyError.message,
+            variant: "destructive",
+          });
+        }
+      }
 
       onSuccess();
       handleClose();
