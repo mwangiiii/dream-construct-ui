@@ -11,17 +11,33 @@ import {
   ScrollText,
   X,
   ChevronRight,
+  HardHat,
+  Layers,
+  Wrench,
+  Package,
+  DollarSign,
+  AlertTriangle,
+  BarChart3,
 } from "lucide-react";
 
 interface ProjectManagerLayoutProps {
   children: ReactNode;
 }
 
+// Stages through Reports were already built and routed in App.tsx but had no
+// sidebar entry, so a PM could only reach their own pages by typing the URL.
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard",       short: "Dash",     path: "/pm/dashboard"              },
-  { icon: Briefcase,       label: "Projects",         short: "Projects", path: "/project_manager/projects"  },
-  { icon: Settings,        label: "Settings",         short: "Settings", path: "/project_manager/settings"  },
-  { icon: ScrollText,      label: "Policies",         short: "Policies", path: "/policies"                  },
+  { icon: LayoutDashboard, label: "Dashboard",       short: "Dash",      path: "/pm/dashboard"                   },
+  { icon: Briefcase,       label: "Projects",         short: "Projects",  path: "/project_manager/projects"       },
+  { icon: Layers,          label: "Stages",           short: "Stages",    path: "/project_manager/stages"         },
+  { icon: HardHat,         label: "Workers",          short: "Workers",   path: "/project_manager/workers"        },
+  { icon: Wrench,          label: "Daily Progress",   short: "Daily",     path: "/project_manager/daily-progress" },
+  { icon: Package,         label: "Materials",        short: "Materials", path: "/project_manager/materials"      },
+  { icon: DollarSign,      label: "Financials",       short: "Finance",   path: "/project_manager/financials"     },
+  { icon: AlertTriangle,   label: "Issues",           short: "Issues",    path: "/project_manager/issues"         },
+  { icon: BarChart3,       label: "Reports",          short: "Reports",   path: "/project_manager/reports"        },
+  { icon: Settings,        label: "Settings",         short: "Settings",  path: "/project_manager/settings"       },
+  { icon: ScrollText,      label: "Policies",         short: "Policies",  path: "/policies"                       },
 ];
 
 const ProjectManagerLayout = ({ children }: ProjectManagerLayoutProps) => {

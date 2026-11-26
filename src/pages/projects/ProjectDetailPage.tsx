@@ -1,10 +1,11 @@
 // src/pages/projects/ProjectDetailPage.tsx
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
+import { useDerivedProgress } from "@/lib/projectProgress";
 import { projectApi } from "@/lib/api/projectApi";
 import {
   ArrowLeft,
@@ -33,27 +34,47 @@ import {
   AlertTriangle,
   Trash2,
   Archive,
+  HardHat,
+  Layers,
+  ClipboardCheck,
+  Package,
 } from "lucide-react";
 
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
 import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
+// Inherited from the project_manager detail page — these tabs were already
+// built and working there, and were showing "Coming Soon" (or missing
+// entirely) for admin.
+import WorkersTab from "@/components/projects/tabs/WorkersTab";
+import DailyProgress from "@/components/projects/tabs/DailyProgress";
+import Stages from "@/components/projects/tabs/Stages";
+import InspectionsTab from "@/components/projects/tabs/InspectionsTab";
+import MaterialTrackingTab from "@/components/projects/tabs/MaterialTracking";
+import ProblemsAndIssues from "@/components/projects/tabs/ProblemsandIssues";
 import TasksTab from "@/components/projects/tabs/TasksTab";
 import UpdatesTab from "@/components/projects/tabs/UpdatesTab";
 import PhotosTab from "@/components/projects/tabs/PhotosTab";
 import DocumentsTab from "@/components/projects/tabs/DocumentsTab";
 import Financials from "@/components/projects/tabs/financials";
 
+// Kept in step with the project_manager detail page so admin sees the same
+// project tooling a PM does. Project staffing lives in the Workers tab
+// (workers + worker_assignments); there is no separate team concept.
 type Tab =
   | "overview"
   | "milestones"
   | "tasks"
+  | "workers"
   | "updates"
   | "approvals"
   | "documents"
   | "photos"
-  | "team"
-  | "financials"
-  | "daily-logs";
+  | "daily-logs"
+  | "stages"
+  | "inspections"
+  | "material-tracking"
+  | "problems-issues"
+  | "financials";
 
 interface Milestone {
   id: string;
@@ -134,19 +155,6 @@ interface Document {
   uploaded_by_user?: { full_name: string } | null;
 }
 
-interface TeamMember {
-  user_id: string;
-  role_name: "admin" | "manager" | "project_manager" | "client" | "finance" | "quantity_surveyor";
-  user: {
-    id: string;
-    full_name: string;
-    user_statuses: {
-      is_active: boolean;
-      status_name: string;
-    } | null;
-  } | null;
-}
-
 interface Toast {
   id: string;
   message: string;
@@ -201,10 +209,18 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+
+  // Project progress. OverviewTab previously received no projectProgress prop
+  // at all here, so the bar never populated. Tabs are conditionally rendered,
+  // so MilestonesTab — which computes it — is only mounted while that tab is
+  // open; deriving it here means Overview is correct on first load, and
+  // onProgressChange still wins once the user edits tasks.
+  const [liveProgress, setLiveProgress] = useState<number | null>(null);
+  const derivedProgress = useDerivedProgress(id, null);
+  const projectProgress = liveProgress ?? derivedProgress;
+
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [projectManagers, setProjectManagers] = useState<{ id: string; full_name: string }[]>([]);
-  const [savingManager, setSavingManager] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -215,7 +231,6 @@ export default function ProjectDetailPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [photos, setPhotos] = useState<Document[]>([]);
-  const [team, setTeam] = useState<TeamMember[]>([]);
 
   const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
     const id = Date.now().toString();
@@ -224,30 +239,6 @@ export default function ProjectDetailPage() {
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const handleProjectManagerChange = async (managerId: string) => {
-    if (!project || !id) return;
-
-    setSavingManager(true);
-    try {
-      const { error } = await supabase
-        .from("projects")
-        .update({ manager_id: managerId || null })
-        .eq("id", id)
-        .select("id")
-        .single();
-
-      if (error) throw error;
-
-      const manager = projectManagers.find((item) => item.id === managerId) || null;
-      setProject({ ...project, manager_id: managerId || null, manager });
-      showToast(manager ? `Assigned to ${manager.full_name}` : "Project manager unassigned");
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : "Could not update project manager", "error");
-    } finally {
-      setSavingManager(false);
-    }
   };
 
   useEffect(() => {
@@ -259,33 +250,6 @@ export default function ProjectDetailPage() {
       fetchProjectAndData();
     }
   }, [id, currentUser]);
-
-  useEffect(() => {
-    if (!currentUser?.roles.some((role) => role.role_name === "admin")) return;
-
-    const fetchProjectManagers = async () => {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("user_id, profiles!inner(id, full_name, status_id)")
-        .eq("role_name", "project_manager")
-        .eq("profiles.status_id", 1);
-
-      if (error) {
-        showToast("Could not load project managers", "error");
-        return;
-      }
-
-      const managers = (data || []).reduce((unique: { id: string; full_name: string }[], item) => {
-        const manager = { id: item.profiles.id, full_name: item.profiles.full_name };
-        if (!unique.some((existing) => existing.id === manager.id)) unique.push(manager);
-        return unique;
-      }, []);
-      managers.sort((a, b) => (a.full_name || "").localeCompare(b.full_name || ""));
-      setProjectManagers(managers);
-    };
-
-    fetchProjectManagers();
-  }, [currentUser]);
 
   const initializeUser = async () => {
     try {
@@ -340,27 +304,6 @@ export default function ProjectDetailPage() {
         details = await projectApi.fetchProjectDetails(id);
       } catch {
         // Fallback: Original manual fetches
-        let teamDataRaw: any[] = [];
-        try {
-          const { data: teamRaw } = await supabase
-            .from("project_team")
-            .select("user_id")
-            .eq("project_id", id);
-          teamDataRaw = teamRaw || [];
-        } catch {
-          teamDataRaw = [];
-        }
-
-        const teamUserIds = teamDataRaw.map((row: any) => row.user_id);
-        let teamData: any[] = [];
-        if (teamUserIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("id, full_name, phone, user_roles(role_name), user_statuses(status_name)")
-            .in("id", teamUserIds);
-          teamData = profiles || [];
-        }
-
         const [
           { data: proj },
           { data: tasksData },
@@ -406,7 +349,6 @@ export default function ProjectDetailPage() {
             enrichWithUsers(enriched as any[], "approved_by", "approved_by_user")
           ),
           documents: await enrichWithUsers(docsRaw || [], "uploaded_by", "uploaded_by_user"),
-          teamMembers: teamData,
         };
       }
 
@@ -416,18 +358,6 @@ export default function ProjectDetailPage() {
       setTasks(details.tasks);
       setApprovals(details.approvals);
       setDocuments(details.documents);
-
-      // Format team
-      const formattedTeam = (details.teamMembers || []).map((item: any) => ({
-        user_id: item.id,
-        role_name: item.user_roles?.[0]?.role_name || "member",
-        user: {
-          id: item.id,
-          full_name: item.full_name,
-          user_statuses: item.user_statuses || null,
-        },
-      }));
-      setTeam(formattedTeam);
 
       // Photos: Try edge function, fallback to direct
       let allPhotos: Document[] = [];
@@ -503,12 +433,17 @@ export default function ProjectDetailPage() {
     { id: "photos", label: "Site Photos", icon: Camera },
     { id: "documents", label: "Documents", icon: FileText },
     // { id: "approvals", label: "Approvals", icon: Gavel },
-    { id: "team", label: "Team", icon: Users },
+    { id: "workers", label: "Workers", icon: HardHat },
+    { id: "daily-logs", label: "Daily Logs", icon: Wrench },
+    { id: "stages", label: "Stages", icon: Layers },
+    { id: "inspections", label: "Inspections", icon: ClipboardCheck },
+    { id: "material-tracking", label: "Materials", icon: Package },
+    { id: "problems-issues", label: "Issues", icon: AlertTriangle },
     { id: "financials", label: "Financials", icon: DollarSign },
-
-    // { id: "daily-logs", label: "Daily Logs", icon: Wrench },
   ];
 
+  // Clients deliberately keep the narrower set — the tabs added above are
+  // internal tooling (workers, materials, inspections, financials).
   const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];
   const tabs = isClient ? allTabs.filter((tab) => clientTabs.includes(tab.id)) : allTabs;
 
@@ -584,20 +519,21 @@ export default function ProjectDetailPage() {
                           <Building2 className="w-4 h-4 text-primary flex-shrink-0" />
                           <label htmlFor="project-manager">Project Manager</label>
                         </div>
-                        <select
-                          id="project-manager"
-                          aria-label="Assign project manager"
-                          value={project.manager_id || ""}
-                          onChange={(event) => handleProjectManagerChange(event.target.value)}
-                          disabled={savingManager}
-                          className="w-full min-w-0 max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-48 lg:w-56"
-                        >
-                          <option value="">Unassigned</option>
-                          {projectManagers.map((manager) => (
-                            <option key={manager.id} value={manager.id}>{manager.full_name}</option>
-                          ))}
-                        </select>
-                        {savingManager && <span className="text-xs text-muted-foreground sm:whitespace-nowrap" aria-live="polite">Updating...</span>}
+                        {/* Read-only. Allocation happens in one place:
+                            /admin/assignments. */}
+                        <div className="flex items-center gap-2 text-xs sm:text-base">
+                          <span className="truncate">
+                            {project.manager?.full_name ?? (
+                              <span className="text-muted-foreground">Unassigned</span>
+                            )}
+                          </span>
+                          <Link
+                            to="/admin/assignments"
+                            className="shrink-0 text-xs font-medium text-primary hover:underline"
+                          >
+                            Change
+                          </Link>
+                        </div>
                       </div>
                     ) : project.manager && (
                       <div className="flex items-center gap-2">
@@ -664,11 +600,13 @@ export default function ProjectDetailPage() {
                 isClient={isClient}
                 isAdmin={isAdmin}
                 onProjectUpdate={fetchProjectAndData}
+                projectProgress={projectProgress}
               />
             )}
 
             {activeTab === "milestones" && (
-              <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+              <MilestonesTab projectId={id!} milestones={milestones} canEdit={canEdit}
+                onUpdate={fetchProjectAndData} onProgressChange={setLiveProgress} />
             )}
 
             {activeTab === "tasks" && (
@@ -676,7 +614,9 @@ export default function ProjectDetailPage() {
                 projectId={id!}
                 tasks={tasks}
                 milestones={milestones}
-                teamMembers={team}
+                /* No `workers` prop: TasksTab does not use it, and assignment
+                   is owned by the Workers tab. This previously passed
+                   `teamMembers={team}` — a prop TasksTab has never had. */
                 canEdit={canEdit}
                 onUpdate={fetchProjectAndData}
               />
@@ -708,6 +648,32 @@ export default function ProjectDetailPage() {
               <DocumentsTab projectId={id!} documents={documents} canEdit={canEdit} onUpdate={fetchProjectAndData} />
             )}
 
+            {activeTab === "workers" && (
+              <WorkersTab projectId={id!} canEdit={canEdit} onUpdate={fetchProjectAndData} />
+            )}
+
+            {activeTab === "daily-logs" && (
+              <DailyProgress projectId={id!} />
+            )}
+
+            {activeTab === "stages" && (
+              <Stages projectId={project?.id} />
+            )}
+
+            {activeTab === "inspections" && (
+              <InspectionsTab projectId={id!} milestones={milestones}
+                canEdit={canEdit} onUpdate={fetchProjectAndData} />
+            )}
+
+            {activeTab === "material-tracking" && (
+              <MaterialTrackingTab projectId={id!} milestones={milestones}
+                canEdit={canEdit} onUpdate={fetchProjectAndData} />
+            )}
+
+            {activeTab === "problems-issues" && (
+              <ProblemsAndIssues projectId={id!} />
+            )}
+
             {activeTab === "financials" && (
               <Financials projectId={id!} />
             )}
@@ -726,17 +692,6 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {!isClient && ["team", "financials", "daily-logs"].includes(activeTab) && (
-              <GlassCard className="text-center py-16 sm:py-20">
-                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                    <Clock className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
-                  </div>
-                  <h3 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Coming Soon</h3>
-                  <p className="text-base sm:text-lg text-muted-foreground">This section is currently under development</p>
-                </motion.div>
-              </GlassCard>
-            )}
           </motion.div>
         </AnimatePresence>
       </div>

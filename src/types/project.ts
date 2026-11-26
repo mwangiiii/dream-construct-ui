@@ -205,26 +205,15 @@ export const projectApi = {
         }
       }
 
-      // 7. Fetch team members
-      const { data: teamMembers, error: teamError } = await supabase
-        .from('profiles')
-        .select('id, full_name, phone, user_roles(role_name), user_statuses(status_name)')
-        .in('id', 
-          (await supabase
-            .from('project_team')
-            .select('user_id')
-            .eq('project_id', projectId)
-          ).data?.map(row => row.user_id) || []
-        );
-
-
+      // Project staffing is worker_assignments, not a separate team table.
+      // This used to query public.project_team, which does not exist on the
+      // database — so every project detail load fired a request that 404'd.
       return {
         project: project as Project,
         milestones: (milestones || []) as Milestone[],
         tasks: tasksWithUsers,
         approvals: approvalsWithUsers,
         documents: documentsWithUsers,
-        teamMembers: teamMembers || [],
       };
     } catch (error) {
       throw error;

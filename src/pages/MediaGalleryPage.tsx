@@ -1,11 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, X, Loader2, Share2, ExternalLink, AlertCircle,
   Image as ImageIcon, PlayCircle, ChevronLeft, ChevronRight,
-  Bookmark, Maximize2,
+  Maximize2, ArrowRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { useSiteSections } from "@/lib/sitePages";
+import { renderMarkdown } from "@/lib/markdown";
 
 interface MediaMetadata {
   completion_time?: string;
@@ -56,6 +59,15 @@ const CATEGORIES = [
   "Drone Shots",
 ];
 
+// The other public pages, so the media centre is a route into the rest of the
+// company rather than a dead end.
+const COMPANY_LINKS = [
+  { to: "/projects", label: "Projects", blurb: "Live and completed developments across our portfolio." },
+  { to: "/services", label: "Services", blurb: "What we build, and how we deliver it." },
+  { to: "/team",     label: "Our Team", blurb: "The people responsible for the work above." },
+  { to: "/reviews",  label: "Reviews",  blurb: "What our clients say once we hand over." },
+];
+
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 const formatNumber = (n: number) =>
@@ -78,6 +90,11 @@ const MediaGalleryPage = () => {
   const [lightbox, setLightbox]               = useState<MediaPost | null>(null);
   const [lightboxIndex, setLightboxIndex]     = useState(0);
   const [initialMediaId, setInitialMediaId]   = useState<string | null>(null);
+
+  // Hero / intro / closing copy, editable in Admin → Content → Pages. Falls
+  // back to hardcoded strings so the page is never blank if a section is
+  // unpublished or the table is empty.
+  const { sections } = useSiteSections("media");
 
   const observerRef    = useRef<IntersectionObserver | null>(null);
   const loadMoreRef    = useRef<HTMLDivElement | null>(null);
@@ -251,8 +268,11 @@ const MediaGalleryPage = () => {
   };
   const clearSearch = () => { setSearchQuery(""); setDebouncedSearch(""); };
 
-  // ── Pin card — the whole gallery is these ─────────────────────────────────
-  const PinCard = ({ item }: { item: MediaPost }) => {
+  // ── Media card ────────────────────────────────────────────────────────────
+  // Uniform aspect ratio rather than the previous masonry. A ragged Pinterest
+  // column reads as a social feed; a catalogue grid reads as a company
+  // portfolio, which is what this page is for.
+  const MediaCard = ({ item, featured = false }: { item: MediaPost; featured?: boolean }) => {
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
       if (!ref.current) return;
@@ -267,15 +287,18 @@ const MediaGalleryPage = () => {
     return (
       <div
         ref={ref}
-        className="relative mb-3 sm:mb-4 break-inside-avoid group cursor-pointer"
+        className="group cursor-pointer"
         onClick={() => openLightbox(item)}
       >
-        {/* The card body — image dominates, corners rounded, chrome only on hover */}
-        <div className="relative rounded-2xl overflow-hidden bg-zinc-900 shadow-sm">
+        <div
+          className={`relative overflow-hidden rounded-xl bg-card border border-white/10 group-hover:border-primary/40 transition-colors duration-300 ${
+            featured ? "aspect-[16/10]" : "aspect-[4/3]"
+          }`}
+        >
           {item.media_type === "video" ? (
             <video
               src={item.thumbnail_url || item.media_url}
-              className="w-full h-auto block"
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
               muted loop playsInline preload="metadata"
               onMouseEnter={e => e.currentTarget.play()}
               onMouseLeave={e => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
@@ -284,71 +307,55 @@ const MediaGalleryPage = () => {
             <img
               src={item.thumbnail_url || item.media_url}
               alt={item.alt_text || item.caption}
-              className="w-full h-auto block"
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
               loading="lazy"
             />
           )}
 
-          {/* Featured pin — always visible when applicable */}
-          {item.is_pinned && (
-            <div className="absolute top-3 left-3 flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/95 backdrop-blur text-black text-[10px] font-semibold tracking-wide">
-              <Bookmark className="w-3 h-3 fill-current" strokeWidth={0} />
-              Featured
-            </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/10 to-transparent opacity-80 group-hover:opacity-95 transition-opacity duration-300" />
+
+          {item.categories[0] && (
+            <span className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-background/80 backdrop-blur-sm border border-white/10 text-[10px] font-semibold uppercase tracking-wider text-primary">
+              {item.categories[0]}
+            </span>
           )}
 
-          {/* Video badge */}
           {item.media_type === "video" && (
-            <div className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-              <PlayCircle className="w-4 h-4 text-white" strokeWidth={1.5} />
+            <div className="absolute top-3 right-3 w-8 h-8 rounded-full bg-background/80 backdrop-blur-sm border border-white/10 flex items-center justify-center pointer-events-none">
+              <PlayCircle className="w-4 h-4 text-primary" strokeWidth={1.75} />
             </div>
           )}
 
-          {/* Hover overlay — Pinterest-y */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-            {/* Action buttons — top-right on hover */}
-            <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200"
-                 style={{ marginTop: item.media_type === "video" ? "44px" : "0" }}>
-              <button
-                onClick={(e) => handleShare(item, e)}
-                className="w-9 h-9 rounded-full bg-white/95 hover:bg-white text-black flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
-                aria-label="Share"
-              >
-                <Share2 className="w-4 h-4" strokeWidth={2} />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); openLightbox(item); }}
-                className="w-9 h-9 rounded-full bg-white/95 hover:bg-white text-black flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
-                aria-label="Expand"
-              >
-                <Maximize2 className="w-4 h-4" strokeWidth={2} />
-              </button>
-            </div>
-
-            {/* Caption over image on hover */}
-            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 translate-y-1 group-hover:translate-y-0 transition-transform duration-300">
-              <p className="text-white text-sm font-semibold line-clamp-2 leading-snug drop-shadow">
-                {item.caption}
-              </p>
-              {item.metadata.location && (
-                <p className="text-white/80 text-xs mt-1 flex items-center gap-1 drop-shadow">
-                  {item.metadata.location}
-                </p>
-              )}
-            </div>
+          <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+               style={{ marginTop: item.media_type === "video" ? "40px" : "0" }}>
+            <button
+              onClick={(e) => handleShare(item, e)}
+              className="w-8 h-8 rounded-full bg-background/85 backdrop-blur-sm border border-white/10 hover:border-primary/50 text-foreground flex items-center justify-center transition"
+              aria-label="Share"
+            >
+              <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); openLightbox(item); }}
+              className="w-8 h-8 rounded-full bg-background/85 backdrop-blur-sm border border-white/10 hover:border-primary/50 text-foreground flex items-center justify-center transition"
+              aria-label="Expand"
+            >
+              <Maximize2 className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
           </div>
-        </div>
 
-        {/* Tiny caption below card — always visible, keeps scanning easy */}
-        <div className="px-1 pt-2 pb-1">
-          <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug">
-            {item.caption}
-          </p>
-          {(item.metadata.location || item.categories[0]) && (
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">
-              {[item.categories[0], item.metadata.location].filter(Boolean).join(" · ")}
-            </p>
-          )}
+          <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
+            <h3 className={`font-semibold text-foreground leading-snug line-clamp-2 ${
+              featured ? "text-lg sm:text-xl" : "text-sm sm:text-base"
+            }`}>
+              {item.caption}
+            </h3>
+            {(item.metadata.location || item.metadata.area) && (
+              <p className="text-xs text-muted-foreground mt-1.5 truncate">
+                {[item.metadata.location, item.metadata.area].filter(Boolean).join(" · ")}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -490,98 +497,200 @@ const MediaGalleryPage = () => {
   const totalItems = allMedia.length;
   const hasFilters = activeFilter !== "All" || !!searchQuery;
 
+  // Featured work gets its own band, but only on the unfiltered view — a
+  // "Featured" heading above category results would be misleading. Once
+  // filtering, pinned items fall back into the main grid.
+  //
+  // The band shows at most FEATURED_LIMIT; any pinned item beyond that is
+  // appended to the grid, so nothing is ever rendered nowhere.
+  const FEATURED_LIMIT = 4;
+  const featured = hasFilters ? [] : pinnedMedia.slice(0, FEATURED_LIMIT);
+  const gridItems = hasFilters
+    ? allMedia
+    : [...pinnedMedia.slice(FEATURED_LIMIT), ...media];
+
+  const hero = sections.hero;
+  const intro = sections.intro;
+  const cta = sections.cta;
+
+  const filmCount = allMedia.filter(m => m.media_type === "video").length;
+  const locationCount = new Set(
+    allMedia.map(m => m.metadata?.location).filter(Boolean)
+  ).size;
+
   return (
     <div className="min-h-screen bg-background">
 
-      {/* ── Compact sticky topbar ─────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 bg-background/90 backdrop-blur-xl border-b border-border">
-        <div className="max-w-[1800px] mx-auto px-3 sm:px-5 py-3 sm:py-3.5 flex items-center gap-3 sm:gap-4">
-          {/* Wordmark */}
-          <div className="flex-shrink-0">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
-              Gallery
+      {/* ── Editorial hero ────────────────────────────────────────────────── */}
+      {/* pt-32 clears the fixed Navbar from MainLayout, which the old sticky
+          topbar sat underneath. */}
+      <section className="relative pt-32 pb-14 sm:pt-40 sm:pb-20 overflow-hidden">
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 60% 50% at 50% 0%, hsl(var(--primary) / 0.10), transparent 70%)",
+          }}
+        />
+        <div className="relative container mx-auto px-4 sm:px-6">
+          <div className="max-w-3xl">
+            <div className="flex items-center gap-2.5 mb-5">
+              <span className="h-px w-8 bg-primary/60" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+                Media Centre
+              </span>
+            </div>
+
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.05]">
+              {hero?.heading ?? "Our Work in Focus"}
             </h1>
-          </div>
 
-          {/* Search — always visible, centered */}
-          <div className="flex-1 max-w-2xl mx-auto relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/70" strokeWidth={2} />
-            <input
-              type="text"
-              placeholder="Search projects, locations…"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-9 py-2 sm:py-2.5 bg-muted/50 hover:bg-muted focus:bg-muted focus:ring-2 focus:ring-primary/40 border-0 rounded-full text-sm placeholder:text-muted-foreground/70 transition-all"
-            />
-            {searchQuery && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted-foreground/10 transition"
+            <p className="mt-5 text-base sm:text-lg text-muted-foreground leading-relaxed max-w-2xl">
+              {hero?.subheading ??
+                "Project photography, site films and company updates from across our portfolio."}
+            </p>
+
+            {hero?.cta_label && hero.cta_href && (
+              <Link
+                to={hero.cta_href}
+                className="inline-flex items-center gap-2 mt-7 px-6 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition"
               >
-                <X className="w-3.5 h-3.5" strokeWidth={2} />
-              </button>
+                {hero.cta_label}
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             )}
           </div>
 
-          {/* Result count */}
-          <div className="hidden sm:block flex-shrink-0 text-xs text-muted-foreground tabular-nums">
-            {isLoading ? "…" : `${totalItems} pin${totalItems !== 1 ? "s" : ""}`}
-          </div>
+          {/* Portfolio figures. Derived from what is loaded, so they never
+              overstate — no hardcoded marketing numbers. */}
+          {!isLoading && totalItems > 0 && (
+            <dl className="mt-12 sm:mt-16 grid grid-cols-3 gap-4 sm:gap-8 max-w-2xl border-t border-border pt-8">
+              {[
+                { label: "Pieces published", value: totalItems },
+                { label: "Site films", value: filmCount },
+                { label: "Locations", value: locationCount },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <dt className="text-xs uppercase tracking-wider text-muted-foreground">{label}</dt>
+                  <dd className="text-2xl sm:text-3xl font-bold text-foreground mt-1.5 tabular-nums">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
+      </section>
 
-        {/* Category chips row */}
-        <div className="max-w-[1800px] mx-auto px-3 sm:px-5 pb-2.5 sm:pb-3">
-          <div
-            className="flex gap-1.5 overflow-x-auto"
-            style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
-          >
-            {["All", ...CATEGORIES].map(cat => {
-              const active = activeFilter === cat;
-              return (
+      {/* ── Editable intro copy ───────────────────────────────────────────── */}
+      {(intro?.heading || intro?.body) && (
+        <section className="border-y border-border bg-card/30">
+          <div className="container mx-auto px-4 sm:px-6 py-12 sm:py-16">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {intro.heading && (
+                <h2 className="lg:col-span-4 text-2xl sm:text-3xl font-bold tracking-tight">
+                  {intro.heading}
+                </h2>
+              )}
+              {intro.body && (
+                <div
+                  className="lg:col-span-8 text-muted-foreground leading-relaxed space-y-4 [&_strong]:text-foreground [&_a]:text-primary"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(intro.body) }}
+                />
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Featured work ─────────────────────────────────────────────────── */}
+      {!isLoading && !error && featured.length > 0 && (
+        <section className="container mx-auto px-4 sm:px-6 pt-14 sm:pt-20">
+          <div className="flex items-end justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Featured Work</h2>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Selected projects from across the portfolio.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {featured.map(item => (
+              <MediaCard key={item.id} item={item} featured />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Filter bar ────────────────────────────────────────────────────── */}
+      {/* top-[72px] sits it directly beneath the scrolled Navbar. */}
+      <div className="sticky top-[72px] z-30 bg-background/90 backdrop-blur-xl border-b border-border mt-14 sm:mt-20">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" strokeWidth={2} />
+              <input
+                type="text"
+                placeholder="Search projects, locations…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-9 py-2.5 bg-muted/40 border border-white/10 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 rounded-xl text-sm placeholder:text-muted-foreground/70 outline-none transition-all"
+              />
+              {searchQuery && (
                 <button
-                  key={cat}
-                  onClick={() => setFilter(cat)}
-                  className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition ${
-                    active
-                      ? "bg-foreground text-background"
-                      : "bg-muted/50 hover:bg-muted text-foreground/80"
-                  }`}
+                  onClick={clearSearch}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground transition"
                 >
-                  {cat}
+                  <X className="w-3.5 h-3.5" strokeWidth={2} />
                 </button>
-              );
-            })}
-            {hasFilters && (
-              <button
-                onClick={() => { setFilter("All"); clearSearch(); }}
-                className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap text-muted-foreground hover:text-foreground flex items-center gap-1 transition"
-              >
-                <X className="w-3 h-3" strokeWidth={2.5} /> Clear
-              </button>
-            )}
+              )}
+            </div>
+
+            <div
+              className="flex-1 flex gap-1.5 overflow-x-auto lg:justify-end"
+              style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+            >
+              {["All", ...CATEGORIES].map(cat => {
+                const active = activeFilter === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setFilter(cat)}
+                    className={`flex-shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border transition ${
+                      active
+                        ? "bg-primary/15 border-primary/40 text-primary"
+                        : "bg-transparent border-white/10 text-muted-foreground hover:text-foreground hover:border-white/25"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* ── Masonry grid ──────────────────────────────────────────────────── */}
-      <main className="max-w-[1800px] mx-auto px-3 sm:px-5 py-4 sm:py-6">
+      {/* ── Grid ──────────────────────────────────────────────────────────── */}
+      <main className="container mx-auto px-4 sm:px-6 py-10 sm:py-14">
 
         {isLoading && !error && (
-          <div className="flex items-center justify-center py-40">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/50" strokeWidth={2} />
+          <div className="flex items-center justify-center py-32">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" strokeWidth={2} />
           </div>
         )}
 
         {error && (
-          <div className="max-w-sm mx-auto py-32 text-center space-y-5">
-            <AlertCircle className="w-10 h-10 text-muted-foreground/50 mx-auto" strokeWidth={1.5} />
+          <div className="max-w-sm mx-auto py-28 text-center space-y-5">
+            <AlertCircle className="w-10 h-10 text-destructive/70 mx-auto" strokeWidth={1.5} />
             <div>
-              <p className="text-base font-semibold mb-1">Couldn't load pins</p>
+              <p className="text-base font-semibold mb-1">Couldn't load the media library</p>
               <p className="text-sm text-muted-foreground">{error}</p>
             </div>
             <button
               onClick={() => { setError(null); setIsLoading(true); fetchMedia(0, false); }}
-              className="px-5 py-2 rounded-full bg-foreground text-background text-sm font-semibold hover:opacity-90 transition"
+              className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition"
             >
               Try again
             </button>
@@ -589,16 +698,20 @@ const MediaGalleryPage = () => {
         )}
 
         {!isLoading && !error && totalItems === 0 && (
-          <div className="max-w-sm mx-auto py-32 text-center space-y-4">
-            <ImageIcon className="w-10 h-10 text-muted-foreground/30 mx-auto" strokeWidth={1.5} />
+          <div className="max-w-sm mx-auto py-28 text-center space-y-4">
+            <ImageIcon className="w-10 h-10 text-muted-foreground/40 mx-auto" strokeWidth={1.5} />
             <div>
-              <p className="text-base font-semibold mb-1">No pins found</p>
-              <p className="text-sm text-muted-foreground">Try a different filter or search.</p>
+              <p className="text-base font-semibold mb-1">Nothing to show here yet</p>
+              <p className="text-sm text-muted-foreground">
+                {hasFilters
+                  ? "No media matches that filter."
+                  : "Published media will appear here."}
+              </p>
             </div>
             {hasFilters && (
               <button
                 onClick={() => { setFilter("All"); clearSearch(); }}
-                className="text-sm font-semibold text-foreground border-b-2 border-foreground/40 hover:border-foreground pb-0.5 transition"
+                className="text-sm font-semibold text-primary hover:underline"
               >
                 Clear filters
               </button>
@@ -606,38 +719,95 @@ const MediaGalleryPage = () => {
           </div>
         )}
 
-        {!isLoading && !error && totalItems > 0 && (
+        {!isLoading && !error && gridItems.length > 0 && (
           <>
-            {/* True masonry via CSS columns — Pinterest layout. */}
+            <div className="flex items-end justify-between gap-4 mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+                {activeFilter === "All" ? "All Media" : activeFilter}
+              </h2>
+              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                {gridItems.length} item{gridItems.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
             <motion.div
               key={activeFilter + debouncedSearch}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: EASE }}
-              className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 gap-3 sm:gap-4"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
             >
-              {allMedia.map(item => (
-                <PinCard key={item.id} item={item} />
+              {gridItems.map(item => (
+                <MediaCard key={item.id} item={item} />
               ))}
             </motion.div>
 
-            <div ref={loadMoreRef} className="py-10 sm:py-14 flex justify-center">
+            <div ref={loadMoreRef} className="py-12 flex justify-center">
               {isLoadingMore && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" strokeWidth={2} />
                   Loading more…
                 </div>
               )}
             </div>
 
-            {!hasMore && totalItems > 0 && (
-              <div className="text-center py-8 text-xs text-muted-foreground/60 tracking-wide">
-                You've reached the end · {totalItems} pins
+            {!hasMore && (
+              <div className="text-center text-xs text-muted-foreground/60 tracking-wide">
+                End of library · {totalItems} item{totalItems !== 1 ? "s" : ""}
               </div>
             )}
           </>
         )}
       </main>
+
+      {/* ── Company-wide content ──────────────────────────────────────────── */}
+      <section className="border-t border-border bg-card/30">
+        <div className="container mx-auto px-4 sm:px-6 py-14 sm:py-20">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Explore more</h2>
+          <p className="text-sm text-muted-foreground mt-2">
+            Other parts of the company you may be looking for.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8">
+            {COMPANY_LINKS.map(({ to, label, blurb }) => (
+              <Link key={to} to={to} className="group block">
+                <div className="h-full p-5 rounded-xl glass border border-white/10 hover:border-primary/40 transition-all duration-300">
+                  <h3 className="font-semibold group-hover:text-primary transition-colors">
+                    {label}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{blurb}</p>
+                  <ArrowRight className="w-4 h-4 text-primary mt-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Closing call to action ────────────────────────────────────────── */}
+      {cta?.heading && (
+        <section className="border-t border-border">
+          <div className="container mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight max-w-2xl mx-auto">
+              {cta.heading}
+            </h2>
+            {cta.subheading && (
+              <p className="mt-4 text-muted-foreground max-w-xl mx-auto leading-relaxed">
+                {cta.subheading}
+              </p>
+            )}
+            {cta.cta_label && cta.cta_href && (
+              <Link
+                to={cta.cta_href}
+                className="inline-flex items-center gap-2 mt-8 px-7 py-3.5 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition"
+              >
+                {cta.cta_label}
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {lightbox && <LightboxModal />}
     </div>

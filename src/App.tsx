@@ -17,6 +17,9 @@ import {
   Volume1,
   UserPlus,
   Image as ImageIcon,
+  FileText,
+  Star,
+  ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -42,6 +45,9 @@ import UserManagement from "./pages/admin/UserManagement";
 import ReviewsManagement from "./pages/admin/ReviewsManagement";
 import Dashboard from "./pages/admin/Dashboard";
 import MediaCreate from "./pages/admin/multimedia/mediaCreate";
+import PagesContent from "./pages/admin/PagesContent";
+import ProjectAssignments from "./pages/admin/ProjectAssignments";
+import AdminWorkersPage from "./pages/admin/WorkersPage";
 
 // ─── Project Manager Pages ────────────────────────────────────────────────────
 import ProjectManagerProjectManagement from "./pages/project_manager/Projects/ProjectDetailPage.tsx";
@@ -293,43 +299,53 @@ const ContentManagement = () => {
   );
 };
 
+// The three stores the content service manages. These cards had drifted into
+// three different visual treatments; they share one now.
+const CONTENT_SECTIONS = [
+  {
+    to: "/admin/content/reviews",
+    icon: Star,
+    title: "Reviews",
+    blurb: "Approve, feature and reply to customer reviews and testimonials.",
+    action: "Manage reviews",
+  },
+  {
+    to: "/admin/content/media",
+    icon: ImageIcon,
+    title: "Media Library",
+    blurb: "Upload and organise project photography, films and audio. Drafts, published and archived.",
+    action: "Open library",
+  },
+  {
+    to: "/admin/content/pages",
+    icon: FileText,
+    title: "Pages Content",
+    blurb: "Edit the headings and copy on the public pages without a code change.",
+    action: "Edit pages",
+  },
+];
+
 const ContentOverview = () => (
-  <div className="space-y-6">
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <Link to="/admin/content/reviews">
-        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
-          <h3 className="text-xl font-semibold mb-2">Reviews Management</h3>
-          <p className="text-muted-foreground">Manage customer reviews and testimonials</p>
-        </div>
-      </Link>
-      <Link to="/admin/content/media" className="block">
-        <div className="p-6 border rounded-xl hover:border-primary/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer group">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-semibold text-foreground group-hover:text-primary transition-colors">
-              Media Library
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    {CONTENT_SECTIONS.map(({ to, icon: Icon, title, blurb, action }) => (
+      <Link key={to} to={to} className="block group">
+        <div className="h-full p-6 glass border border-white/10 rounded-xl hover:border-primary/40 transition-all duration-300">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <h3 className="text-lg font-semibold text-foreground group-hover:text-primary transition-colors">
+              {title}
             </h3>
-            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-              <ImageIcon className="w-6 h-6 text-primary" />
+            <div className="w-11 h-11 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+              <Icon className="w-5 h-5 text-primary" />
             </div>
           </div>
-          <p className="text-muted-foreground text-sm">
-            Upload and organize images, videos, and more • Manage drafts, published & archived content
-          </p>
-          <div className="mt-4 flex items-center text-primary text-sm font-medium">
-            Open Library
-            <svg className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+          <p className="text-sm text-muted-foreground leading-relaxed">{blurb}</p>
+          <div className="mt-5 flex items-center gap-1.5 text-primary text-sm font-medium">
+            {action}
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </div>
         </div>
       </Link>
-      <Link to="/admin/content/pages">
-        <div className="p-6 border rounded-lg hover:border-primary transition-colors cursor-pointer">
-          <h3 className="text-xl font-semibold mb-2">Pages Content</h3>
-          <p className="text-muted-foreground">Edit homepage, services, and other pages</p>
-        </div>
-      </Link>
-    </div>
+    ))}
   </div>
 );
 
@@ -370,12 +386,6 @@ const MediaLibraryTabs = () => {
 };
 
 const MediaLibrary = MediaLibraryTabs;
-const PagesContent = () => (
-  <div className="text-center py-12">
-    <h2 className="text-2xl font-semibold mb-4">Pages Content</h2>
-    <p className="text-muted-foreground">Page content editor coming soon…</p>
-  </div>
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // APP
@@ -585,6 +595,27 @@ const App = () => {
               element={
                 <ProtectedRoute requiredRoles={ROLES.ADMIN_ONLY}>
                   <AdminLayout><Dashboard /></AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Project → PM allocation. The single place an assignment is
+                made; the dashboard panel and project detail header are
+                read-only and link here. */}
+            <Route path="/admin/assignments"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_ONLY}>
+                  <AdminLayout><ProjectAssignments /></AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Workers — top-level admin view, per-project via picker. Reuses
+                the component that powers /project_manager/workers. */}
+            <Route path="/admin/workers"
+              element={
+                <ProtectedRoute requiredRoles={ROLES.ADMIN_MANAGER}>
+                  <AdminLayout><AdminWorkersPage /></AdminLayout>
                 </ProtectedRoute>
               }
             />

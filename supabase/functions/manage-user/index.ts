@@ -120,13 +120,23 @@ serve(async (req)=>{
     });
   }
 });
-// ─── Allowed roles — must stay in sync with frontend ROLES object ─────────────
+// ─── Allowed roles ───────────────────────────────────────────────────────────
+// Must stay in sync with RoleName / ROLE_PRIORITY in src/lib/auth.ts AND with
+// the rows in public.roles — user_roles.role_name carries an FK to
+// roles(role_name), so a value listed here with no lookup row is accepted by
+// this function and then rejected by the database.
+//
+// 'surveyor' became 'quantity_surveyor' in lockstep with
+// 20261125120000_fix_quantity_surveyor_role.sql, which adds the lookup row and
+// repoints existing assignments. DEPLOY THIS FUNCTION AND THAT MIGRATION
+// TOGETHER — whichever lands first, the two disagree in the gap and surveyor
+// role changes fail until both are in.
 const ALLOWED_ROLES = [
   "admin",
   "manager",
   "client",
   "finance",
-  "surveyor",
+  "quantity_surveyor",
   "project_manager"
 ];
 // === LIST EMAILS ===

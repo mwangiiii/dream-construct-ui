@@ -94,7 +94,19 @@ const UserCreate: React.FC = () => {
       },
     });
 
-    if (error) throw error;
+    if (error) {
+      // On a non-2xx response supabase-js throws FunctionsHttpError, whose
+      // message is only the generic "Edge Function returned a non-2xx status
+      // code" — the reason the function actually rejected the request is in
+      // the response body. Without reading it, every failure looks identical.
+      const res = (error as { context?: Response }).context;
+      if (res && typeof res.json === 'function') {
+        const body = await res.json().catch(() => null);
+        if (body?.error) throw new Error(body.error);
+      }
+      throw error;
+    }
+
     if (!data?.success) throw new Error(data?.error || 'Failed to create user');
     return data;
   };
@@ -243,7 +255,7 @@ const UserCreate: React.FC = () => {
                     name="companyName"
                     value={form.companyName}
                     onChange={handleChange}
-                    placeholder="Dream Construct Ltd"
+                    placeholder="Reve Construct Ltd"
                     className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-background/50 border border-border rounded-2xl text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all text-base sm:text-lg"
                   />
                 </div>

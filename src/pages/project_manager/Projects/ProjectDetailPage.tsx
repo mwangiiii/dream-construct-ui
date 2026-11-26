@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabaseClient";
 import { getCurrentUser, AuthUser } from "@/lib/auth";
 import { projectApi } from "@/lib/api/projectApi";
+import { useDerivedProgress } from "@/lib/projectProgress";
 import {
   ArrowLeft,
   Calendar,
@@ -239,15 +240,28 @@ export default function ProjectDetailPage() {
    * ─────────────────────────────────────────────────────────────────────
    * PROJECT PROGRESS — computed automatically, never set manually.
    *
-   * Source of truth: MilestonesTab calls onProgressChange(n) whenever
-   * task completion changes.  We store it here so OverviewTab can read it.
+   * Two sources, in priority order:
    *
-   * Formula (inside MilestonesTab):
+   *  1. `liveProgress` — MilestonesTab calls onProgressChange(n) when task
+   *     completion changes, so edits reflect instantly without a refetch.
+   *  2. `derived` — computed here from milestones/tasks via
+   *     lib/projectProgress, using the SAME formula.
+   *
+   * Why both: tabs are conditionally rendered, so MilestonesTab is only
+   * mounted while that tab is open. Overview is the default tab, so relying on
+   * onProgressChange alone left this stuck at 0 until the user visited
+   * Milestones and came back — the progress bar on the project home simply
+   * never populated.
+   *
+   * Formula (identical in both paths):
    *   milestone %  = tasks_with_status_done / total_milestone_tasks * 100
    *   project %    = average of all milestone percentages
    * ─────────────────────────────────────────────────────────────────────
    */
-  const [projectProgress, setProjectProgress] = useState<number>(0);
+  const [liveProgress, setLiveProgress] = useState<number | null>(null);
+  const derivedProgress = useDerivedProgress(id, null);
+  const projectProgress = liveProgress ?? derivedProgress;
+  const setProjectProgress = setLiveProgress;
 
   const showToast = (message: string, type: "success" | "error" | "warning" = "success") => {
     const toastId = Date.now().toString();
@@ -730,17 +744,6 @@ export default function ProjectDetailPage() {
               <Financials projectId={id!} />
             )}
 
-            {!isClient && ["team"].includes(activeTab) && (
-              <GlassCard className="text-center py-16 sm:py-20">
-                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 backdrop-blur-xl bg-primary/20 border border-primary/30 rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                    <Clock className="w-8 h-8 sm:w-10 sm:h-10 text-primary" />
-                  </div>
-                  <h3 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">Coming Soon</h3>
-                  <p className="text-base sm:text-lg text-muted-foreground">This section is currently under development</p>
-                </motion.div>
-              </GlassCard>
-            )}
 
           </motion.div>
         </AnimatePresence>

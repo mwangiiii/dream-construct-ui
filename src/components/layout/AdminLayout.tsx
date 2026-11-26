@@ -13,6 +13,8 @@ import {
   ScrollText,
   X,
   ChevronRight,
+  UserCog,
+  HardHat,
 } from "lucide-react";
 
 interface AdminLayoutProps {
@@ -23,6 +25,8 @@ const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", short: "Dash",     path: "/admin"               },
   { icon: Users,           label: "Users",      short: "Users",    path: "/admin/users"         },
   { icon: Briefcase,       label: "Projects",   short: "Projects", path: "/admin/projects"      },
+  { icon: UserCog,         label: "Assignments", short: "Assign",  path: "/admin/assignments"   },
+  { icon: HardHat,         label: "Workers",    short: "Workers",  path: "/admin/workers"       },
   { icon: FileText,        label: "Content",    short: "Content",  path: "/admin/content/media" },
   { icon: Settings,        label: "Settings",   short: "Settings", path: "/admin/settings"      },
   // Internal staff policies AND the public Terms/Privacy documents — one

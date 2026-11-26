@@ -5,25 +5,36 @@
 //  state changes:
 //
 //    action = "archive"           → soft delete (sets archived_at)
-//    action = "restore"           → undo archive (clears archived_at)
+//    action = "restore"           → undo archive (clears archived_at AND
+//                                   deep_archived_at — a restored project
+//                                   is fully back to active)
+//    action = "deep_archive"      → promote to deep archive (hidden from
+//                                   the assigned PM too; admin/manager
+//                                   only). Sets archived_at if null and
+//                                   deep_archived_at.
+//    action = "undeep_archive"    → demote back to regular archive
+//                                   (clears deep_archived_at; keeps
+//                                   archived_at)
 //    action = "permanent_delete"  → hard delete of the project and every
 //                                   record it produced, including files
 //                                   under `<project_id>/` in the
 //                                   documents-and-images bucket
 //
-//  All three verify the caller is an admin via the is_current_user_admin()
-//  RPC. Only `permanent_delete` touches storage; archive / restore are
-//  pure DB toggles.
+//  All actions verify the caller is an admin via the is_current_user_admin()
+//  RPC. Only `permanent_delete` touches storage; the others are pure DB
+//  toggles.
 //
 //  Env required:
 //    SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 //
 //  POST body:
-//    { "action": "archive" | "restore" | "permanent_delete",
+//    { "action": "archive" | "restore" | "deep_archive" | "undeep_archive"
+//                | "permanent_delete",
 //      "project_id": "<uuid>" }
 //
 //  Response (success):
-//    archive / restore:  { success: true, action, project_id }
+//    archive / restore / deep_archive / undeep_archive:
+//                        { success: true, action, project_id }
 //    permanent_delete:   { success: true, action, project_id,
 //                          storage_files_removed, storage_errors? }
 // =============================================================================
@@ -31,7 +42,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
-type Action = "archive" | "restore" | "permanent_delete";
+type Action =
+  | "archive"
+  | "restore"
+  | "deep_archive"
+  | "undeep_archive"
+  | "permanent_delete";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin":  "*",
@@ -111,8 +127,14 @@ serve(async (req) => {
     const action    = body.action;
     const projectId = body.project_id;
 
-    if (!action || !["archive", "restore", "permanent_delete"].includes(action)) {
-      return json({ error: "Invalid or missing action. Expected archive | restore | permanent_delete" }, 400);
+    if (
+      !action ||
+      !["archive", "restore", "deep_archive", "undeep_archive", "permanent_delete"].includes(action)
+    ) {
+      return json({
+        error:
+          "Invalid or missing action. Expected archive | restore | deep_archive | undeep_archive | permanent_delete",
+      }, 400);
     }
     if (!projectId || typeof projectId !== "string") {
       return json({ error: "Missing required field: project_id" }, 400);
@@ -139,6 +161,20 @@ serve(async (req) => {
     // ── Restore ─────────────────────────────────────────────────────────────
     if (action === "restore") {
       const { error } = await userClient.rpc("restore_project", { pid: projectId });
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, action, project_id: projectId });
+    }
+
+    // ── Deep archive ────────────────────────────────────────────────────────
+    if (action === "deep_archive") {
+      const { error } = await userClient.rpc("deep_archive_project", { pid: projectId });
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, action, project_id: projectId });
+    }
+
+    // ── Undeep archive ──────────────────────────────────────────────────────
+    if (action === "undeep_archive") {
+      const { error } = await userClient.rpc("undeep_archive_project", { pid: projectId });
       if (error) return json({ success: false, error: error.message }, 500);
       return json({ success: true, action, project_id: projectId });
     }

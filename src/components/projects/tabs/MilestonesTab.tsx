@@ -191,6 +191,7 @@ export default function MilestonesTab({
 
   const [editingId, setEditingId]             = useState<string | null>(null);
   const [editForm, setEditForm]               = useState<Partial<Milestone>>({});
+  const [createForm, setCreateForm]           = useState<Partial<Milestone>>({});
   const [loading, setLoading]                 = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [draggedItem, setDraggedItem]         = useState<string | null>(null);
@@ -328,6 +329,49 @@ export default function MilestonesTab({
     },
     [getProjectStart]
   );
+
+  // ── create milestone ───────────────────────────────────────────────────────
+  // Direct insert rather than an edge function: project_milestones_write is
+  // `can_write_project(project_id)`, so admin/manager and the project's own PM
+  // are already authorised at the database. Reuses validateDates so a new
+  // milestone obeys the same rules as an edited one.
+  //
+  // progress_percent and status are deliberately NOT written — both are derived
+  // from task completion at render time.
+  const handleCreateMilestone = async () => {
+    if (!canEdit) return;
+    if (!createForm.title?.trim()) {
+      toast({ title: "Title is required", variant: "destructive" });
+      return;
+    }
+    const err = validateDates(createForm);
+    if (err) { toast({ title: err, variant: "destructive" }); return; }
+
+    setLoading(true);
+    try {
+      const nextOrder =
+        dynamicMilestones.reduce((max, m) => Math.max(max, m.sort_order ?? 0), 0) + 100;
+
+      const { error } = await supabase.from("project_milestones").insert({
+        project_id:         projectId,
+        title:              createForm.title.trim(),
+        description:        createForm.description?.trim() || null,
+        planned_start_date: createForm.planned_start_date || null,
+        planned_end_date:   createForm.planned_end_date   || null,
+        sort_order:         nextOrder,
+      });
+      if (error) throw new Error(error.message);
+
+      setShowCreateModal(false);
+      setCreateForm({});
+      onUpdate();
+      toast({ title: "Milestone created" });
+    } catch (e: any) {
+      toast({ title: e.message ?? "Failed to create milestone", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ── save milestone ─────────────────────────────────────────────────────────
   const handleUpdateMilestone = async () => {
@@ -816,22 +860,85 @@ export default function MilestonesTab({
         </div>
       )}
 
-      {/* Create modal placeholder */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-2xl backdrop-blur-xl bg-background/95 border border-white/20 rounded-2xl p-6"
+            className="w-full max-w-lg backdrop-blur-xl bg-background/95 border border-white/20 rounded-xl p-5 max-h-[88vh] overflow-y-auto"
           >
-            <h3 className="text-2xl font-bold mb-4">Create New Milestone</h3>
-            <p className="text-muted-foreground mb-6">Milestone creation coming soon.</p>
-            <button
-              onClick={() => setShowCreateModal(false)}
-              className="w-full px-4 py-3 bg-primary hover:bg-primary/90 text-background font-semibold rounded-xl transition-all"
-            >
-              Close
-            </button>
+            <h3 className="text-base font-bold mb-1">Create Milestone</h3>
+            <p className="text-[11px] text-muted-foreground mb-4">
+              Progress and status are computed from task completion — there is nothing to set here.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                  Title *
+                </label>
+                <input
+                  value={createForm.title ?? ""}
+                  onChange={(e) => setCreateForm({ ...createForm, title: e.target.value })}
+                  placeholder="e.g. Foundation Complete"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={createForm.description ?? ""}
+                  onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                  rows={3}
+                  placeholder="Optional"
+                  className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                    Planned Start
+                  </label>
+                  <input
+                    type="date"
+                    value={createForm.planned_start_date ?? ""}
+                    onChange={(e) => setCreateForm({ ...createForm, planned_start_date: e.target.value })}
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                    Planned End
+                  </label>
+                  <input
+                    type="date"
+                    value={createForm.planned_end_date ?? ""}
+                    onChange={(e) => setCreateForm({ ...createForm, planned_end_date: e.target.value })}
+                    className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded-lg [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={handleCreateMilestone}
+                disabled={loading || !createForm.title?.trim()}
+                className="flex-1 px-4 py-2 bg-primary hover:bg-primary/90 text-background font-semibold rounded-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Creating…" : "Create"}
+              </button>
+              <button
+                onClick={() => { setShowCreateModal(false); setCreateForm({}); }}
+                className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition font-semibold text-sm"
+              >
+                Cancel
+              </button>
+            </div>
           </motion.div>
         </div>
       )}

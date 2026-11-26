@@ -38,7 +38,14 @@ interface TasksTabProps {
     assigned_worker?: { id: string; full_name: string; role: string } | null;
   })[];
   milestones: Milestone[];
-  workers: Worker[];
+  /**
+   * Optional and currently unused — worker assignment is owned by WorkersTab
+   * (see the read-only "Set via Workers → Task Assignments" field below).
+   * It was required before, which forced callers to invent a value: the admin
+   * and client detail page passed `teamMembers={team}`, a differently shaped
+   * TeamMember[], which silently fell through to the `workers = []` default.
+   */
+  workers?: Worker[];
   canEdit: boolean;
   onUpdate: () => void;
 }
