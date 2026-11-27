@@ -38,9 +38,12 @@ import {
   Layers,
   ClipboardCheck,
   Package,
+  MailQuestion,
+  Eye,
 } from "lucide-react";
 
 import OverviewTab from "@/components/projects/tabs/OverviewTab";
+import EnquiryTab from "@/components/projects/tabs/EnquiryTab";
 import MilestonesTab from "@/components/projects/tabs/MilestonesTab";
 // Inherited from the project_manager detail page — these tabs were already
 // built and working there, and were showing "Coming Soon" (or missing
@@ -74,7 +77,8 @@ type Tab =
   | "inspections"
   | "material-tracking"
   | "problems-issues"
-  | "financials";
+  | "financials"
+  | "enquiry";
 
 interface Milestone {
   id: string;
@@ -419,11 +423,24 @@ export default function ProjectDetailPage() {
 
   const isClient = currentUser?.roles.some((r: any) => r.role_name === "client");
   const isAdmin = currentUser?.roles.some((r: any) => r.role_name === "admin");
+  const isManager = currentUser?.roles.some((r: any) => r.role_name === "manager");
+  const isProjectPM =
+    currentUser?.roles.some((r: any) => r.role_name === "project_manager") &&
+    project?.manager_id === currentUser?.profile?.id;
+
+  // Admin viewing their own project console: the per-project tabs are read-only
+  // (data is linked to what the PM fills in) and admin interacts via the
+  // Enquiry tab. Managers and the project's own PM keep full edit rights.
+  // Admin keeps `isAdmin` so the Overview Danger Zone (archive / deep archive
+  // / permanent delete) stays available — those are lifecycle actions, not
+  // day-to-day edits.
+  const adminViewing = Boolean(isAdmin && !isManager && !isProjectPM);
 
   const canEdit =
-    currentUser?.roles.some((r: any) => ["admin", "manager", "project_manager"].includes(r.role_name)) ||
-    (currentUser?.roles.some((r: any) => r.role_name === "project_manager") &&
-      project?.manager_id === currentUser?.profile?.id);
+    !adminViewing && (
+      currentUser?.roles.some((r: any) => ["admin", "manager", "project_manager"].includes(r.role_name)) ||
+      isProjectPM
+    );
 
   const allTabs: { id: Tab; label: string; icon: any }[] = [
     { id: "overview", label: "Overview", icon: Home },
@@ -440,12 +457,17 @@ export default function ProjectDetailPage() {
     { id: "material-tracking", label: "Materials", icon: Package },
     { id: "problems-issues", label: "Issues", icon: AlertTriangle },
     { id: "financials", label: "Financials", icon: DollarSign },
+    // Admin-only — composes an email to the project's PM. Hidden from
+    // clients and from non-admin internal roles.
+    { id: "enquiry", label: "Enquiry", icon: MailQuestion },
   ];
 
   // Clients deliberately keep the narrower set — the tabs added above are
   // internal tooling (workers, materials, inspections, financials).
   const clientTabs: Tab[] = ["overview", "milestones", "tasks", "updates", "photos", "documents"];
-  const tabs = isClient ? allTabs.filter((tab) => clientTabs.includes(tab.id)) : allTabs;
+  const tabs = isClient
+    ? allTabs.filter((tab) => clientTabs.includes(tab.id))
+    : allTabs.filter((tab) => (tab.id === "enquiry" ? adminViewing : true));
 
   if (loading) {
     return (
@@ -587,6 +609,20 @@ export default function ProjectDetailPage() {
 
       {/* Tab Content */}
       <div className="container mx-auto px-3 sm:px-6 py-6 sm:py-12">
+        {/* Admin read-only banner. Overview, Financials and Enquiry stay
+            interactive — Overview exposes the Danger Zone, Financials isn't
+            PM-operational, Enquiry is admin's own action. Everything else
+            is for viewing only. */}
+        {adminViewing && activeTab !== "overview" && activeTab !== "financials" && activeTab !== "enquiry" && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3.5 py-2.5 text-xs text-primary">
+            <Eye className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>
+              Admin view — this table is linked to the project manager's data and
+              is read-only here. Use the <strong>Enquiry</strong> tab to send
+              the PM a note.
+            </span>
+          </div>
+        )}
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
             {activeTab === "overview" && (
@@ -653,11 +689,18 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "daily-logs" && (
-              <DailyProgress projectId={id!} />
+              // DailyProgress doesn't accept a canEdit prop. Shield it when
+              // admin is viewing so its internal edit controls are inert.
+              // pointer-events-none keeps scrolling but blocks clicks.
+              <div style={adminViewing ? { pointerEvents: "none", opacity: 0.92 } : undefined}>
+                <DailyProgress projectId={id!} />
+              </div>
             )}
 
             {activeTab === "stages" && (
-              <Stages projectId={project?.id} />
+              <div style={adminViewing ? { pointerEvents: "none", opacity: 0.92 } : undefined}>
+                <Stages projectId={project?.id} />
+              </div>
             )}
 
             {activeTab === "inspections" && (
@@ -671,11 +714,22 @@ export default function ProjectDetailPage() {
             )}
 
             {activeTab === "problems-issues" && (
-              <ProblemsAndIssues projectId={id!} />
+              <div style={adminViewing ? { pointerEvents: "none", opacity: 0.92 } : undefined}>
+                <ProblemsAndIssues projectId={id!} />
+              </div>
             )}
 
             {activeTab === "financials" && (
               <Financials projectId={id!} />
+            )}
+
+            {activeTab === "enquiry" && adminViewing && (
+              <EnquiryTab
+                projectId={id!}
+                projectTitle={project?.title ?? "Untitled project"}
+                projectNumber={project?.project_number ?? null}
+                manager={project?.manager ?? null}
+              />
             )}
 
             {activeTab === "approvals" && !isClient && (
