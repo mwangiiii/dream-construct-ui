@@ -24,9 +24,13 @@ interface PMWorkersProps {
   // and the backend scopes the data (existing behavior). Admin usage
   // supplies a project id via the picker.
   projectId?: string;
+  // Admin-only "Project Workers" view: hides create / edit / assign
+  // controls, leaving view + delete. The PM at /project_manager/workers
+  // keeps full control (default false).
+  readOnly?: boolean;
 }
 
-function PMWorkers({ projectId }: PMWorkersProps = {}) {
+function PMWorkers({ projectId, readOnly = false }: PMWorkersProps = {}) {
   const [activeTab, setActiveTab] = useState('attendance');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [showAddWorker, setShowAddWorker] = useState(false);
@@ -490,13 +494,15 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
                       {workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                     </select>
                   </div>
-                  <button
-                    onClick={() => setShowMarkAttendance(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
-                  >
-                    <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
-                    Mark Attendance
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setShowMarkAttendance(true)}
+                      className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
+                    >
+                      <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
+                      Mark Attendance
+                    </button>
+                  )}
                 </div>
                 {filteredAttendance.length === 0 ? (
                   <EmptyState
@@ -547,9 +553,11 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
                   <EmptyState
                     icon={Users}
                     title="No Workers Registered"
-                    description="Add your first worker to start managing your team."
-                    action="Add Worker"
-                    onAction={() => setShowAddWorker(true)}
+                    description={readOnly
+                      ? "No workers have been registered for this project yet."
+                      : "Add your first worker to start managing your team."}
+                    action={readOnly ? undefined : "Add Worker"}
+                    onAction={readOnly ? undefined : () => setShowAddWorker(true)}
                   />
                 ) : (
                   <>
@@ -566,6 +574,7 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
                           />
                         </div>
                       </div>
+                      {!readOnly && (
                       <button
                         onClick={() => setShowAddWorker(true)}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-background rounded-xl font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 group"
@@ -573,6 +582,7 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
                         <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
                         Add Worker
                       </button>
+                      )}
                     </div>
                     <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
                       <table className="min-w-full bg-transparent border-none rounded-2xl overflow-hidden">
@@ -609,10 +619,12 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
         {activeTab === 'assignments' && (
           <motion.div key="assignments" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
-              <button
-                onClick={() => setShowAssignTask(true)}
-                className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-background rounded-xl font-semibold hover:shadow-lg"
-              >Assign Task</button>
+              {!readOnly && (
+                <button
+                  onClick={() => setShowAssignTask(true)}
+                  className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-background rounded-xl font-semibold hover:shadow-lg"
+                >Assign Task</button>
+              )}
               <div className="flex gap-2 items-center">
                 <label>Status:</label>
                 <select value={assignmentFilter.status} onChange={e => setAssignmentFilter(f => ({ ...f, status: e.target.value }))} className="px-3 py-2 rounded border">
@@ -640,8 +652,8 @@ function PMWorkers({ projectId }: PMWorkersProps = {}) {
                 icon={CheckCircle}
                 title="No Assignments"
                 description="No assignments found for selected filters."
-                action="Assign Task"
-                onAction={() => setShowAssignTask(true)}
+                action={readOnly ? undefined : "Assign Task"}
+                onAction={readOnly ? undefined : () => setShowAssignTask(true)}
               />
             ) : (
               <div className="overflow-x-auto rounded-2xl border-2 border-white/10 bg-white/5 shadow-2xl">
